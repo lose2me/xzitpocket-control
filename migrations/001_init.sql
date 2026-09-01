@@ -1,0 +1,241 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS apps (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active',
+    display_name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    last_login_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS identities (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    student_id_hash TEXT NOT NULL,
+    student_alias TEXT NOT NULL,
+    student_id_ciphertext TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(provider, student_id_hash)
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY,
+    device_serial TEXT NOT NULL UNIQUE,
+    installation_id TEXT NOT NULL UNIQUE,
+    device_token_hash TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    app_version TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS user_devices (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    first_bound_at INTEGER NOT NULL,
+    last_login_at INTEGER NOT NULL,
+    unbound_at INTEGER,
+    PRIMARY KEY(user_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS auth_challenges (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    challenge_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    access_hash TEXT NOT NULL UNIQUE,
+    refresh_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL,
+    refresh_expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL,
+    properties_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(device_id, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    day TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    dimension_json TEXT NOT NULL DEFAULT '{}',
+    value INTEGER NOT NULL,
+    PRIMARY KEY(day, app_id, metric, dimension_json)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id TEXT PRIMARY KEY,
+    client_name TEXT NOT NULL,
+    secret_hash TEXT,
+    redirect_uris_json TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+    code_hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT REFERENCES devices(id) ON DELETE SET NULL,
+    redirect_uri TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    code_challenge TEXT,
+    code_challenge_method TEXT,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    token_hash TEXT PRIMARY KEY,
+    token_type TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT REFERENCES devices(id) ON DELETE SET NULL,
+    scope TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS oauth_providers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    authorization_url TEXT NOT NULL,
+    token_url TEXT NOT NULL,
+    userinfo_url TEXT,
+    client_id TEXT NOT NULL,
+    secret_ciphertext TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_accounts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider_id TEXT NOT NULL REFERENCES oauth_providers(id) ON DELETE CASCADE,
+    external_subject TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    access_ciphertext TEXT NOT NULL,
+    refresh_ciphertext TEXT,
+    expires_at INTEGER,
+    scope TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(provider_id, external_subject)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_transactions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT REFERENCES devices(id) ON DELETE SET NULL,
+    provider_id TEXT NOT NULL REFERENCES oauth_providers(id) ON DELETE CASCADE,
+    state_hash TEXT NOT NULL UNIQUE,
+    code_verifier_ciphertext TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS service_clients (
+    id TEXT PRIMARY KEY,
+    audience TEXT NOT NULL UNIQUE,
+    secret_ciphertext TEXT,
+    scopes_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS risk_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    device_id TEXT REFERENCES devices(id) ON DELETE SET NULL,
+    observed_count INTEGER NOT NULL DEFAULT 1,
+    window_start INTEGER NOT NULL,
+    window_end INTEGER NOT NULL,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    acknowledged_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id TEXT,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    created_at INTEGER NOT NULL,
+    last_login_at INTEGER NOT NULL,
+    disabled_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id TEXT PRIMARY KEY,
+    admin_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_time_type
+    ON activity_events(occurred_at, type);
+CREATE INDEX IF NOT EXISTS idx_events_user_time
+    ON activity_events(user_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_device
+    ON sessions(user_id, device_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_risk_time_type
+    ON risk_events(created_at, type);
+CREATE INDEX IF NOT EXISTS idx_audit_time
+    ON audit_logs(created_at);
+
+INSERT OR IGNORE INTO apps(id, name, status, created_at)
+VALUES ('xzitpocket', 'xzitpocket', 'active', CAST(strftime('%s','now') AS INTEGER) * 1000);
