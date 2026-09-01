@@ -193,7 +193,7 @@ func (s *Store) ListOAuthAccounts(ctx context.Context, userID string) ([]OAuthAc
 func (s *Store) UpsertOAuthAccount(ctx context.Context, a OAuthAccount) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO oauth_accounts(id, user_id, provider_id, external_subject, display_name, access_ciphertext, refresh_ciphertext, expires_at, scope, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(provider_id, external_subject) DO UPDATE SET user_id=excluded.user_id, display_name=excluded.display_name,
+		ON CONFLICT(provider_id, external_subject) DO UPDATE SET id=excluded.id, user_id=excluded.user_id, display_name=excluded.display_name,
 		access_ciphertext=excluded.access_ciphertext, refresh_ciphertext=excluded.refresh_ciphertext, expires_at=excluded.expires_at, scope=excluded.scope, updated_at=excluded.updated_at`,
 		a.ID, a.UserID, a.ProviderID, a.ExternalSubject, a.DisplayName, a.AccessCiphertext, nullableString(a.RefreshCiphertext.String), nullInt64(a.ExpiresAt), a.Scope, millis(a.CreatedAt), millis(a.UpdatedAt))
 	return err
@@ -202,6 +202,24 @@ func (s *Store) UpsertOAuthAccount(ctx context.Context, a OAuthAccount) error {
 func (s *Store) DeleteOAuthAccount(ctx context.Context, userID, providerID string) error {
 	_, err := s.DB.ExecContext(ctx, "DELETE FROM oauth_accounts WHERE user_id = ? AND provider_id = ?", userID, providerID)
 	return err
+}
+
+func (s *Store) GetOAuthAccountByExternal(ctx context.Context, providerID, subject string) (OAuthAccount, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT id, user_id, provider_id, external_subject, display_name, access_ciphertext, refresh_ciphertext, expires_at, scope, created_at, updated_at
+		FROM oauth_accounts WHERE provider_id = ? AND external_subject = ?`, providerID, subject)
+	var a OAuthAccount
+	var expires, created, updated sql.NullInt64
+	if err := row.Scan(&a.ID, &a.UserID, &a.ProviderID, &a.ExternalSubject, &a.DisplayName, &a.AccessCiphertext, &a.RefreshCiphertext, &expires, &a.Scope, &created, &updated); err != nil {
+		return OAuthAccount{}, err
+	}
+	a.ExpiresAt = expires
+	if created.Valid {
+		a.CreatedAt = fromMillis(created.Int64)
+	}
+	if updated.Valid {
+		a.UpdatedAt = fromMillis(updated.Int64)
+	}
+	return a, nil
 }
 
 func (s *Store) CreateOAuthTransaction(ctx context.Context, tx OAuthTransaction) error {

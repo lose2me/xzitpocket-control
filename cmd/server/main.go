@@ -51,6 +51,20 @@ func main() {
 	static := http.FileServer(http.FS(staticFS))
 	handler := httpapi.New(application, static, logger)
 	server := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	defer cleanupCancel()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				application.CleanupTelemetry(cleanupCtx)
+			case <-cleanupCtx.Done():
+				return
+			}
+		}
+	}()
 	go func() {
 		logger.Info("control server listening", "addr", cfg.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

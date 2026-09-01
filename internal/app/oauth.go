@@ -156,6 +156,32 @@ func (a *App) ExchangeOAuthCode(ctx context.Context, clientID, clientSecret, cod
 	return OAuthTokenOutput{AccessToken: access, TokenType: "Bearer", ExpiresIn: 3600, Scope: obj.Scope, RefreshToken: refresh}, nil
 }
 
+func (a *App) RefreshOAuthToken(ctx context.Context, clientID, clientSecret, rawRefresh string) (OAuthTokenOutput, error) {
+	client, err := a.Store.GetOAuthClient(ctx, clientID)
+	if errors.Is(err, sql.ErrNoRows) || client.Status != "active" {
+		return OAuthTokenOutput{}, Err("invalid_client", "OAuth 客户端无效", http.StatusUnauthorized)
+	}
+	if err != nil {
+		return OAuthTokenOutput{}, err
+	}
+	if client.SecretHash.Valid && !controlcrypto.ConstantTimeEqual(client.SecretHash.String, controlcrypto.HashToken(a.Cfg.TokenPepper, clientSecret)) {
+		return OAuthTokenOutput{}, Err("invalid_client", "OAuth 客户端认证失败", http.StatusUnauthorized)
+	}
+	token, err := a.Store.GetOAuthToken(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, rawRefresh))
+	if err != nil || token.RevokedAt != nil || !token.ExpiresAt.After(time.Now().UTC()) || token.TokenType != "refresh_token" || token.ClientID != clientID {
+		return OAuthTokenOutput{}, Err("invalid_grant", "刷新令牌无效", http.StatusBadRequest)
+	}
+	now := time.Now().UTC()
+	access, err := controlcrypto.NewToken(32)
+	if err != nil {
+		return OAuthTokenOutput{}, err
+	}
+	if err := a.Store.CreateOAuthToken(ctx, sqlite.OAuthToken{TokenHash: controlcrypto.HashToken(a.Cfg.TokenPepper, access), TokenType: "access_token", ClientID: clientID, UserID: token.UserID, DeviceID: token.DeviceID, Scope: token.Scope, ExpiresAt: now.Add(time.Hour), CreatedAt: now}); err != nil {
+		return OAuthTokenOutput{}, err
+	}
+	return OAuthTokenOutput{AccessToken: access, TokenType: "Bearer", ExpiresIn: 3600, Scope: token.Scope}, nil
+}
+
 func (a *App) AuthenticateOAuthToken(ctx context.Context, raw string) (sqlite.OAuthToken, error) {
 	if strings.TrimSpace(raw) == "" {
 		return sqlite.OAuthToken{}, ErrUnauthorized
@@ -170,6 +196,9 @@ func (a *App) AuthenticateOAuthToken(ctx context.Context, raw string) (sqlite.OA
 	if token.RevokedAt != nil || !token.ExpiresAt.After(time.Now().UTC()) {
 		return sqlite.OAuthToken{}, Err("invalid_token", "OAuth 令牌已过期", http.StatusUnauthorized)
 	}
+	if token.TokenType != "access_token" {
+		return sqlite.OAuthToken{}, Err("invalid_token", "令牌类型无效", http.StatusUnauthorized)
+	}
 	return token, nil
 }
 
@@ -178,7 +207,13 @@ func (a *App) OAuthUserinfo(ctx context.Context, token sqlite.OAuthToken) (map[s
 	if err != nil {
 		return nil, err
 	}
-	identity, _ := a.Store.GetIdentityByUser(ctx, u.ID, identityProvider)
+	if u.Status != "active" {
+		return nil, Err("user_unavailable", "用户不可用", http.StatusForbidden)
+	}
+	identity, err := a.Store.GetIdentityByUser(ctx, u.ID, identityProvider)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	scopes := strings.Fields(token.Scope)
 	has := func(s string) bool {
 		for _, v := range scopes {
@@ -274,37 +309,53 @@ func (a *App) CompleteExternalOAuth(ctx context.Context, providerID, state, code
 		return sqlite.OAuthAccount{}, err
 	}
 	cfg := oauth2.Config{ClientID: provider.ClientID, ClientSecret: secret, Endpoint: oauth2.Endpoint{AuthURL: provider.AuthorizationURL, TokenURL: provider.TokenURL}, RedirectURL: tx.RedirectURI, Scopes: parseJSONStrings(provider.Scopes)}
-	oauthToken, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	exchangeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	oauthToken, err := cfg.Exchange(exchangeCtx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return sqlite.OAuthAccount{}, Err("oauth_exchange_failed", "外部 OAuth 换 token 失败", http.StatusBadGateway)
 	}
 	subject := ""
 	displayName := ""
 	if provider.UserinfoURL.Valid && provider.UserinfoURL.String != "" {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, provider.UserinfoURL.String, nil)
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, provider.UserinfoURL.String, nil)
+		if reqErr != nil {
+			return sqlite.OAuthAccount{}, Err("oauth_userinfo_failed", "外部 OAuth 用户信息地址无效", http.StatusBadGateway)
+		}
 		req.Header.Set("Authorization", "Bearer "+oauthToken.AccessToken)
-		resp, e := http.DefaultClient.Do(req)
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, e := client.Do(req)
 		if e == nil {
 			defer resp.Body.Close()
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			var info map[string]any
-			_ = json.Unmarshal(body, &info)
-			for _, key := range []string{"sub", "id", "user_id"} {
-				if v, ok := info[key].(string); ok && v != "" {
-					subject = v
-					break
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+				var info map[string]any
+				_ = json.Unmarshal(body, &info)
+				for _, key := range []string{"sub", "id", "user_id"} {
+					if v, ok := info[key].(string); ok && v != "" {
+						subject = v
+						break
+					}
+				}
+				for _, key := range []string{"name", "display_name", "preferred_username"} {
+					if v, ok := info[key].(string); ok && v != "" {
+						displayName = v
+						break
+					}
 				}
 			}
-			for _, key := range []string{"name", "display_name", "preferred_username"} {
-				if v, ok := info[key].(string); ok && v != "" {
-					displayName = v
-					break
-				}
-			}
+		}
+		if e != nil || subject == "" {
+			return sqlite.OAuthAccount{}, Err("oauth_userinfo_failed", "外部 OAuth 用户信息获取失败", http.StatusBadGateway)
 		}
 	}
 	if subject == "" {
 		subject = controlcrypto.HashBytesHex([]byte(code))
+	}
+	if existing, lookupErr := a.Store.GetOAuthAccountByExternal(ctx, providerID, subject); lookupErr == nil && existing.UserID != tx.UserID {
+		return sqlite.OAuthAccount{}, Err("oauth_account_linked", "外部账号已绑定其他用户", http.StatusConflict)
+	} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return sqlite.OAuthAccount{}, lookupErr
 	}
 	accessCipher, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, oauthToken.AccessToken)
 	if err != nil {
@@ -351,5 +402,5 @@ func (a *App) DeleteMyOAuthAccount(ctx context.Context, p SessionPrincipal, prov
 func (a *App) ClientSecretRequired(client sqlite.OAuthClient) bool { return client.SecretHash.Valid }
 func (a *App) OAuthDiscovery() map[string]any {
 	base := a.Cfg.PublicBaseURL
-	return map[string]any{"issuer": base, "authorization_endpoint": base + "/oauth/authorize", "token_endpoint": base + "/oauth/token", "userinfo_endpoint": base + "/oauth/userinfo", "revocation_endpoint": base + "/oauth/revoke", "jwks_uri": base + "/.well-known/jwks.json", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": []string{"openid", "profile", "student_id:read", "device:read"}}
+	return map[string]any{"issuer": base, "authorization_endpoint": base + "/oauth/authorize", "token_endpoint": base + "/oauth/token", "userinfo_endpoint": base + "/oauth/userinfo", "revocation_endpoint": base + "/oauth/revoke", "jwks_uri": base + "/.well-known/jwks.json", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": []string{"openid", "profile", "student_alias", "student_id:read", "device:read"}}
 }

@@ -70,8 +70,18 @@ func (s *Store) ListRiskEvents(ctx context.Context, limit, offset int, acknowled
 }
 
 func (s *Store) AcknowledgeRiskEvent(ctx context.Context, id string, now time.Time) error {
-	_, err := s.DB.ExecContext(ctx,
+	result, err := s.DB.ExecContext(ctx,
 		"UPDATE risk_events SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL",
 		millis(now), id)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

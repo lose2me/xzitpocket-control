@@ -10,6 +10,7 @@ WORKDIR /app
 COPY --from=build /out/control /app/control
 COPY web /app/web
 COPY migrations /app/migrations
+COPY --from=build --chown=65532:65532 /src/data /app/data
 VOLUME ["/app/data"]
 EXPOSE 8080
 ENTRYPOINT ["/app/control"]

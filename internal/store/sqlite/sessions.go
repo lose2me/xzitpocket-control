@@ -104,12 +104,27 @@ func (s *Store) RevokeUserDeviceSessions(ctx context.Context, userID, deviceID s
 	return err
 }
 
+func (s *Store) RevokeDeviceSessionsExcept(ctx context.Context, deviceID, userID string, now time.Time) error {
+	_, err := s.DB.ExecContext(ctx,
+		"UPDATE sessions SET revoked_at = ? WHERE device_id = ? AND user_id <> ? AND revoked_at IS NULL",
+		millis(now), deviceID, userID)
+	return err
+}
+
 func (s *Store) CountActiveSessions(ctx context.Context, userID string, now time.Time) (int, error) {
 	var count int
 	err := s.DB.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND refresh_expires_at > ?",
 		userID, millis(now)).Scan(&count)
 	return count, err
+}
+
+func (s *Store) CleanupChallenges(ctx context.Context, before time.Time) (int64, error) {
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM auth_challenges WHERE expires_at < ? OR used_at IS NOT NULL AND used_at < ?", millis(before), millis(before))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func scanSession(row rowScannerUser) (Session, error) {

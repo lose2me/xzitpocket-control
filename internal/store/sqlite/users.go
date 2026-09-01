@@ -37,6 +37,39 @@ func (s *Store) CreateIdentity(ctx context.Context, identity Identity) error {
 	return err
 }
 
+// FindOrCreateIdentity serializes the first-login race for a student identity.
+// The returned identity is always the canonical row, whether it was created by
+// this call or by a concurrent login.
+func (s *Store) FindOrCreateIdentity(ctx context.Context, user User, identity Identity) (Identity, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existing Identity
+	var created, updated int64
+	row := tx.QueryRowContext(ctx, "SELECT id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at FROM identities WHERE provider = ? AND student_id_hash = ?", identity.Provider, identity.StudentIDHash)
+	if scanErr := row.Scan(&existing.ID, &existing.UserID, &existing.Provider, &existing.StudentIDHash, &existing.StudentAlias, &existing.StudentIDCiphertext, &created, &updated); scanErr == nil {
+		existing.CreatedAt, existing.UpdatedAt = fromMillis(created), fromMillis(updated)
+		if err := tx.Commit(); err != nil {
+			return Identity{}, err
+		}
+		return existing, nil
+	} else if scanErr != sql.ErrNoRows {
+		return Identity{}, scanErr
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO users(id, status, display_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?)", user.ID, user.Status, user.DisplayName, millis(user.CreatedAt), millis(user.LastLoginAt)); err != nil {
+		return Identity{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO identities(id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", identity.ID, identity.UserID, identity.Provider, identity.StudentIDHash, identity.StudentAlias, identity.StudentIDCiphertext, millis(identity.CreatedAt), millis(identity.UpdatedAt)); err != nil {
+		return Identity{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Identity{}, err
+	}
+	return identity, nil
+}
+
 func (s *Store) UpdateIdentity(ctx context.Context, identity Identity) error {
 	_, err := s.DB.ExecContext(ctx,
 		"UPDATE identities SET student_alias = ?, student_id_ciphertext = ?, updated_at = ? WHERE id = ?",
@@ -132,10 +165,16 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) error {
 
 func (s *Store) AnonymizeUser(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET display_name = '' WHERE id = ?", id); err != nil { return err }
-	if _, err := tx.ExecContext(ctx, "UPDATE identities SET student_id_ciphertext = '', updated_at = ? WHERE user_id = ?", millis(time.Now().UTC()), id); err != nil { return err }
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET display_name = '' WHERE id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE identities SET student_id_ciphertext = '', updated_at = ? WHERE user_id = ?", millis(time.Now().UTC()), id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

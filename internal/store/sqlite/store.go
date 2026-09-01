@@ -88,36 +88,36 @@ type User struct {
 }
 
 type Identity struct {
-	ID                  string
-	UserID              string
-	Provider            string
-	StudentIDHash       string
-	StudentAlias        string
-	StudentIDCiphertext string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                  string    `json:"id"`
+	UserID              string    `json:"user_id"`
+	Provider            string    `json:"provider"`
+	StudentIDHash       string    `json:"-"`
+	StudentAlias        string    `json:"student_alias"`
+	StudentIDCiphertext string    `json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type Session struct {
-	ID             string
-	UserID         string
-	DeviceID       string
-	AccessHash     string
-	RefreshHash    string
-	ExpiresAt      time.Time
-	RefreshExpires time.Time
-	CreatedAt      time.Time
-	LastUsedAt     time.Time
-	RevokedAt      *time.Time
+	ID             string     `json:"id"`
+	UserID         string     `json:"user_id"`
+	DeviceID       string     `json:"device_id"`
+	AccessHash     string     `json:"-"`
+	RefreshHash    string     `json:"-"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	RefreshExpires time.Time  `json:"refresh_expires_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	LastUsedAt     time.Time  `json:"last_used_at"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 
 type Challenge struct {
-	ID            string
-	DeviceID      string
-	Challenge     string
-	ChallengeHash string
-	ExpiresAt     time.Time
-	UsedAt        *time.Time
+	ID            string     `json:"id"`
+	DeviceID      string     `json:"device_id"`
+	Challenge     string     `json:"-"`
+	ChallengeHash string     `json:"-"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	UsedAt        *time.Time `json:"used_at,omitempty"`
 }
 
 type EventInput struct {
@@ -144,89 +144,89 @@ type RiskEvent struct {
 }
 
 type OAuthClient struct {
-	ClientID     string
-	ClientName   string
-	SecretHash   sql.NullString
-	RedirectURIs string
-	Scopes       string
-	Status       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ClientID     string         `json:"client_id"`
+	ClientName   string         `json:"client_name"`
+	SecretHash   sql.NullString `json:"-"`
+	RedirectURIs string         `json:"redirect_uris"`
+	Scopes       string         `json:"scopes"`
+	Status       string         `json:"status"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type OAuthProvider struct {
-	ID               string
-	Name             string
-	AuthorizationURL string
-	TokenURL         string
-	UserinfoURL      sql.NullString
-	ClientID         string
-	SecretCiphertext string
-	Scopes           string
-	Status           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	AuthorizationURL string         `json:"authorization_url"`
+	TokenURL         string         `json:"token_url"`
+	UserinfoURL      sql.NullString `json:"userinfo_url"`
+	ClientID         string         `json:"client_id"`
+	SecretCiphertext string         `json:"-"`
+	Scopes           string         `json:"scopes"`
+	Status           string         `json:"status"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type OAuthAccount struct {
-	ID                string
-	UserID            string
-	ProviderID        string
-	ExternalSubject   string
-	DisplayName       string
-	AccessCiphertext  string
-	RefreshCiphertext sql.NullString
-	ExpiresAt         sql.NullInt64
-	Scope             string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                string         `json:"id"`
+	UserID            string         `json:"user_id"`
+	ProviderID        string         `json:"provider_id"`
+	ExternalSubject   string         `json:"external_subject"`
+	DisplayName       string         `json:"display_name"`
+	AccessCiphertext  string         `json:"-"`
+	RefreshCiphertext sql.NullString `json:"-"`
+	ExpiresAt         sql.NullInt64  `json:"expires_at"`
+	Scope             string         `json:"scope"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 type OAuthTransaction struct {
-	ID                     string
-	UserID                 string
-	DeviceID               sql.NullString
-	ProviderID             string
-	StateHash              string
-	CodeVerifierCiphertext string
-	RedirectURI            string
-	ExpiresAt              time.Time
-	UsedAt                 *time.Time
+	ID                     string         `json:"id"`
+	UserID                 string         `json:"user_id"`
+	DeviceID               sql.NullString `json:"device_id"`
+	ProviderID             string         `json:"provider_id"`
+	StateHash              string         `json:"-"`
+	CodeVerifierCiphertext string         `json:"-"`
+	RedirectURI            string         `json:"redirect_uri"`
+	ExpiresAt              time.Time      `json:"expires_at"`
+	UsedAt                 *time.Time     `json:"used_at,omitempty"`
 }
 
 type ServiceClient struct {
-	ID               string
-	Audience         string
-	SecretCiphertext sql.NullString
-	Scopes           string
-	Status           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID               string         `json:"id"`
+	Audience         string         `json:"audience"`
+	SecretCiphertext sql.NullString `json:"-"`
+	Scopes           string         `json:"scopes"`
+	Status           string         `json:"status"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type OAuthCode struct {
-	CodeHash            string
-	ClientID            string
-	UserID              string
-	DeviceID            sql.NullString
-	RedirectURI         string
-	Scope               string
-	CodeChallenge       sql.NullString
-	CodeChallengeMethod sql.NullString
-	ExpiresAt           time.Time
-	UsedAt              *time.Time
+	CodeHash            string         `json:"-"`
+	ClientID            string         `json:"client_id"`
+	UserID              string         `json:"user_id"`
+	DeviceID            sql.NullString `json:"device_id"`
+	RedirectURI         string         `json:"redirect_uri"`
+	Scope               string         `json:"scope"`
+	CodeChallenge       sql.NullString `json:"-"`
+	CodeChallengeMethod sql.NullString `json:"-"`
+	ExpiresAt           time.Time      `json:"expires_at"`
+	UsedAt              *time.Time     `json:"used_at,omitempty"`
 }
 
 type OAuthToken struct {
-	TokenHash string
-	TokenType string
-	ClientID  string
-	UserID    string
-	DeviceID  sql.NullString
-	Scope     string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	RevokedAt *time.Time
+	TokenHash string         `json:"-"`
+	TokenType string         `json:"token_type"`
+	ClientID  string         `json:"client_id"`
+	UserID    string         `json:"user_id"`
+	DeviceID  sql.NullString `json:"device_id"`
+	Scope     string         `json:"scope"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
 }
 
 func millis(t time.Time) int64 {

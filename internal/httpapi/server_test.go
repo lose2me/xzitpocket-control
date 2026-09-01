@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,10 @@ func TestControlFlow(t *testing.T) {
 	if paid["token"] == nil {
 		t.Fatalf("missing paid token: %#v", paid)
 	}
+	introspection := requestWithHeaders(t, ts.URL+"/api/v1/services/document-library/introspect", http.MethodPost, nil, map[string]string{"Authorization": "Bearer " + paid["token"].(string)})
+	if active, ok := introspection["active"].(bool); !ok || !active {
+		t.Fatalf("paid token introspection failed: %#v", introspection)
+	}
 	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android"}}}, map[string]string{"Authorization": "Bearer " + access})
 	d2 := newTestDevice(t, "inst-two")
 	reg2 := register(t, ts.URL, d2)
@@ -127,6 +132,107 @@ func TestControlFlow(t *testing.T) {
 	if info["sub"] == nil {
 		t.Fatal("missing oauth sub")
 	}
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"external-access","token_type":"Bearer","expires_in":3600,"refresh_token":"external-refresh","scope":"openid profile"}`))
+			return
+		}
+		if r.URL.Path == "/userinfo" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"sub":"external-1","name":"外部账号"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer providerServer.Close()
+	provider, err := a.UpsertOAuthProvider(context.Background(), app.OAuthProviderInput{ID: "test-provider", Name: "Test Provider", AuthorizationURL: providerServer.URL + "/authorize", TokenURL: providerServer.URL + "/token", UserinfoURL: providerServer.URL + "/userinfo", ClientID: "provider-client", ClientSecret: "provider-secret", Scopes: []string{"openid", "profile"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = provider
+	providerPrincipal, err := a.AuthenticateSession(context.Background(), rotated["access_token"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := a.StartExternalOAuth(context.Background(), providerPrincipal, "test-provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authParsed, err := url.Parse(start.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := authParsed.Query().Get("state")
+	if state == "" || !strings.Contains(start.AuthorizationURL, "code_challenge=") {
+		t.Fatal("external oauth URL missing state or PKCE")
+	}
+	account, err := a.CompleteExternalOAuth(context.Background(), "test-provider", state, "mock-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.ExternalSubject != "external-1" {
+		t.Fatalf("unexpected external account: %#v", account)
+	}
+	authorizeURL := ts.URL + "/oauth/authorize?client_id=" + url.QueryEscape(client.ClientID) + "&redirect_uri=" + url.QueryEscape("https://client.example/callback") + "&response_type=code&scope=openid%20profile&state=st&code_challenge=" + url.QueryEscape(challengePKCE) + "&code_challenge_method=S256&access_token=" + url.QueryEscape(rotated["access_token"].(string))
+	authClient := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	authResp, err := authClient.Get(authorizeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authResp.Body.Close()
+	if authResp.StatusCode != http.StatusFound {
+		t.Fatalf("authorize status = %d", authResp.StatusCode)
+	}
+	location := authResp.Header.Get("Location")
+	locationURL, err := url.Parse(location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "client_secret": {"client-secret"}, "code": {locationURL.Query().Get("code")}, "redirect_uri": {"https://client.example/callback"}, "code_verifier": {verifier}}
+	tokenReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/oauth/token", bytes.NewBufferString(form.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp, err := authClient.Do(tokenReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokenResp.Body.Close()
+	if tokenResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tokenResp.Body)
+		t.Fatalf("oauth token status=%d body=%s", tokenResp.StatusCode, string(body))
+	}
+	oldAccess := rotated["access_token"].(string)
+	chSwitch := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
+	student2 := "2023000002"
+	alias2 := controlcrypto.StudentAlias(student2)
+	asserted2 := time.Now().UTC().Format(time.RFC3339)
+	switchSig := sign(t, d1.priv, lines("xzitpocket-control-login", chSwitch["challenge_id"].(string), chSwitch["challenge"].(string), d1.serial, student2, alias2, "第二用户", asserted2))
+	_ = requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, map[string]any{"challenge_id": chSwitch["challenge_id"], "challenge": chSwitch["challenge"], "device_serial": d1.serial, "student_id": student2, "student_alias": alias2, "display_name": "第二用户", "asserted_at": asserted2}, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": switchSig, "X-Device-Signed-At": asserted2, "X-Installation-ID": d1.installation})
+	if _, err := a.AuthenticateSession(context.Background(), oldAccess); err == nil {
+		t.Fatal("switching account did not revoke previous device session")
+	}
+	admin := requestWithHeaders(t, ts.URL+"/api/v1/admin/session", http.MethodPost, map[string]string{"username": "admin", "password": "test-password"}, nil)
+	adminAccess, ok := admin["access_token"].(string)
+	if !ok || adminAccess == "" {
+		t.Fatal("admin login failed")
+	}
+	metrics := requestWithHeaders(t, ts.URL+"/api/v1/admin/metrics/overview", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
+	if metrics["total_users"] == nil {
+		t.Fatalf("unexpected metrics: %#v", metrics)
+	}
+	users := requestWithHeaders(t, ts.URL+"/api/v1/admin/users", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
+	items, ok := users["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("unexpected users: %#v", users)
+	}
+	first, _ := items[0].(map[string]any)
+	if first["id"] == nil || first["device_count"] == nil {
+		t.Fatalf("user json fields missing: %#v", first)
+	}
+	detail := requestWithHeaders(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string), http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
+	if _, ok := detail["access_ciphertext"]; ok {
+		t.Fatal("oauth access ciphertext leaked in user detail")
+	}
 }
 
 func newTestDevice(t *testing.T, installation string) *testDevice {
@@ -152,17 +258,17 @@ func requestWithHeaders(t *testing.T, url, method string, body any, headers map[
 	if body != nil {
 		data, _ = json.Marshal(body)
 	}
-	req := httptest.NewRequest(method, url, bytes.NewReader(data))
+	req, err := http.NewRequest(method, url, bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	if body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res := httptest.NewRecorder() // server is addressed through URL only in this test helper
-	client := http.DefaultClient
-	_ = client // replaced by direct transport below
-	resp, err := http.DefaultTransport.RoundTrip(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +279,6 @@ func requestWithHeaders(t *testing.T, url, method string, body any, headers map[
 	if resp.StatusCode >= 300 {
 		t.Fatalf("%s %s -> %d %s", method, url, resp.StatusCode, string(raw))
 	}
-	_ = res
 	return out
 }
 func lines(values ...string) string {

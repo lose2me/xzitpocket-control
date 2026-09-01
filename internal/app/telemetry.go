@@ -75,6 +75,15 @@ func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, sessi
 		a.Logger.Warn("insert telemetry failed", "error", err)
 		return nil, err
 	}
+	days := map[string]bool{}
+	for _, event := range events {
+		days[controlcrypto.DayUTC(event.OccurredAt)] = true
+	}
+	for day := range days {
+		if err := a.Store.RebuildDailyMetrics(ctx, day, "xzitpocket"); err != nil {
+			a.Logger.Warn("rebuild daily metrics failed", "day", day, "error", err)
+		}
+	}
 	return map[string]any{"accepted": accepted, "duplicates": duplicates}, nil
 }
 
@@ -84,6 +93,9 @@ func (a *App) MetricsOverview(ctx context.Context) (sqlite.Overview, error) {
 func (a *App) MetricsSeries(ctx context.Context, days int) ([]sqlite.SeriesPoint, error) {
 	return a.Store.MetricsSeries(ctx, days, time.Now().UTC())
 }
+func (a *App) MetricsBreakdown(ctx context.Context) (sqlite.MetricsBreakdown, error) {
+	return a.Store.MetricsBreakdown(ctx, time.Now().UTC())
+}
 
 func (a *App) CleanupTelemetry(ctx context.Context) {
 	before := time.Now().UTC().AddDate(0, 0, -a.Cfg.EventRetentionDays)
@@ -91,6 +103,17 @@ func (a *App) CleanupTelemetry(ctx context.Context) {
 		a.Logger.Warn("cleanup events failed", "error", err)
 	} else if n > 0 {
 		a.Logger.Info("cleaned telemetry events", "count", n)
+	}
+	metricsBefore := time.Now().UTC().AddDate(-2, 0, 0).Format("2006-01-02")
+	if n, err := a.Store.CleanupDailyMetrics(ctx, metricsBefore); err != nil {
+		a.Logger.Warn("cleanup daily metrics failed", "error", err)
+	} else if n > 0 {
+		a.Logger.Info("cleaned daily metrics", "count", n)
+	}
+	if n, err := a.Store.CleanupChallenges(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
+		a.Logger.Warn("cleanup challenges failed", "error", err)
+	} else if n > 0 {
+		a.Logger.Info("cleaned challenges", "count", n)
 	}
 }
 

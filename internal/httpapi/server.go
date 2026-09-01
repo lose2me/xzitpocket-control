@@ -9,19 +9,29 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"xzitpocket-control/internal/app"
+	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
 type Server struct {
 	App    *app.App
 	Logger *slog.Logger
 	Static http.Handler
+	rateMu sync.Mutex
+	rates  map[string]rateWindow
+}
+
+type rateWindow struct {
+	started time.Time
+	count   int
 }
 
 func New(a *app.App, static http.Handler, logger *slog.Logger) *Server {
@@ -31,7 +41,7 @@ func New(a *app.App, static http.Handler, logger *slog.Logger) *Server {
 	if static == nil {
 		static = http.NotFoundHandler()
 	}
-	return &Server{App: a, Static: static, Logger: logger}
+	return &Server{App: a, Static: static, Logger: logger, rates: make(map[string]rateWindow)}
 }
 
 type requestIDKey struct{}
@@ -50,6 +60,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/healthz" {
+		if err := s.App.Store.DB.PingContext(r.Context()); err != nil {
+			writeError(w, r, app.Err("database_unavailable", "数据库不可用", http.StatusServiceUnavailable))
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
 		return
 	}
@@ -76,10 +90,22 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
 	case r.Method == http.MethodPost && path == "/devices/register":
+		if !s.allow(r, "device-register", 1000, time.Hour) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
 		s.registerDevice(w, r)
 	case r.Method == http.MethodPost && path == "/auth/challenges":
+		if !s.allow(r, "challenge", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
 		s.createChallenge(w, r)
 	case r.Method == http.MethodPost && path == "/auth/assertions":
+		if !s.allow(r, "assertion", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
 		s.assertLogin(w, r)
 	case r.Method == http.MethodPost && path == "/auth/refresh":
 		s.refresh(w, r)
@@ -104,6 +130,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/services/") && strings.HasSuffix(path, "/introspect"):
 		s.introspectServiceToken(w, r, segment(path, 1))
 	case r.Method == http.MethodPost && path == "/admin/session":
+		if !s.allow(r, "admin-login", 20, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
 		s.adminLogin(w, r)
 	case r.Method == http.MethodDelete && path == "/admin/session":
 		s.adminLogout(w, r)
@@ -111,6 +141,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminMetricsOverview(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/series":
 		s.adminMetricsSeries(w, r)
+	case r.Method == http.MethodGet && path == "/admin/metrics/breakdown":
+		s.adminMetricsBreakdown(w, r)
 	case r.Method == http.MethodGet && path == "/admin/users":
 		s.adminUsers(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/admin/users/") && !strings.HasSuffix(path, "/status"):
@@ -140,6 +172,38 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, r, app.Err("not_found", "接口不存在", http.StatusNotFound))
 	}
+}
+
+func (s *Server) allow(r *http.Request, bucket string, limit int, window time.Duration) bool {
+	remote := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		remote = host
+	}
+	key := bucket + "|" + remote
+	now := time.Now()
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	if s.rates == nil {
+		s.rates = make(map[string]rateWindow)
+	}
+	entry := s.rates[key]
+	if entry.started.IsZero() || now.Sub(entry.started) >= window {
+		s.rates[key] = rateWindow{started: now, count: 1}
+		return true
+	}
+	if entry.count >= limit {
+		return false
+	}
+	entry.count++
+	s.rates[key] = entry
+	if len(s.rates) > 10000 {
+		for k, v := range s.rates {
+			if now.Sub(v.started) >= window {
+				delete(s.rates, k)
+			}
+		}
+	}
+	return true
 }
 
 func segment(path string, index int) string {
@@ -201,9 +265,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = apiErr.Code
 		message = apiErr.Message
 	}
+	if status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="xzitpocket-control"`)
+	}
 	if status >= 500 {
-		rctx := r.Context()
-		_ = rctx
 		slog.Default().Error("request failed", "error", err)
 	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}, "request_id": requestID(r)})
@@ -342,15 +407,28 @@ func (s *Server) assertLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var in app.AssertionInput
 	if err := decodeJSON(r, &in, 64<<10); err != nil {
+		s.App.ObserveLoginAttempt(r.Context(), p.Device.ID, s.sourceIPHash(r), "malformed_request")
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	out, err := s.App.AssertLogin(r.Context(), p, in, r.Header.Get("X-Device-Signature"), r.Header.Get("X-Installation-ID"), r.Header.Get("X-Device-Signed-At"))
+	out, err := s.App.AssertLogin(r.Context(), p, in, r.Header.Get("X-Device-Signature"), r.Header.Get("X-Installation-ID"), r.Header.Get("X-Device-Signed-At"), s.sourceIPHash(r))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
+	s.setAccessCookie(w, out.AccessToken, 15*time.Minute)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) sourceIPHash(r *http.Request) string {
+	ip := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		ip = host
+	}
+	if ip == "" {
+		return ""
+	}
+	return controlcrypto.HMACHex(s.App.Cfg.IDPepper, ip)
 }
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -368,17 +446,24 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	s.setAccessCookie(w, out.AccessToken, 15*time.Minute)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) setAccessCookie(w http.ResponseWriter, token string, lifetime time.Duration) {
+	secure := strings.HasPrefix(strings.ToLower(s.App.Cfg.PublicBaseURL), "https://")
+	http.SetCookie(w, &http.Cookie{Name: "control_access", Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(lifetime.Seconds())})
 }
 func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authSession(w, r)
 	if !ok {
 		return
 	}
-	if err := s.App.Store.RevokeSession(r.Context(), p.Session.ID, time.Now().UTC()); err != nil {
+	if err := s.App.RevokeSession(r.Context(), p); err != nil {
 		writeError(w, r, err)
 		return
 	}
+	http.SetCookie(w, &http.Cookie{Name: "control_access", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": true})
 }
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
@@ -517,6 +602,20 @@ func (s *Server) issueServiceToken(w http.ResponseWriter, r *http.Request, servi
 }
 func (s *Server) introspectServiceToken(w http.ResponseWriter, r *http.Request, service string) {
 	raw := bearer(r)
+	if clientID, secret, ok := r.BasicAuth(); ok {
+		if err := s.App.ValidateServiceClientSecret(r.Context(), service, clientID, secret); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		var in struct {
+			Token string `json:"token"`
+		}
+		if err := decodeJSONLoose(r, &in, 32<<10); err != nil {
+			writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+			return
+		}
+		raw = strings.TrimSpace(in.Token)
+	}
 	if raw == "" {
 		writeError(w, r, app.ErrUnauthorized)
 		return
@@ -592,6 +691,17 @@ func (s *Server) adminMetricsSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
+func (s *Server) adminMetricsBreakdown(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authAdmin(w, r, "analyst"); !ok {
+		return
+	}
+	out, err := s.App.MetricsBreakdown(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r, "analyst"); !ok {
 		return
@@ -666,7 +776,8 @@ func (s *Server) adminRisk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 func (s *Server) adminRiskAcknowledge(w http.ResponseWriter, r *http.Request, id string) {
-	if _, ok := s.authAdmin(w, r, "analyst"); !ok {
+	p, ok := s.authAdmin(w, r, "analyst")
+	if !ok {
 		return
 	}
 	if !checkAdminCSRF(w, r) {
@@ -676,6 +787,7 @@ func (s *Server) adminRiskAcknowledge(w http.ResponseWriter, r *http.Request, id
 		writeError(w, r, err)
 		return
 	}
+	_ = s.App.Store.AddAudit(r.Context(), p.Admin.ID, "risk_acknowledge", "risk_event", id, "{}", time.Now().UTC())
 	writeJSON(w, http.StatusOK, map[string]any{"acknowledged": true})
 }
 func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
@@ -819,6 +931,7 @@ func parseJSON(raw string) any {
 func (s *Server) handleOAuthPublic(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/.well-known/jwks.json":
+		w.Header().Set("Cache-Control", "public, max-age=300")
 		writeJSON(w, http.StatusOK, s.App.JWKS())
 	case r.Method == http.MethodGet && r.URL.Path == "/.well-known/openid-configuration":
 		writeJSON(w, http.StatusOK, s.App.OAuthDiscovery())
@@ -855,6 +968,7 @@ func (s *Server) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, redirect, http.StatusFound)
 }
 func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	if err := r.ParseForm(); err != nil {
 		writeError(w, r, app.Err("invalid_request", "请求格式无效", http.StatusBadRequest))
 		return
@@ -865,11 +979,17 @@ func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
 			clientID, secret = id, sec
 		}
 	}
-	if r.Form.Get("grant_type") != "authorization_code" {
-		writeError(w, r, app.Err("unsupported_grant_type", "仅支持 authorization_code", http.StatusBadRequest))
+	var out app.OAuthTokenOutput
+	var err error
+	switch r.Form.Get("grant_type") {
+	case "authorization_code":
+		out, err = s.App.ExchangeOAuthCode(r.Context(), clientID, secret, r.Form.Get("code"), r.Form.Get("redirect_uri"), r.Form.Get("code_verifier"))
+	case "refresh_token":
+		out, err = s.App.RefreshOAuthToken(r.Context(), clientID, secret, r.Form.Get("refresh_token"))
+	default:
+		writeError(w, r, app.Err("unsupported_grant_type", "不支持的 grant_type", http.StatusBadRequest))
 		return
 	}
-	out, err := s.App.ExchangeOAuthCode(r.Context(), clientID, secret, r.Form.Get("code"), r.Form.Get("redirect_uri"), r.Form.Get("code_verifier"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -890,6 +1010,7 @@ func (s *Server) oauthUserinfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 func (s *Server) oauthRevoke(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	if err := r.ParseForm(); err != nil {
 		writeError(w, r, app.Err("invalid_request", "请求格式无效", http.StatusBadRequest))
 		return

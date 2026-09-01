@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,12 +15,12 @@ import (
 )
 
 func (a *App) AdminLogin(ctx context.Context, username, password string) (string, AdminPrincipal, error) {
-	username, password = strings.TrimSpace(username), strings.TrimSpace(password)
+	username = strings.TrimSpace(username)
 	if username == "" || password == "" {
 		return "", AdminPrincipal{}, Err("invalid_credentials", "用户名或密码错误", http.StatusUnauthorized)
 	}
 	admin, err := a.Store.GetAdminByUsername(ctx, username)
-	if errors.Is(err, sql.ErrNoRows) || err != nil && admin.ID == "" {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", AdminPrincipal{}, Err("invalid_credentials", "用户名或密码错误", http.StatusUnauthorized)
 	}
 	if err != nil {
@@ -38,12 +39,18 @@ func (a *App) AdminLogin(ctx context.Context, username, password string) (string
 		return "", AdminPrincipal{}, err
 	}
 	_ = a.Store.TouchAdmin(ctx, admin.ID, now)
+	_ = a.Store.AddAudit(ctx, admin.ID, "admin_login", "admin", admin.ID, "{}", now)
 	admin.LastLoginAt = now
 	return token, AdminPrincipal{Admin: admin, Token: token}, nil
 }
 
 func (a *App) RevokeAdmin(ctx context.Context, p AdminPrincipal) error {
-	return a.Store.RevokeAdminSession(ctx, p.Session.ID, time.Now().UTC())
+	now := time.Now().UTC()
+	if err := a.Store.RevokeAdminSession(ctx, p.Session.ID, now); err != nil {
+		return err
+	}
+	_ = a.Store.AddAudit(ctx, p.Admin.ID, "admin_logout", "admin", p.Admin.ID, "{}", now)
+	return nil
 }
 
 func (a *App) ListUsers(ctx context.Context, limit, offset int, status string) ([]sqlite.UserListItem, int, error) {
@@ -60,10 +67,20 @@ func (a *App) ListUsers(ctx context.Context, limit, offset int, status string) (
 }
 
 type UserDetail struct {
-	User          UserView              `json:"user"`
-	StudentID     string                `json:"student_id,omitempty"`
-	Devices       []DeviceView          `json:"devices"`
-	OAuthAccounts []sqlite.OAuthAccount `json:"oauth_accounts"`
+	User          UserView           `json:"user"`
+	StudentID     string             `json:"student_id,omitempty"`
+	Devices       []DeviceView       `json:"devices"`
+	OAuthAccounts []OAuthAccountView `json:"oauth_accounts"`
+}
+
+type OAuthAccountView struct {
+	ID              string  `json:"id"`
+	ProviderID      string  `json:"provider_id"`
+	ExternalSubject string  `json:"external_subject,omitempty"`
+	DisplayName     string  `json:"display_name"`
+	Scope           string  `json:"scope"`
+	ExpiresAt       *string `json:"expires_at,omitempty"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func (a *App) GetUserDetail(ctx context.Context, id string) (UserDetail, error) {
@@ -92,7 +109,16 @@ func (a *App) GetUserDetail(ctx context.Context, id string) (UserDetail, error) 
 	if err != nil {
 		return UserDetail{}, err
 	}
-	return UserDetail{User: toUserView(u, alias), StudentID: studentID, Devices: userDevicesView(devices), OAuthAccounts: accounts}, nil
+	accountViews := make([]OAuthAccountView, 0, len(accounts))
+	for _, account := range accounts {
+		var expires *string
+		if account.ExpiresAt.Valid {
+			value := time.UnixMilli(account.ExpiresAt.Int64).UTC().Format(time.RFC3339)
+			expires = &value
+		}
+		accountViews = append(accountViews, OAuthAccountView{ID: account.ID, ProviderID: account.ProviderID, ExternalSubject: account.ExternalSubject, DisplayName: account.DisplayName, Scope: account.Scope, ExpiresAt: expires, UpdatedAt: account.UpdatedAt.Format(time.RFC3339)})
+	}
+	return UserDetail{User: toUserView(u, alias), StudentID: studentID, Devices: userDevicesView(devices), OAuthAccounts: accountViews}, nil
 }
 
 func clampLimit(v int) int {
@@ -136,6 +162,9 @@ func max0(v int) int {
 }
 func (a *App) AcknowledgeRisk(ctx context.Context, id string) error {
 	if err := a.Store.AcknowledgeRiskEvent(ctx, id, time.Now().UTC()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
 	return nil
@@ -144,12 +173,18 @@ func (a *App) ListAudit(ctx context.Context, limit, offset int) ([]sqlite.AuditL
 	return a.Store.ListAudit(ctx, clampLimit(limit), max0(offset))
 }
 func (a *App) SetUserStatus(ctx context.Context, id, status, actor string) error {
-	if _, err := a.Store.GetUser(ctx, id); errors.Is(err, sql.ErrNoRows) { return ErrNotFound } else if err != nil { return err }
+	if _, err := a.Store.GetUser(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
 	if err := a.Store.SetUserStatus(ctx, id, status); err != nil {
 		return err
 	}
 	if status == "deleted" {
-		if err := a.Store.AnonymizeUser(ctx, id); err != nil { return err }
+		if err := a.Store.AnonymizeUser(ctx, id); err != nil {
+			return err
+		}
 	}
 	return a.Store.AddAudit(ctx, actor, "user_status_change", "user", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
 }
@@ -166,7 +201,7 @@ type OAuthClientInput struct {
 func (a *App) UpsertOAuthClient(ctx context.Context, in OAuthClientInput) (sqlite.OAuthClient, error) {
 	in.ClientID = strings.TrimSpace(in.ClientID)
 	in.ClientName = strings.TrimSpace(in.ClientName)
-	if in.ClientID == "" || len(in.ClientID) > 128 || in.ClientName == "" {
+	if !validIdentifier(in.ClientID) || in.ClientName == "" {
 		return sqlite.OAuthClient{}, Err("invalid_oauth_client", "OAuth 客户端参数无效", http.StatusBadRequest)
 	}
 	if in.Status == "" {
@@ -180,6 +215,10 @@ func (a *App) UpsertOAuthClient(ctx context.Context, in OAuthClientInput) (sqlit
 	}
 	for _, u := range in.RedirectURIs {
 		if strings.TrimSpace(u) == "" || strings.ContainsAny(u, "\r\n") {
+			return sqlite.OAuthClient{}, Err("invalid_redirect_uris", "回调地址无效", http.StatusBadRequest)
+		}
+		parsed, parseErr := url.Parse(u)
+		if parseErr != nil || parsed.Fragment != "" || parsed.Scheme == "" || parsed.Scheme == "javascript" || parsed.Scheme == "data" || ((parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == "") {
 			return sqlite.OAuthClient{}, Err("invalid_redirect_uris", "回调地址无效", http.StatusBadRequest)
 		}
 	}
@@ -226,8 +265,17 @@ type OAuthProviderInput struct {
 
 func (a *App) UpsertOAuthProvider(ctx context.Context, in OAuthProviderInput) (sqlite.OAuthProvider, error) {
 	in.ID = strings.TrimSpace(in.ID)
-	if in.ID == "" || in.Name == "" || in.AuthorizationURL == "" || in.TokenURL == "" || in.ClientID == "" {
+	if !validIdentifier(in.ID) || in.Name == "" || in.AuthorizationURL == "" || in.TokenURL == "" || in.ClientID == "" {
 		return sqlite.OAuthProvider{}, Err("invalid_oauth_provider", "OAuth Provider 参数无效", http.StatusBadRequest)
+	}
+	for _, endpoint := range []string{in.AuthorizationURL, in.TokenURL, in.UserinfoURL} {
+		if endpoint == "" {
+			continue
+		}
+		u, parseErr := url.Parse(endpoint)
+		if parseErr != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return sqlite.OAuthProvider{}, Err("invalid_oauth_provider", "OAuth Provider 地址无效", http.StatusBadRequest)
+		}
 	}
 	if in.Status == "" {
 		in.Status = "active"
@@ -282,7 +330,7 @@ type ServiceClientInput struct {
 
 func (a *App) UpsertServiceClient(ctx context.Context, in ServiceClientInput) (sqlite.ServiceClient, error) {
 	in.Audience = strings.TrimSpace(in.Audience)
-	if in.Audience == "" || len(in.Audience) > 128 || strings.ContainsAny(in.Audience, "/\\\r\n") {
+	if !validIdentifier(in.Audience) {
 		return sqlite.ServiceClient{}, Err("invalid_service", "服务名称无效", http.StatusBadRequest)
 	}
 	if in.Status == "" {
@@ -327,4 +375,16 @@ func (a *App) UpsertServiceClient(ctx context.Context, in ServiceClientInput) (s
 		return sqlite.ServiceClient{}, err
 	}
 	return out, nil
+}
+
+func (a *App) ValidateServiceClientSecret(ctx context.Context, audience, clientID, secret string) error {
+	client, err := a.Store.GetServiceClientByAudience(ctx, audience)
+	if err != nil || client.Status != "active" || client.ID != clientID || !client.SecretCiphertext.Valid {
+		return Err("invalid_client", "服务客户端认证失败", http.StatusUnauthorized)
+	}
+	plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, client.SecretCiphertext.String)
+	if err != nil || !controlcrypto.ConstantTimeEqual(plain, secret) {
+		return Err("invalid_client", "服务客户端认证失败", http.StatusUnauthorized)
+	}
+	return nil
 }

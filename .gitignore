@@ -1,5 +1,6 @@
-data/*.db
-data/*.db-*
-data/*.key
+data/*
+!data/.gitkeep
 .env
 *.log
+control
+*.exe

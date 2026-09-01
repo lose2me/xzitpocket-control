@@ -134,9 +134,13 @@ type SessionOutput struct {
 	RefreshExpiresAt string     `json:"refresh_expires_at"`
 }
 
-func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in AssertionInput, signature, installationID, signedAt string) (SessionOutput, error) {
+func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in AssertionInput, signature, installationID, signedAt string, sourceHashes ...string) (SessionOutput, error) {
+	sourceHash := ""
+	if len(sourceHashes) > 0 {
+		sourceHash = sourceHashes[0]
+	}
 	device := principal.Device
-	if installationID != "" && installationID != device.Installation {
+	if installationID == "" || installationID != device.Installation {
 		return SessionOutput{}, Err("installation_mismatch", "安装标识不匹配", http.StatusUnauthorized)
 	}
 	if in.DeviceSerial != device.DeviceSerial {
@@ -152,10 +156,11 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	if err != nil || absDuration(time.Since(assertedAt)) > 10*time.Minute {
 		return SessionOutput{}, Err("invalid_timestamp", "asserted_at 时间无效", http.StatusBadRequest)
 	}
-	if signedAt != "" {
-		if t, parseErr := time.Parse(time.RFC3339, signedAt); parseErr != nil || absDuration(time.Since(t)) > 10*time.Minute {
-			return SessionOutput{}, Err("invalid_timestamp", "设备签名时间无效", http.StatusBadRequest)
-		}
+	if signedAt == "" {
+		return SessionOutput{}, Err("signature_required", "需要设备签名时间", http.StatusUnauthorized)
+	}
+	if t, parseErr := time.Parse(time.RFC3339, signedAt); parseErr != nil || absDuration(time.Since(t)) > 10*time.Minute {
+		return SessionOutput{}, Err("invalid_timestamp", "设备签名时间无效", http.StatusBadRequest)
 	}
 	pub, err := controlcrypto.ParseP256PublicKey(device.PublicKey)
 	if err != nil {
@@ -163,12 +168,12 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	}
 	message, err := controlcrypto.CanonicalLines("xzitpocket-control-login", in.ChallengeID, in.Challenge, in.DeviceSerial, in.StudentID, in.StudentAlias, in.DisplayName, in.AssertedAt)
 	if err != nil || !controlcrypto.VerifyP256Signature(pub, message, signature) {
-		a.recordLoginAttempt(ctx, "", device.ID, "signature_invalid")
+		a.recordLoginAttemptWithSource(ctx, "", device.ID, "signature_invalid", sourceHash)
 		return SessionOutput{}, Err("invalid_device_signature", "设备签名无效", http.StatusUnauthorized)
 	}
 	expectedAlias := controlcrypto.StudentAlias(in.StudentID)
 	if in.StudentAlias != expectedAlias {
-		a.recordLoginAttempt(ctx, "", device.ID, "alias_mismatch")
+		a.recordLoginAttemptWithSource(ctx, "", device.ID, "alias_mismatch", sourceHash)
 		return SessionOutput{}, Err("invalid_student_alias", "student_alias 不匹配", http.StatusBadRequest)
 	}
 	ok, err := a.Store.ConsumeChallenge(ctx, in.ChallengeID, device.ID, controlcrypto.HashToken(a.Cfg.TokenPepper, in.Challenge), time.Now().UTC())
@@ -176,7 +181,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, err
 	}
 	if !ok {
-		a.recordLoginAttempt(ctx, "", device.ID, "challenge_invalid")
+		a.recordLoginAttemptWithSource(ctx, "", device.ID, "challenge_invalid", sourceHash)
 		return SessionOutput{}, Err("challenge_expired", "登录挑战无效或已使用", http.StatusUnauthorized)
 	}
 
@@ -188,9 +193,6 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 			return SessionOutput{}, idErr
 		}
 		now := time.Now().UTC()
-		if err := a.Store.CreateUser(ctx, sqlite.User{ID: userID, Status: "active", DisplayName: in.DisplayName, CreatedAt: now, LastLoginAt: now}); err != nil {
-			return SessionOutput{}, err
-		}
 		identityID, idErr := controlcrypto.NewID("idn")
 		if idErr != nil {
 			return SessionOutput{}, idErr
@@ -200,13 +202,9 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 			return SessionOutput{}, idErr
 		}
 		identity = sqlite.Identity{ID: identityID, UserID: userID, Provider: identityProvider, StudentIDHash: studentHash, StudentAlias: in.StudentAlias, StudentIDCiphertext: ciphertext, CreatedAt: now, UpdatedAt: now}
-		if err := a.Store.CreateIdentity(ctx, identity); err != nil {
-			// A concurrent first login may have won the unique identity race.
-			if loaded, loadErr := a.Store.GetIdentityByHash(ctx, identityProvider, studentHash); loadErr == nil {
-				identity = loaded
-			} else {
-				return SessionOutput{}, err
-			}
+		identity, err = a.Store.FindOrCreateIdentity(ctx, sqlite.User{ID: userID, Status: "active", DisplayName: in.DisplayName, CreatedAt: now, LastLoginAt: now}, identity)
+		if err != nil {
+			return SessionOutput{}, err
 		}
 	} else if err != nil {
 		return SessionOutput{}, err
@@ -216,7 +214,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, err
 	}
 	if user.Status != "active" {
-		a.recordLoginAttempt(ctx, user.ID, device.ID, "user_unavailable")
+		a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "user_unavailable", sourceHash)
 		return SessionOutput{}, Err("user_unavailable", "用户不可用", http.StatusForbidden)
 	}
 	now := time.Now().UTC()
@@ -225,6 +223,10 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	}
 	if err := a.Store.BindUserDevice(ctx, user.ID, device.ID, now); err != nil {
 		return SessionOutput{}, err
+	}
+	// A device can switch accounts; invalidate only its previous account sessions.
+	if err := a.Store.RevokeDeviceSessionsExcept(ctx, device.ID, user.ID, now); err != nil {
+		a.Logger.Warn("revoke previous device sessions failed", "error", err)
 	}
 	access, err := controlcrypto.NewToken(32)
 	if err != nil {
@@ -242,7 +244,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	if err := a.Store.CreateSession(ctx, sqlite.Session{ID: sid, UserID: user.ID, DeviceID: device.ID, AccessHash: controlcrypto.HashToken(a.Cfg.TokenPepper, access), RefreshHash: controlcrypto.HashToken(a.Cfg.TokenPepper, refresh), ExpiresAt: accessExpiry, RefreshExpires: refreshExpiry, CreatedAt: now, LastUsedAt: now}); err != nil {
 		return SessionOutput{}, err
 	}
-	a.recordLoginAttempt(ctx, user.ID, device.ID, "success")
+	a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "success", sourceHash)
 	a.recordRiskForDevices(ctx, user.ID, device.ID)
 	user.LastLoginAt = now
 	if in.DisplayName != "" {
@@ -259,8 +261,20 @@ func absDuration(d time.Duration) time.Duration {
 }
 
 func (a *App) recordLoginAttempt(ctx context.Context, userID, deviceID, reason string) {
+	a.recordLoginAttemptWithSource(ctx, userID, deviceID, reason, "")
+}
+
+func (a *App) ObserveLoginAttempt(ctx context.Context, deviceID, sourceHash, reason string) {
+	a.recordLoginAttemptWithSource(ctx, "", deviceID, reason, sourceHash)
+}
+
+func (a *App) recordLoginAttemptWithSource(ctx context.Context, userID, deviceID, reason, sourceHash string) {
 	now := time.Now().UTC()
-	detail := controlcrypto.JSON(map[string]string{"reason": reason})
+	detailValues := map[string]string{"reason": reason}
+	if sourceHash != "" {
+		detailValues["source_ip_hash"] = sourceHash
+	}
+	detail := controlcrypto.JSON(detailValues)
 	if err := a.Store.AddAudit(ctx, userID, "login_attempt", "device", deviceID, detail, now); err != nil {
 		a.Logger.Warn("record login attempt failed", "error", err)
 	}
@@ -311,9 +325,10 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	if err != nil {
 		return SessionOutput{}, err
 	}
-	if installationID != "" && installationID != device.Installation {
+	if installationID == "" || installationID != device.Installation {
 		return SessionOutput{}, Err("installation_mismatch", "安装标识不匹配", http.StatusUnauthorized)
 	}
+	_ = a.Store.TouchDevice(ctx, device.ID, now)
 	if signedAt == "" {
 		return SessionOutput{}, Err("signature_required", "需要设备签名", http.StatusUnauthorized)
 	}
@@ -407,4 +422,13 @@ func (a *App) UserDevices(ctx context.Context, p SessionPrincipal) ([]DeviceView
 		return nil, err
 	}
 	return userDevicesView(devices), nil
+}
+
+func (a *App) RevokeSession(ctx context.Context, p SessionPrincipal) error {
+	now := time.Now().UTC()
+	if err := a.Store.RevokeSession(ctx, p.Session.ID, now); err != nil {
+		return err
+	}
+	_ = a.Store.AddAudit(ctx, p.User.ID, "session_revoke", "session", p.Session.ID, "{}", now)
+	return nil
 }

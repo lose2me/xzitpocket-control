@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,10 @@ var (
 	ErrUnauthorized = Err("unauthorized", "未授权", http.StatusUnauthorized)
 	ErrForbidden    = Err("forbidden", "无权访问", http.StatusForbidden)
 )
+
+var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+func validIdentifier(value string) bool { return identifierPattern.MatchString(value) }
 
 type App struct {
 	Cfg          config.Config

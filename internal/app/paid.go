@@ -68,7 +68,7 @@ func containsAll(allowed []string, requested []string) bool {
 
 func (a *App) IssueServiceToken(ctx context.Context, p SessionPrincipal, service string, in ServiceTokenInput, signature, installationID, signedAt string) (ServiceTokenOutput, error) {
 	service = strings.TrimSpace(service)
-	if service == "" || len(service) > 128 || strings.ContainsAny(service, "/\\\r\n") {
+	if !validIdentifier(service) {
 		return ServiceTokenOutput{}, Err("invalid_service", "服务名称无效", http.StatusBadRequest)
 	}
 	scopes, err := normalizeScopes(in.Scope)
@@ -85,7 +85,7 @@ func (a *App) IssueServiceToken(ctx context.Context, p SessionPrincipal, service
 	if config.Status != "active" || !containsAll(decodeStringList(config.Scopes), scopes) {
 		return ServiceTokenOutput{}, Err("scope_not_allowed", "请求的 scope 未被允许", http.StatusForbidden)
 	}
-	if installationID != "" && installationID != p.Device.Installation {
+	if installationID == "" || installationID != p.Device.Installation {
 		return ServiceTokenOutput{}, Err("installation_mismatch", "安装标识不匹配", http.StatusUnauthorized)
 	}
 	if signedAt == "" {
@@ -107,7 +107,10 @@ func (a *App) IssueServiceToken(ctx context.Context, p SessionPrincipal, service
 	}
 	now := time.Now().UTC()
 	expiry := now.Add(10 * time.Minute)
-	identity, _ := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider)
+	identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider)
+	if err != nil {
+		return ServiceTokenOutput{}, err
+	}
 	claims := jwt.MapClaims{"iss": a.Cfg.PublicBaseURL, "aud": service, "sub": p.User.ID, "student_alias": identity.StudentAlias, "device_serial": p.Device.DeviceSerial, "scope": strings.Join(scopes, " "), "iat": now.Unix(), "exp": expiry.Unix()}
 	jti, err := controlcrypto.NewID("jti")
 	if err != nil {
