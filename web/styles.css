@@ -140,6 +140,17 @@ body {
 
 .detail-item {
   min-height: 70px;
+  border: 1px solid #dfe7ea;
+  background: #ffffff !important;
+}
+
+.detail-item .text-caption {
+  color: #71818a;
+}
+
+.detail-item .text-body-2 {
+  color: #24343b !important;
+  font-weight: 600;
 }
 
 .loading-bar {

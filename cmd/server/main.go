@@ -43,10 +43,16 @@ func main() {
 		logger.Error("initialize application", "error", err)
 		os.Exit(1)
 	}
-	staticFS, err := fs.Sub(adminweb.Files, ".")
-	if err != nil {
-		logger.Error("load web assets", "error", err)
-		os.Exit(1)
+	var staticFS fs.FS
+	if cfg.WebDir != "" {
+		staticFS = os.DirFS(cfg.WebDir)
+	} else {
+		var err error
+		staticFS, err = fs.Sub(adminweb.Files, ".")
+		if err != nil {
+			logger.Error("load web assets", "error", err)
+			os.Exit(1)
+		}
 	}
 	static := http.FileServer(http.FS(staticFS))
 	handler := httpapi.New(application, static, logger)

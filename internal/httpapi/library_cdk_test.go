@@ -65,8 +65,8 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	}
 	userHeaders := map[string]string{"Authorization": "Bearer " + access}
 	visible := requestWithHeaders(t, ts.URL+"/api/v1/question-banks", http.MethodGet, nil, userHeaders)
-	if visible["total"].(float64) != 0 {
-		t.Fatalf("locked question bank should not be listed: %#v", visible)
+	if visible["total"].(float64) != 1 {
+		t.Fatalf("active question bank should be listed even when locked: %#v", visible)
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/question-banks/"+bankID, http.MethodGet, nil, userHeaders); status != http.StatusForbidden {
 		t.Fatalf("locked question bank status = %d, want %d", status, http.StatusForbidden)

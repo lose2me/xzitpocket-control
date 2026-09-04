@@ -62,9 +62,9 @@ func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, err
 	return count, err
 }
 
-// ListAccessibleQuestionBanks returns only active banks that the student can
-// currently open. Unlocked banks are visible to every authenticated student;
-// CDK-protected banks require a used code bound to the supplied student hash.
+// ListAccessibleQuestionBanks returns every active bank. A CDK-protected bank
+// is listed before it is unlocked; reading its questions remains protected by
+// GetQuestionBankForUser.
 func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset int, studentHash string) ([]QuestionBankSummary, int, error) {
 	if limit <= 0 {
 		limit = 50
@@ -76,10 +76,9 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	}
 	query := `SELECT b.id, b.order_id, b.is_new, b.name, b.status, b.requires_cdk, COUNT(q.id), b.created_at, b.updated_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id
-		WHERE b.status = 'active' AND (b.requires_cdk = 0 OR EXISTS (
-			SELECT 1 FROM library_cdks c WHERE ? <> '' AND c.question_bank_id = b.id AND c.bound_student_id_hash = ? AND c.status = 'used'))
+		WHERE b.status = 'active'
 		GROUP BY b.id ORDER BY b.order_id ASC, b.id LIMIT ? OFFSET ?`
-	rows, err := s.DB.QueryContext(ctx, query, studentHash, studentHash, limit, offset)
+	rows, err := s.DB.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -104,9 +103,8 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 		return nil, 0, err
 	}
 	var total int
-	countQuery := `SELECT COUNT(*) FROM question_banks b WHERE b.status = 'active' AND (b.requires_cdk = 0 OR EXISTS (
-		SELECT 1 FROM library_cdks c WHERE ? <> '' AND c.question_bank_id = b.id AND c.bound_student_id_hash = ? AND c.status = 'used'))`
-	if err := s.DB.QueryRowContext(ctx, countQuery, studentHash, studentHash).Scan(&total); err != nil {
+	countQuery := `SELECT COUNT(*) FROM question_banks b WHERE b.status = 'active'`
+	if err := s.DB.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
