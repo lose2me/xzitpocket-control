@@ -8,12 +8,11 @@ import (
 	"strings"
 	"time"
 
-	controlcrypto "xzitpocket-control/internal/crypto"
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-var allowedEventTypes = map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "paid_service_open": true, "paid_service_token_success": true, "logout": true}
-var allowedPropertyKeys = map[string]bool{"app_version": true, "platform": true, "screen": true, "service": true, "result": true, "source": true, "duration_ms": true, "error_code": true}
+var allowedEventTypes = map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true, "logout": true}
+var allowedPropertyKeys = map[string]bool{"app_version": true, "platform": true, "screen": true, "library": true, "question_bank": true, "result": true, "source": true, "duration_ms": true, "error_code": true}
 
 type TelemetryEventInput struct {
 	EventID    string         `json:"event_id"`
@@ -75,15 +74,6 @@ func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, sessi
 		a.Logger.Warn("insert telemetry failed", "error", err)
 		return nil, err
 	}
-	days := map[string]bool{}
-	for _, event := range events {
-		days[controlcrypto.DayUTC(event.OccurredAt)] = true
-	}
-	for day := range days {
-		if err := a.Store.RebuildDailyMetrics(ctx, day, "xzitpocket"); err != nil {
-			a.Logger.Warn("rebuild daily metrics failed", "day", day, "error", err)
-		}
-	}
 	return map[string]any{"accepted": accepted, "duplicates": duplicates}, nil
 }
 
@@ -104,17 +94,9 @@ func (a *App) CleanupTelemetry(ctx context.Context) {
 	} else if n > 0 {
 		a.Logger.Info("cleaned telemetry events", "count", n)
 	}
-	metricsBefore := time.Now().UTC().AddDate(-2, 0, 0).Format("2006-01-02")
-	if n, err := a.Store.CleanupDailyMetrics(ctx, metricsBefore); err != nil {
-		a.Logger.Warn("cleanup daily metrics failed", "error", err)
-	} else if n > 0 {
-		a.Logger.Info("cleaned daily metrics", "count", n)
-	}
 	if n, err := a.Store.CleanupChallenges(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
 		a.Logger.Warn("cleanup challenges failed", "error", err)
 	} else if n > 0 {
 		a.Logger.Info("cleaned challenges", "count", n)
 	}
 }
-
-func eventJSON(value any) string { return controlcrypto.JSON(value) }

@@ -2,13 +2,11 @@ package app
 
 import (
 	"context"
-	"crypto/ed25519"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -35,38 +33,24 @@ var (
 	ErrForbidden    = Err("forbidden", "无权访问", http.StatusForbidden)
 )
 
-var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
-
-func validIdentifier(value string) bool { return identifierPattern.MatchString(value) }
-
 type App struct {
-	Cfg          config.Config
-	Store        *sqlite.Store
-	Logger       *slog.Logger
-	ServicePriv  ed25519.PrivateKey
-	ServicePub   ed25519.PublicKey
-	ServiceKeyID string
+	Cfg    config.Config
+	Store  *sqlite.Store
+	Logger *slog.Logger
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	priv, pub, kid, err := controlcrypto.LoadOrCreateEd25519(cfg.ServiceSigningKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("load service signing key: %w", err)
-	}
-	a := &App{Cfg: cfg, Store: store, Logger: logger, ServicePriv: priv, ServicePub: pub, ServiceKeyID: kid}
-	if err := a.ensureBootstrapAdmin(context.Background()); err != nil {
-		return nil, err
-	}
-	if err := a.ensureDefaultService(context.Background()); err != nil {
+	a := &App{Cfg: cfg, Store: store, Logger: logger}
+	if err := a.ensureAdmin(context.Background()); err != nil {
 		return nil, err
 	}
 	return a, nil
 }
 
-func (a *App) ensureBootstrapAdmin(ctx context.Context) error {
+func (a *App) ensureAdmin(ctx context.Context) error {
 	count, err := a.Store.CountAdmins(ctx)
 	if err != nil {
 		return err
@@ -74,38 +58,22 @@ func (a *App) ensureBootstrapAdmin(ctx context.Context) error {
 	if count != 0 {
 		return nil
 	}
-	hash, err := controlcrypto.Argon2idHash(a.Cfg.AdminBootstrap)
+	hash, err := controlcrypto.Argon2idHash(a.Cfg.AdminKey)
 	if err != nil {
-		return fmt.Errorf("hash bootstrap admin password: %w", err)
+		return fmt.Errorf("hash administrator key: %w", err)
 	}
 	now := time.Now().UTC()
 	id, err := controlcrypto.NewID("adm")
 	if err != nil {
 		return err
 	}
-	if err := a.Store.CreateAdmin(ctx, sqlite.Admin{ID: id, Username: "admin", PasswordHash: hash, Role: "admin", CreatedAt: now, LastLoginAt: now}); err != nil {
-		return fmt.Errorf("create bootstrap admin: %w", err)
+	if err := a.Store.CreateAdmin(ctx, sqlite.Admin{ID: id, PasswordHash: hash, CreatedAt: now, LastLoginAt: now}); err != nil {
+		return fmt.Errorf("create administrator: %w", err)
 	}
-	if a.Cfg.AdminBootstrap == "change-me" {
-		a.Logger.Warn("using default admin bootstrap password; set CONTROL_ADMIN_BOOTSTRAP")
+	if a.Cfg.AdminKey == "change-me" {
+		a.Logger.Warn("using default admin management key; edit data/.env")
 	}
 	return nil
-}
-
-func (a *App) ensureDefaultService(ctx context.Context) error {
-	_, err := a.Store.GetServiceClientByAudience(ctx, "document-library")
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	now := time.Now().UTC()
-	id, err := controlcrypto.NewID("svc")
-	if err != nil {
-		return err
-	}
-	return a.Store.UpsertServiceClient(ctx, sqlite.ServiceClient{ID: id, Audience: "document-library", Scopes: `["library:read"]`, Status: "active", CreatedAt: now, UpdatedAt: now})
 }
 
 type DevicePrincipal struct {

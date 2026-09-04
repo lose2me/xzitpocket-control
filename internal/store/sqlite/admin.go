@@ -10,24 +10,22 @@ import (
 
 type Admin struct {
 	ID           string
-	Username     string
 	PasswordHash string
-	Role         string
 	CreatedAt    time.Time
 	LastLoginAt  time.Time
 	DisabledAt   *time.Time
 }
 
-func (s *Store) GetAdminByUsername(ctx context.Context, username string) (Admin, error) {
+// GetAdmin returns the single local administrator.
+func (s *Store) GetAdmin(ctx context.Context) (Admin, error) {
 	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, username, password_hash, role, created_at, last_login_at, disabled_at FROM admin_users WHERE username = ?",
-		username)
+		"SELECT id, password_hash, created_at, last_login_at, disabled_at FROM admin_users ORDER BY created_at, id LIMIT 1")
 	return scanAdmin(row)
 }
 
 func (s *Store) GetAdminByID(ctx context.Context, id string) (Admin, error) {
 	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, username, password_hash, role, created_at, last_login_at, disabled_at FROM admin_users WHERE id = ?",
+		"SELECT id, password_hash, created_at, last_login_at, disabled_at FROM admin_users WHERE id = ?",
 		id)
 	return scanAdmin(row)
 }
@@ -40,8 +38,8 @@ func (s *Store) CountAdmins(ctx context.Context) (int, error) {
 
 func (s *Store) CreateAdmin(ctx context.Context, admin Admin) error {
 	_, err := s.DB.ExecContext(ctx,
-		"INSERT INTO admin_users(id, username, password_hash, role, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)",
-		admin.ID, admin.Username, admin.PasswordHash, admin.Role, millis(admin.CreatedAt), millis(admin.LastLoginAt))
+		"INSERT INTO admin_users(id, password_hash, created_at, last_login_at) VALUES (?, ?, ?, ?)",
+		admin.ID, admin.PasswordHash, millis(admin.CreatedAt), millis(admin.LastLoginAt))
 	return err
 }
 
@@ -150,7 +148,7 @@ func scanAdmin(row rowScannerUser) (Admin, error) {
 	var admin Admin
 	var created, lastLogin int64
 	var disabled sql.NullInt64
-	if err := row.Scan(&admin.ID, &admin.Username, &admin.PasswordHash, &admin.Role, &created, &lastLogin, &disabled); err != nil {
+	if err := row.Scan(&admin.ID, &admin.PasswordHash, &created, &lastLogin, &disabled); err != nil {
 		return Admin{}, err
 	}
 	admin.CreatedAt = fromMillis(created)

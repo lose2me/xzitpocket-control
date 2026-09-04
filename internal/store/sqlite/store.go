@@ -58,9 +58,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
-	if _, err := s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)", millis(time.Now().UTC())); err != nil {
-		return fmt.Errorf("record schema migration: %w", err)
-	}
 	return nil
 }
 
@@ -120,6 +117,67 @@ type Challenge struct {
 	UsedAt        *time.Time `json:"used_at,omitempty"`
 }
 
+// QuestionBank is the normalized question library aggregate.
+type QuestionBank struct {
+	ID          string
+	OrderID     int
+	IsNew       bool
+	Name        string
+	Status      string
+	RequiresCDK bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Questions   []Question
+}
+
+type Question struct {
+	ID             string
+	BankID         string
+	QuestionNumber int
+	Type           string
+	Title          string
+	QuestionText   string
+	CorrectAnswer  string
+	SortOrder      int
+	Options        []QuestionOption
+}
+
+type QuestionOption struct {
+	ID         string
+	QuestionID string
+	Label      string
+	Text       string
+	SortOrder  int
+}
+
+type QuestionBankSummary struct {
+	ID            string
+	OrderID       int
+	IsNew         bool
+	Name          string
+	Status        string
+	RequiresCDK   bool
+	QuestionCount int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// LibraryCDK is a single-use unlock code for one question bank. The plaintext
+// code is deliberately never stored and is only returned by the create call.
+type LibraryCDK struct {
+	ID                       string
+	QuestionBankID           string
+	QuestionBankName         string
+	CodeHash                 string
+	BoundStudentIDHash       string
+	BoundStudentIDCiphertext string
+	BoundUserID              string
+	Status                   string
+	CreatedAt                time.Time
+	UsedAt                   *time.Time
+	RevokedAt                *time.Time
+}
+
 type EventInput struct {
 	EventID    string
 	UserID     string
@@ -141,92 +199,6 @@ type RiskEvent struct {
 	Detail         string     `json:"detail"`
 	CreatedAt      time.Time  `json:"created_at"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
-}
-
-type OAuthClient struct {
-	ClientID     string         `json:"client_id"`
-	ClientName   string         `json:"client_name"`
-	SecretHash   sql.NullString `json:"-"`
-	RedirectURIs string         `json:"redirect_uris"`
-	Scopes       string         `json:"scopes"`
-	Status       string         `json:"status"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-}
-
-type OAuthProvider struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	AuthorizationURL string         `json:"authorization_url"`
-	TokenURL         string         `json:"token_url"`
-	UserinfoURL      sql.NullString `json:"userinfo_url"`
-	ClientID         string         `json:"client_id"`
-	SecretCiphertext string         `json:"-"`
-	Scopes           string         `json:"scopes"`
-	Status           string         `json:"status"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-}
-
-type OAuthAccount struct {
-	ID                string         `json:"id"`
-	UserID            string         `json:"user_id"`
-	ProviderID        string         `json:"provider_id"`
-	ExternalSubject   string         `json:"external_subject"`
-	DisplayName       string         `json:"display_name"`
-	AccessCiphertext  string         `json:"-"`
-	RefreshCiphertext sql.NullString `json:"-"`
-	ExpiresAt         sql.NullInt64  `json:"expires_at"`
-	Scope             string         `json:"scope"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-}
-
-type OAuthTransaction struct {
-	ID                     string         `json:"id"`
-	UserID                 string         `json:"user_id"`
-	DeviceID               sql.NullString `json:"device_id"`
-	ProviderID             string         `json:"provider_id"`
-	StateHash              string         `json:"-"`
-	CodeVerifierCiphertext string         `json:"-"`
-	RedirectURI            string         `json:"redirect_uri"`
-	ExpiresAt              time.Time      `json:"expires_at"`
-	UsedAt                 *time.Time     `json:"used_at,omitempty"`
-}
-
-type ServiceClient struct {
-	ID               string         `json:"id"`
-	Audience         string         `json:"audience"`
-	SecretCiphertext sql.NullString `json:"-"`
-	Scopes           string         `json:"scopes"`
-	Status           string         `json:"status"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-}
-
-type OAuthCode struct {
-	CodeHash            string         `json:"-"`
-	ClientID            string         `json:"client_id"`
-	UserID              string         `json:"user_id"`
-	DeviceID            sql.NullString `json:"device_id"`
-	RedirectURI         string         `json:"redirect_uri"`
-	Scope               string         `json:"scope"`
-	CodeChallenge       sql.NullString `json:"-"`
-	CodeChallengeMethod sql.NullString `json:"-"`
-	ExpiresAt           time.Time      `json:"expires_at"`
-	UsedAt              *time.Time     `json:"used_at,omitempty"`
-}
-
-type OAuthToken struct {
-	TokenHash string         `json:"-"`
-	TokenType string         `json:"token_type"`
-	ClientID  string         `json:"client_id"`
-	UserID    string         `json:"user_id"`
-	DeviceID  sql.NullString `json:"device_id"`
-	Scope     string         `json:"scope"`
-	ExpiresAt time.Time      `json:"expires_at"`
-	CreatedAt time.Time      `json:"created_at"`
-	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
 }
 
 func millis(t time.Time) int64 {

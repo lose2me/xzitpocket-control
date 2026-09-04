@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,11 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -63,15 +59,6 @@ func HashToken(pepper []byte, token string) string {
 
 func HMACHex(key []byte, value string) string {
 	return HashToken(key, value)
-}
-
-func HashBytesHex(value []byte) string {
-	sum := sha256.Sum256(value)
-	return hex.EncodeToString(sum[:])
-}
-
-func ConstantTimeEqual(a, b string) bool {
-	return hmac.Equal([]byte(a), []byte(b))
 }
 
 func StudentAlias(studentID string) string {
@@ -202,46 +189,10 @@ func Argon2idVerify(encoded, password string) bool {
 	return hmac.Equal(actual, expected)
 }
 
-func LoadOrCreateEd25519(path string) (ed25519.PrivateKey, ed25519.PublicKey, string, error) {
-	if data, err := os.ReadFile(path); err == nil {
-		raw, decodeErr := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(data)))
-		if decodeErr != nil || len(raw) != ed25519.PrivateKeySize {
-			return nil, nil, "", errors.New("invalid Ed25519 signing key file")
-		}
-		private := ed25519.PrivateKey(raw)
-		public := private.Public().(ed25519.PublicKey)
-		return private, public, keyID(public), nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, nil, "", err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, nil, "", err
-	}
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	if err := os.WriteFile(path, []byte(base64.RawStdEncoding.EncodeToString(private)+
-		"\n"), 0o600); err != nil {
-		return nil, nil, "", err
-	}
-	return private, public, keyID(public), nil
-}
-
-func keyID(public ed25519.PublicKey) string {
-	sum := sha256.Sum256(public)
-	return hex.EncodeToString(sum[:8])
-}
-
 func JSON(value any) string {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "{}"
 	}
 	return string(data)
-}
-
-func DayUTC(t time.Time) string {
-	return t.UTC().Format("2006-01-02")
 }

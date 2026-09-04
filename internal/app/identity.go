@@ -260,10 +260,6 @@ func absDuration(d time.Duration) time.Duration {
 	return d
 }
 
-func (a *App) recordLoginAttempt(ctx context.Context, userID, deviceID, reason string) {
-	a.recordLoginAttemptWithSource(ctx, userID, deviceID, reason, "")
-}
-
 func (a *App) ObserveLoginAttempt(ctx context.Context, deviceID, sourceHash, reason string) {
 	a.recordLoginAttemptWithSource(ctx, "", deviceID, reason, sourceHash)
 }

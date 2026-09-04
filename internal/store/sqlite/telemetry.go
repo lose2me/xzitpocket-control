@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -56,64 +57,6 @@ func (s *Store) CleanupEvents(ctx context.Context, before time.Time) (int64, err
 	return result.RowsAffected()
 }
 
-func (s *Store) RebuildDailyMetrics(ctx context.Context, day, appID string) error {
-	if day == "" {
-		return nil
-	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM daily_metrics WHERE day = ? AND app_id = ?", day, appID); err != nil {
-		return err
-	}
-	start, parseErr := time.Parse("2006-01-02", day)
-	if parseErr != nil {
-		return parseErr
-	}
-	end := start.AddDate(0, 0, 1)
-	activeTypes := "('app_start','foreground','heartbeat','control_login_success','paid_service_open','paid_service_token_success')"
-	insert := func(metric string, value int) error {
-		_, e := tx.ExecContext(ctx, "INSERT INTO daily_metrics(day, app_id, metric, dimension_json, value) VALUES (?, ?, ?, '{}', ?)", day, appID, metric, value)
-		return e
-	}
-	var value int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(DISTINCT user_id) FROM activity_events WHERE user_id IS NOT NULL AND occurred_at >= ? AND occurred_at < ? AND type IN "+activeTypes, millis(start), millis(end)).Scan(&value); err != nil {
-		return err
-	}
-	if err := insert("active_users", value); err != nil {
-		return err
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(DISTINCT device_id) FROM activity_events WHERE occurred_at >= ? AND occurred_at < ? AND type IN "+activeTypes, millis(start), millis(end)).Scan(&value); err != nil {
-		return err
-	}
-	if err := insert("active_devices", value); err != nil {
-		return err
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM activity_events WHERE occurred_at >= ? AND occurred_at < ?", millis(start), millis(end)).Scan(&value); err != nil {
-		return err
-	}
-	if err := insert("events", value); err != nil {
-		return err
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM activity_events WHERE occurred_at >= ? AND occurred_at < ? AND type = 'paid_service_open'", millis(start), millis(end)).Scan(&value); err != nil {
-		return err
-	}
-	if err := insert("paid_entries", value); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) CleanupDailyMetrics(ctx context.Context, beforeDay string) (int64, error) {
-	result, err := s.DB.ExecContext(ctx, "DELETE FROM daily_metrics WHERE day < ?", beforeDay)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 type Overview struct {
 	DAU           int `json:"dau"`
 	WAU           int `json:"wau"`
@@ -126,11 +69,13 @@ type Overview struct {
 
 func (s *Store) MetricsOverview(ctx context.Context, now time.Time) (Overview, error) {
 	var result Overview
+	now = now.UTC()
 	nowMs := millis(now)
-	dayStart := millis(time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC))
-	weekStart := millis(now.AddDate(0, 0, -6))
-	monthStart := millis(now.AddDate(0, 0, -29))
-	activeTypes := "('app_start','foreground','heartbeat','control_login_success','paid_service_open','paid_service_token_success')"
+	dayStartTime := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dayStart := millis(dayStartTime)
+	weekStart := millis(dayStartTime.AddDate(0, 0, -6))
+	monthStart := millis(dayStartTime.AddDate(0, 0, -29))
+	activeTypes := "('app_start','foreground','heartbeat','control_login_success','library_open')"
 	query := "SELECT COUNT(DISTINCT user_id) FROM activity_events WHERE user_id IS NOT NULL AND occurred_at >= ? AND occurred_at <= ? AND type IN " + activeTypes
 	if err := s.DB.QueryRowContext(ctx, query, dayStart, nowMs).Scan(&result.DAU); err != nil {
 		return Overview{}, err
@@ -166,27 +111,32 @@ type SeriesPoint struct {
 }
 
 type MetricsBreakdown struct {
-	Platforms       map[string]int `json:"platforms"`
-	Versions        map[string]int `json:"versions"`
-	PaidEntries     int            `json:"paid_entries"`
-	PaidUsers       int            `json:"paid_users"`
-	AnonymousEvents int            `json:"anonymous_events"`
-	NewDevices      int            `json:"new_devices"`
-	NewUsers        int            `json:"new_users"`
+	Platforms           map[string]int `json:"platforms"`
+	Versions            map[string]int `json:"versions"`
+	LibraryEntries      int            `json:"library_entries"`
+	LibraryUsers        int            `json:"library_users"`
+	AnonymousEvents     int            `json:"anonymous_events"`
+	NewDevices          int            `json:"new_devices"`
+	NewUsers            int            `json:"new_users"`
+	CDKActivationsToday int            `json:"cdk_activations_today"`
+	CDKActivationsWeek  int            `json:"cdk_activations_week"`
+	CDKActivationsTotal int            `json:"cdk_activations_total"`
 }
 
 func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBreakdown, error) {
 	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}}
+	now = now.UTC()
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
-	rows, err := s.DB.QueryContext(ctx, "SELECT user_id, type, properties_json FROM activity_events WHERE occurred_at >= ?", millis(start))
+	rows, err := s.DB.QueryContext(ctx, "SELECT user_id, type, properties_json FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?", millis(start), millis(now))
 	if err != nil {
 		return result, err
 	}
 	defer rows.Close()
-	paidUsers := map[string]bool{}
-	activeType := map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "paid_service_open": true, "paid_service_token_success": true}
+	libraryUsers := map[string]bool{}
+	activeType := map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true}
 	for rows.Next() {
-		var userID, eventType, raw string
+		var userID sql.NullString
+		var eventType, raw string
 		if err := rows.Scan(&userID, &eventType, &raw); err != nil {
 			return result, err
 		}
@@ -200,24 +150,37 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 		if version, ok := props["app_version"].(string); ok && version != "" {
 			result.Versions[version]++
 		}
-		if userID == "" && activeType[eventType] {
+		if !userID.Valid && activeType[eventType] {
 			result.AnonymousEvents++
 		}
-		if eventType == "paid_service_open" {
-			result.PaidEntries++
-			if userID != "" {
-				paidUsers[userID] = true
+		if eventType == "library_open" {
+			result.LibraryEntries++
+			if userID.Valid && userID.String != "" {
+				libraryUsers[userID.String] = true
 			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return result, err
 	}
-	result.PaidUsers = len(paidUsers)
-	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM devices WHERE created_at >= ?", millis(start)).Scan(&result.NewDevices); err != nil {
+	result.LibraryUsers = len(libraryUsers)
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM devices WHERE created_at >= ? AND created_at <= ?", millis(start), millis(now)).Scan(&result.NewDevices); err != nil {
 		return result, err
 	}
-	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE created_at >= ?", millis(start)).Scan(&result.NewUsers); err != nil {
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE created_at >= ? AND created_at <= ?", millis(start), millis(now)).Scan(&result.NewUsers); err != nil {
+		return result, err
+	}
+	// CDK activation means a successful redemption. "This week" uses the
+	// calendar week beginning Monday in UTC, matching the dashboard's date
+	// boundaries elsewhere in this package.
+	weekStart := start.AddDate(0, 0, -((int(start.Weekday()) + 6) % 7))
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM library_cdks WHERE status = 'used' AND used_at IS NOT NULL AND used_at >= ? AND used_at <= ?", millis(start), millis(now)).Scan(&result.CDKActivationsToday); err != nil {
+		return result, err
+	}
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM library_cdks WHERE status = 'used' AND used_at IS NOT NULL AND used_at >= ? AND used_at <= ?", millis(weekStart), millis(now)).Scan(&result.CDKActivationsWeek); err != nil {
+		return result, err
+	}
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM library_cdks WHERE status = 'used' AND used_at IS NOT NULL").Scan(&result.CDKActivationsTotal); err != nil {
 		return result, err
 	}
 	return result, nil

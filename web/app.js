@@ -1,27 +1,122 @@
 (function () {
-  const { createApp, ref, computed, onMounted, nextTick } = Vue;
+  const { createApp, ref, computed, nextTick, watch, onMounted, onBeforeUnmount } = Vue;
+  const { createVuetify, useDisplay } = Vuetify;
+
+      const vuetify = createVuetify({
+    theme: {
+      defaultTheme: 'control',
+      themes: {
+        control: {
+          dark: false,
+          colors: {
+            primary: '#176b4d',
+            secondary: '#287ca8',
+            info: '#287ca8',
+            success: '#2f855a',
+            warning: '#b7791f',
+            error: '#b23f4a',
+            background: '#f4f7f8',
+            surface: '#ffffff',
+            'surface-variant': '#e8eef1',
+            sidebar: '#173842'
+          }
+        }
+      }
+    },
+    icons: { defaultSet: 'mdi' },
+    locale: {
+      locale: 'zhHans',
+      fallback: 'en',
+      messages: {
+        zhHans: {
+          dataIterator: { noResultsText: '没有符合条件的结果', loadingText: '加载中……' },
+          dataTable: {
+            itemsPerPageText: '每页条数：',
+            sortBy: '排序',
+            ariaLabel: {
+              sortDescending: '：降序排列',
+              sortAscending: '：升序排列',
+              sortNone: '：未排序',
+              activateNone: '点击取消排序',
+              activateDescending: '点击按降序排列',
+              activateAscending: '点击按升序排列',
+              selectRow: '选择行',
+              selectAll: '选择全部',
+              selectGroup: '选择分组'
+            }
+          },
+          dataFooter: {
+            itemsPerPageText: '每页条数：',
+            itemsPerPageAll: '全部',
+            nextPage: '下一页',
+            prevPage: '上一页',
+            firstPage: '第一页',
+            lastPage: '最后一页',
+            pageText: '{0}-{1} 共 {2}'
+          },
+          dataTableFooter: {
+            itemsPerPageText: '每页条数：',
+            itemsPerPageAll: '全部',
+            nextPage: '下一页',
+            prevPage: '上一页',
+            firstPage: '第一页',
+            lastPage: '最后一页',
+            pageText: '{0}-{1} 共 {2}'
+          },
+          noDataText: '暂无数据',
+          pagination: {
+            ariaLabel: {
+              root: '分页导航',
+              next: '下一页',
+              previous: '上一页',
+              page: '前往第 {0} 页',
+              currentPage: '当前第 {0} 页',
+              first: '第一页',
+              last: '最后一页'
+            }
+          }
+        }
+      }
+    }
+  });
 
   async function api(path, options) {
     options = options || {};
-    const csrfMatch = document.cookie.match(/(?:^|; )control_csrf=([^;]+)/);
+    const csrf = document.cookie.match(/(?:^|; )control_csrf=([^;]+)/);
     const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
-    const storedToken = localStorage.getItem('control_admin');
-    if (storedToken && !headers.Authorization) headers.Authorization = 'Bearer ' + storedToken;
-    if (csrfMatch && options.method && options.method !== 'GET') headers['X-CSRF-Token'] = decodeURIComponent(csrfMatch[1]);
+    const access = localStorage.getItem('control_admin');
+    if (access && !headers.Authorization) headers.Authorization = 'Bearer ' + access;
+    if (csrf && options.method && options.method !== 'GET') headers['X-CSRF-Token'] = decodeURIComponent(csrf[1]);
     const response = await fetch(path, Object.assign({ credentials: 'same-origin' }, options, { headers }));
     let body = {};
     try { body = await response.json(); } catch (_) {}
-    if (!response.ok) throw new Error((body.error && body.error.message) || '请求失败');
+    if (!response.ok) {
+      const error = new Error((body.error && body.error.message) || '请求失败');
+      error.status = response.status;
+      error.code = body.error && body.error.code;
+      throw error;
+    }
     return body;
   }
 
+  const emptyQuestion = (number) => ({
+    questionNumber: number,
+    type: '单选题',
+    title: '第' + number + '题',
+    questionText: '',
+    options: [{ label: 'A', text: '' }, { label: 'B', text: '' }],
+    correctAnswer: ''
+  });
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+
   createApp({
     setup() {
+      const { mdAndUp } = useDisplay();
       const logged = ref(!!localStorage.getItem('control_admin'));
+      const drawer = ref(mdAndUp.value);
       const view = ref('overview');
       const loading = ref(false);
       const error = ref('');
-      const admin = ref(JSON.parse(localStorage.getItem('control_admin_info') || 'null'));
       const overview = ref({});
       const breakdown = ref({ platforms: {}, versions: {} });
       const series = ref([]);
@@ -29,88 +124,416 @@
       const devices = ref([]);
       const risks = ref([]);
       const audit = ref([]);
-      const clients = ref([]);
-      const providers = ref([]);
-      const services = ref([]);
+      const banks = ref([]);
+      const bankTotal = ref(0);
+      const bankPage = ref(1);
+      const bankItemsPerPage = ref(25);
+      const cdks = ref([]);
+      const cdkTotal = ref(0);
+      const cdkPage = ref(1);
+      const cdkItemsPerPage = ref(25);
+      const cdkDialog = ref(false);
+      const cdkRevealDialog = ref(false);
+      const cdkForm = ref({ question_bank_id: '', count: 1 });
+      const cdkBankOptions = ref([]);
+      const createdCDKs = ref([]);
+      const cdkSearch = ref('');
+      const releaseConfig = ref({ latestVersion: '', downloadUrl: '', updatedAt: '' });
+      const releaseForm = ref({ latestVersion: '', downloadUrl: '' });
+      const bankDialog = ref(false);
+      const bankPreviewDialog = ref(false);
+      const bankEditing = ref(false);
+      const bankForm = ref({ id: '', orderId: null, new: true, name: '', status: 'active', requiresCDK: false, questions: [] });
+      const bankNewOptions = [{ title: '是', value: true }, { title: '否', value: false }];
+      const bankCDKOptions = [{ title: '需要', value: true }, { title: '不需要', value: false }];
+      const bankPreview = ref(null);
       const selectedUser = ref(null);
-      const clientForm = ref({ client_id: '', client_name: '', client_secret: '', redirect_uris_text: '', scopes_text: 'openid profile', status: 'active' });
-      const providerForm = ref({ id: '', name: '', authorization_url: '', token_url: '', userinfo_url: '', client_id: '', client_secret: '', scopes_text: 'openid profile', status: 'active' });
-      const serviceForm = ref({ audience: '', secret: '', scopes_text: '', status: 'active' });
-      const loginForm = ref({ username: 'admin', password: '' });
+      const userDialog = ref(false);
+      const loginForm = ref({ key: '' });
       const userStatus = ref('');
       const riskFilter = ref('');
+      const snackbar = ref({ show: false, text: '', color: 'success' });
       const chartEl = ref(null);
       let chart = null;
-      const nav = [['overview', '活跃总览'], ['users', '用户'], ['devices', '设备'], ['risk', '风控'], ['oauth', 'OAuth 配置'], ['audit', '审计']];
-      const title = computed(() => (nav.find(x => x[0] === view.value) || nav[0])[1]);
 
+      const nav = [
+        { key: 'overview', label: '总览', icon: 'mdi-chart-line' },
+        { key: 'users', label: '用户', icon: 'mdi-account-group-outline' },
+        { key: 'devices', label: '设备', icon: 'mdi-cellphone-link' },
+        { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
+        { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
+        { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
+        { key: 'audit', label: '审计', icon: 'mdi-history' }
+      ];
+      const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
+      watch(mdAndUp, (desktop) => { drawer.value = desktop; });
+
+      const statCards = computed(() => [
+        { label: 'DAU', value: overview.value.dau || 0, icon: 'mdi-account-check-outline', color: 'primary' },
+        { label: 'WAU', value: overview.value.wau || 0, icon: 'mdi-account-clock-outline', color: 'secondary' },
+        { label: 'MAU', value: overview.value.mau || 0, icon: 'mdi-account-multiple-outline', color: 'info' },
+        { label: '活跃设备', value: overview.value.active_devices || 0, icon: 'mdi-devices', color: 'success' },
+        { label: '用户总数', value: overview.value.total_users || 0, icon: 'mdi-account-multiple', color: 'warning' },
+        { label: '今日事件', value: overview.value.today_events || 0, icon: 'mdi-pulse', color: 'error' }
+      ]);
+      const platformRows = computed(() => Object.entries(breakdown.value.platforms || {}).map(([label, value]) => ({ label, value })));
+      const versionRows = computed(() => Object.entries(breakdown.value.versions || {}).map(([label, value]) => ({ label, value })));
+      const cdkActivationRows = computed(() => [
+        { label: '今日激活数', value: breakdown.value.cdk_activations_today || 0 },
+        { label: '本周激活数', value: breakdown.value.cdk_activations_week || 0 },
+        { label: '总激活数', value: breakdown.value.cdk_activations_total || 0 }
+      ]);
+      const userDetails = computed(() => {
+        if (!selectedUser.value) return [];
+        const user = selectedUser.value.user || {};
+        return [
+          { label: 'ID', value: valueOrDash(user.id) },
+          { label: '显示名', value: valueOrDash(user.display_name) },
+          { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
+          { label: '伪名', value: valueOrDash(user.student_alias) },
+          { label: '状态', value: statusLabel(user.status) },
+          { label: '最近登录', value: valueOrDash(user.last_login_at) }
+        ];
+      });
+      const userHeaders = [
+        { title: 'ID', key: 'id', sortable: false, width: '18%' }, { title: '显示名', key: 'display_name', width: '20%' },
+        { title: '状态', key: 'status', width: '14%' }, { title: '设备数', key: 'device_count', align: 'center', width: '12%' },
+        { title: '最近登录', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
+      ];
+      const deviceHeaders = [
+        { title: '设备码', key: 'device_serial', sortable: false, width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
+        { title: '版本', key: 'app_version', width: '14%' }, { title: '安装标识', key: 'installation_id', sortable: false, width: '24%' },
+        { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
+      ];
+      const riskHeaders = [
+        { title: '类型', key: 'type', width: '18%' }, { title: '用户', key: 'user_id', sortable: false, width: '16%' },
+        { title: '设备', key: 'device_id', sortable: false, width: '16%' }, { title: '次数', key: 'observed_count', align: 'center', width: '12%' },
+        { title: '时间', key: 'created_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '12%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+      ];
+      const auditHeaders = [
+        { title: '时间', key: 'created_at', width: '18%' }, { title: '动作', key: 'action', width: '18%' },
+        { title: '操作者', key: 'actor_id', sortable: false, width: '16%' }, { title: '目标', key: 'target', sortable: false, width: '22%' },
+        { title: '详情', key: 'detail', sortable: false, width: '26%' }
+      ];
+      const userDeviceHeaders = [
+        { title: '设备码', key: 'device_serial', sortable: false }, { title: '平台', key: 'platform' },
+        { title: '最近活动', key: 'last_seen_at' }
+      ];
+      const bankHeaders = [
+        { title: '顺序 ID', key: 'orderId', sortable: false, align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', sortable: false, width: '13%' }, { title: '名称', key: 'name', width: '17%' },
+        { title: '题目数', key: 'question_count', align: 'center', width: '9%' }, { title: '状态', key: 'status', width: '10%' },
+        { title: '新题库', key: 'new', sortable: false, align: 'center', width: '8%' }, { title: 'CDK 解锁', key: 'requiresCDK', sortable: false, align: 'center', width: '11%' }, { title: '更新时间', key: 'updated_at', width: '9%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '14%' }
+      ];
+      const cdkHeaders = [
+        { title: 'CDK ID', key: 'id', sortable: false, width: '18%' }, { title: '对应题库', key: 'question_bank_name', width: '18%' },
+        { title: '状态', key: 'status', width: '12%' }, { title: '绑定学号', key: 'bound_student_id', sortable: false, width: '14%' },
+        { title: '创建时间', key: 'created_at', width: '15%' }, { title: '使用时间', key: 'used_at', width: '15%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+      ];
+      const riskOptions = [{ title: '全部', value: '' }, { title: '未查看', value: 'false' }, { title: '已查看', value: 'true' }];
+      const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
+      const questionTypeOptions = ['单选题', '多选题', '判断题', '填空题'];
+      const bankPageCount = computed(() => Math.max(1, Math.ceil(bankTotal.value / bankItemsPerPage.value)));
+      const previewText = computed(() => JSON.stringify(bankPreview.value, null, 2));
+
+      const notify = (text, color) => { snackbar.value = { show: true, text, color: color || 'success' }; };
+      const clearAdminSession = () => {
+        localStorage.removeItem('control_admin');
+        logged.value = false;
+        drawer.value = false;
+        selectedUser.value = null;
+        userDialog.value = false;
+        bankDialog.value = false;
+        cdkDialog.value = false;
+        cdkRevealDialog.value = false;
+        createdCDKs.value = [];
+        bankPreviewDialog.value = false;
+      };
       const call = async (fn) => {
         loading.value = true; error.value = '';
-        try { await fn(); } catch (e) { error.value = e.message; } finally { loading.value = false; }
+        try {
+          return await fn();
+        } catch (e) {
+          if (e && e.status === 401 && logged.value) {
+            clearAdminSession();
+            return;
+          }
+          error.value = e && e.message ? e.message : '请求失败';
+        } finally { loading.value = false; }
       };
       const login = () => call(async () => {
         const out = await api('/api/v1/admin/session', { method: 'POST', body: JSON.stringify(loginForm.value) });
-        localStorage.setItem('control_admin', out.access_token);
-        localStorage.setItem('control_admin_info', JSON.stringify(out.admin));
-        admin.value = out.admin; logged.value = true; await load();
+        localStorage.setItem('control_admin', out.access_token); logged.value = true; notify('登录成功'); await load();
       });
       const logout = () => call(async () => {
         await api('/api/v1/admin/session', { method: 'DELETE' });
-        localStorage.removeItem('control_admin'); localStorage.removeItem('control_admin_info'); logged.value = false;
+        localStorage.removeItem('control_admin'); logged.value = false; drawer.value = false; snackbar.value.show = false;
       });
+      const loadOverview = async () => {
+        overview.value = await api('/api/v1/admin/metrics/overview');
+        breakdown.value = await api('/api/v1/admin/metrics/breakdown');
+        series.value = (await api('/api/v1/admin/metrics/series?days=30')).items || [];
+        await nextTick(); drawChart();
+      };
+      const loadBanks = async () => {
+        const offset = (bankPage.value - 1) * bankItemsPerPage.value;
+        const out = await api('/api/v1/admin/question-banks?limit=' + bankItemsPerPage.value + '&offset=' + offset);
+        banks.value = out.items || []; bankTotal.value = out.total || 0;
+      };
+      const loadCDKs = async () => {
+        const offset = (cdkPage.value - 1) * cdkItemsPerPage.value;
+        const search = cdkSearch.value.trim();
+        const query = search ? '&q=' + encodeURIComponent(search) : '';
+        const out = await api('/api/v1/admin/library-cdks?limit=' + cdkItemsPerPage.value + '&offset=' + offset + query);
+        cdks.value = out.items || []; cdkTotal.value = out.total || 0;
+      };
+      const loadRelease = async () => {
+        const out = await api('/api/v1/admin/app/release');
+        releaseConfig.value = out || {};
+        releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '' };
+      };
+      const searchCDKs = () => call(async () => { cdkPage.value = 1; await loadCDKs(); });
+      const loadLibrary = async () => { await Promise.all([loadBanks(), loadCDKs()]); };
       const load = async () => {
         if (!logged.value) return;
         await call(async () => {
-          if (view.value === 'overview') {
-            overview.value = await api('/api/v1/admin/metrics/overview');
-            breakdown.value = await api('/api/v1/admin/metrics/breakdown');
-            series.value = (await api('/api/v1/admin/metrics/series?days=30')).items || [];
-            await nextTick(); drawChart();
-          } else if (view.value === 'users') users.value = (await api('/api/v1/admin/users?limit=100')).items || [];
+          if (view.value === 'overview') await loadOverview();
+          else if (view.value === 'users') users.value = (await api('/api/v1/admin/users?limit=100')).items || [];
           else if (view.value === 'devices') devices.value = (await api('/api/v1/admin/devices?limit=100')).items || [];
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100' + (riskFilter.value ? '&acknowledged=' + riskFilter.value : ''))).items || [];
-          else if (view.value === 'oauth') {
-            clients.value = (await api('/api/v1/admin/oauth-clients')).items || [];
-            providers.value = (await api('/api/v1/admin/oauth-providers')).items || [];
-            services.value = (await api('/api/v1/admin/service-clients')).items || [];
-          } else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
+          else if (view.value === 'library') await loadLibrary();
+          else if (view.value === 'config') await loadRelease();
+          else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
         });
       };
-      const switchView = (name) => { view.value = name; load(); };
+      const switchView = (name) => { view.value = name; if (!mdAndUp.value) drawer.value = false; load(); };
       const drawChart = () => {
-        if (!chartEl.value || !window.echarts) return;
-        if (!chart) chart = echarts.init(chartEl.value);
-        chart.setOption({ tooltip: { trigger: 'axis' }, legend: { data: ['用户', '设备', '事件'] }, grid: { left: 40, right: 20, top: 30, bottom: 28 }, xAxis: { type: 'category', data: series.value.map(x => x.day) }, yAxis: { type: 'value' }, series: [
-          { name: '用户', type: 'line', smooth: true, data: series.value.map(x => x.users), itemStyle: { color: '#17724f' } },
-          { name: '设备', type: 'line', smooth: true, data: series.value.map(x => x.devices), itemStyle: { color: '#287ca8' } },
-          { name: '事件', type: 'line', smooth: true, data: series.value.map(x => x.events), itemStyle: { color: '#b77b25' } }
-        ] });
+        if (!chartEl.value || !window.echarts || view.value !== 'overview') return;
+        if (chart) {
+          let dom = null; try { dom = chart.getDom(); } catch (_) {}
+          if (dom !== chartEl.value) { chart.dispose(); chart = null; }
+        }
+        if (!chart) chart = window.echarts.init(chartEl.value);
+        chart.clear();
+        chart.setOption({
+          animationDuration: 350, tooltip: { trigger: 'axis' },
+          legend: { data: ['用户', '设备', '事件'], top: 0, textStyle: { color: '#5e6d76' } },
+          grid: { left: 42, right: 18, top: 34, bottom: 30 },
+          xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
+          yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
+          series: [
+            { name: '用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
+            { name: '设备', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.devices), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
+            { name: '事件', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.events), itemStyle: { color: '#b7791f' }, lineStyle: { width: 3 } }
+          ]
+        });
       };
-      const showUser = (user) => call(async () => { selectedUser.value = await api('/api/v1/admin/users/' + encodeURIComponent(user.id)); });
-      const setStatus = (user) => call(async () => { await api('/api/v1/admin/users/' + encodeURIComponent(user.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: userStatus.value || user.status }) }); selectedUser.value = null; await load(); });
-      const acknowledge = (risk) => call(async () => { await api('/api/v1/admin/risk-events/' + encodeURIComponent(risk.id), { method: 'PATCH', body: '{}' }); await load(); });
-      const editClient = (client) => { clientForm.value = { client_id: client.client_id, client_name: client.client_name, client_secret: '', redirect_uris_text: (client.redirect_uris || []).join('\n'), scopes_text: (client.scopes || []).join(' '), status: client.status }; };
-      const saveClient = () => call(async () => { const f = clientForm.value; await api('/api/v1/admin/oauth-clients/' + encodeURIComponent(f.client_id), { method: 'PUT', body: JSON.stringify({ client_id: f.client_id, client_name: f.client_name, client_secret: f.client_secret, redirect_uris: f.redirect_uris_text.split(/\s*\n\s*/).filter(Boolean), scopes: f.scopes_text.split(/\s+/).filter(Boolean), status: f.status }) }); clientForm.value = { client_id: '', client_name: '', client_secret: '', redirect_uris_text: '', scopes_text: 'openid profile', status: 'active' }; await load(); });
-      const editProvider = (provider) => { providerForm.value = { id: provider.id, name: provider.name, authorization_url: provider.authorization_url, token_url: provider.token_url, userinfo_url: provider.userinfo_url || '', client_id: provider.client_id, client_secret: '', scopes_text: (provider.scopes || []).join(' '), status: provider.status }; };
-      const saveProvider = () => call(async () => { const f = providerForm.value; await api('/api/v1/admin/oauth-providers/' + encodeURIComponent(f.id), { method: 'PUT', body: JSON.stringify({ id: f.id, name: f.name, authorization_url: f.authorization_url, token_url: f.token_url, userinfo_url: f.userinfo_url, client_id: f.client_id, client_secret: f.client_secret, scopes: f.scopes_text.split(/\s+/).filter(Boolean), status: f.status }) }); providerForm.value = { id: '', name: '', authorization_url: '', token_url: '', userinfo_url: '', client_id: '', client_secret: '', scopes_text: 'openid profile', status: 'active' }; await load(); });
-      const editService = (service) => { serviceForm.value = { audience: service.audience, secret: '', scopes_text: (service.scopes || []).join(' '), status: service.status }; };
-      const saveService = () => call(async () => { const f = serviceForm.value; await api('/api/v1/admin/service-clients/' + encodeURIComponent(f.audience), { method: 'PUT', body: JSON.stringify({ audience: f.audience, secret: f.secret, scopes: f.scopes_text.split(/\s+/).filter(Boolean), status: f.status }) }); serviceForm.value = { audience: '', secret: '', scopes_text: '', status: 'active' }; await load(); });
-      onMounted(() => { if (logged.value) load(); window.addEventListener('resize', () => chart && chart.resize()); });
-      return { logged, view, loading, error, admin, overview, breakdown, series, users, devices, risks, audit, clients, providers, services, selectedUser, clientForm, providerForm, serviceForm, loginForm, userStatus, riskFilter, chartEl, title, nav, login, logout, switchView, load, showUser, setStatus, acknowledge, editClient, saveClient, editProvider, saveProvider, editService, saveService };
+      const openNewBank = () => {
+        bankEditing.value = false;
+        bankForm.value = { id: '', orderId: null, new: true, name: '', status: 'active', requiresCDK: false, questions: [emptyQuestion(1)] };
+        bankDialog.value = true;
+      };
+      const editBank = (row) => call(async () => {
+        const out = await api('/api/v1/admin/question-banks/' + encodeURIComponent(rawItem(row).id));
+        bankEditing.value = true;
+        bankForm.value = { id: out.questionBank.id, orderId: Number(out.questionBank.orderId) || null, new: !!out.questionBank.new, name: out.questionBank.name, status: out.status || 'active', requiresCDK: !!out.questionBank.requiresCDK, questions: clone(out.questionBank.questions || []) };
+        bankForm.value.questions.forEach((q, index) => { q.options = q.options || []; q.questionNumber = Number(q.questionNumber) || index + 1; });
+        bankDialog.value = true;
+      });
+      const addQuestion = () => {
+        const nums = bankForm.value.questions.map(q => Number(q.questionNumber) || 0);
+        const next = nums.length ? Math.max.apply(null, nums) + 1 : 1;
+        bankForm.value.questions.push(emptyQuestion(next));
+      };
+      const removeQuestion = (index) => { bankForm.value.questions.splice(index, 1); };
+      const addOption = (question) => {
+        const labels = question.options.map(option => option.label);
+        let label = 'A';
+        for (let i = 0; i < 26; i++) { const candidate = String.fromCharCode(65 + i); if (!labels.includes(candidate)) { label = candidate; break; } }
+        question.options.push({ label, text: '' });
+      };
+      const removeOption = (question, index) => { question.options.splice(index, 1); };
+      const normalizedBank = () => {
+        const bank = clone(bankForm.value);
+        bank.id = (bank.id || '').trim(); bank.name = (bank.name || '').trim();
+        bank.orderId = Number.isFinite(Number(bank.orderId)) ? Math.trunc(Number(bank.orderId)) : 0;
+        bank.questions = (bank.questions || []).map((q, index) => ({
+          questionNumber: Number(q.questionNumber) || index + 1, type: q.type,
+          title: (q.title || '').trim(), questionText: (q.questionText || '').trim(),
+          options: q.type === '填空题' ? [] : (q.options || []).map(option => ({ label: (option.label || '').trim(), text: (option.text || '').trim() })),
+          correctAnswer: (q.correctAnswer || '').trim()
+        }));
+        return bank;
+      };
+      const saveBank = () => call(async () => {
+        const bank = normalizedBank();
+        const bankID = bank.id;
+        delete bank.id;
+        if (bank.orderId === 0) delete bank.orderId;
+        const payload = { questionBank: bank };
+        if (bankEditing.value && !bankID) throw new Error('题库 ID 无效');
+        if (!payload.questionBank.name) throw new Error('请填写题库名称');
+        const path = '/api/v1/admin/question-banks' + (bankEditing.value ? '/' + encodeURIComponent(bankID) : '');
+        await api(path, { method: bankEditing.value ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+        bankDialog.value = false; notify(bankEditing.value ? '题库已更新' : '题库已创建'); await loadBanks();
+      });
+      const saveRelease = () => call(async () => {
+        const latestVersion = (releaseForm.value.latestVersion || '').trim();
+        const downloadUrl = (releaseForm.value.downloadUrl || '').trim();
+        if (!latestVersion) throw new Error('请填写最新版版本号');
+        if (!downloadUrl) throw new Error('请填写下载 URL');
+        const out = await api('/api/v1/admin/app/release', { method: 'PUT', body: JSON.stringify({ latestVersion, downloadUrl }) });
+        releaseConfig.value = out || {};
+        releaseForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl };
+        notify('APP 发布配置已保存');
+      });
+      const openNewCDK = () => {
+        call(async () => {
+          const out = await api('/api/v1/admin/question-banks?status=active&limit=200&offset=0');
+          cdkBankOptions.value = out.items || [];
+          cdkForm.value = { question_bank_id: cdkBankOptions.value[0]?.id || '', count: 1 };
+          createdCDKs.value = []; cdkDialog.value = true;
+        });
+      };
+      const createCDK = () => call(async () => {
+        if (!cdkForm.value.question_bank_id) throw new Error('请选择题库');
+        const count = Math.max(1, Math.min(500, Number(cdkForm.value.count) || 1));
+        const out = await api('/api/v1/admin/library-cdks', { method: 'POST', body: JSON.stringify({ question_bank_id: cdkForm.value.question_bank_id, count }) });
+        createdCDKs.value = out.items || [out];
+        cdkDialog.value = false; cdkRevealDialog.value = true; notify(count > 1 ? ('已生成 ' + count + ' 个 CDK') : 'CDK 已创建'); await loadCDKs();
+      });
+      const copyCDK = async () => {
+        if (!createdCDKs.value.length) return;
+        const text = createdCDKs.value.map(item => item.code).filter(Boolean).join('\n');
+        try { await navigator.clipboard.writeText(text); notify('CDK 已复制'); }
+        catch (_) { notify('复制失败，请手动复制', 'warning'); }
+      };
+      const revokeCDK = (row) => call(async () => {
+        const item = rawItem(row);
+        if (item.status !== 'active' || !window.confirm('确定撤销这个 CDK 吗？')) return;
+        await api('/api/v1/admin/library-cdks/' + encodeURIComponent(item.id), { method: 'PATCH', body: '{}' });
+        notify('CDK 已撤销'); await loadCDKs();
+      });
+      const previewBankJSON = () => { const bank = normalizedBank(); if (!bankEditing.value) delete bank.id; if (bank.orderId === 0) delete bank.orderId; delete bank.status; bankPreview.value = { questionBank: bank }; bankPreviewDialog.value = true; };
+      const deleteBank = (row) => call(async () => {
+        const item = rawItem(row);
+        if (item.status === 'disabled') return;
+        if (!window.confirm('确定停用题库“' + item.name + '”吗？')) return;
+        await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id), { method: 'DELETE', body: '{}' });
+        notify('题库已停用'); await loadBanks();
+      });
+      const showUser = (user) => call(async () => {
+        const row = rawItem(user); selectedUser.value = await api('/api/v1/admin/users/' + encodeURIComponent(row.id));
+        userStatus.value = selectedUser.value.user.status || ''; userDialog.value = true;
+      });
+      const closeUser = () => { userDialog.value = false; selectedUser.value = null; userStatus.value = ''; };
+      const setStatus = (user) => call(async () => {
+        const row = rawItem(user);
+        await api('/api/v1/admin/users/' + encodeURIComponent(row.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: userStatus.value || row.status }) });
+        notify('用户状态已更新'); closeUser(); await load();
+      });
+      const disableUser = (user) => call(async () => {
+        const row = rawItem(user);
+        if (!row || row.status !== 'active' || !window.confirm('确定停用这个用户吗？')) return;
+        await api('/api/v1/admin/users/' + encodeURIComponent(row.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: 'disabled' }) });
+        notify('用户已停用'); await load();
+      });
+      const acknowledge = (risk) => call(async () => {
+        const row = rawItem(risk);
+        await api('/api/v1/admin/risk-events/' + encodeURIComponent(row.id), { method: 'PATCH', body: '{}' });
+        notify('风控记录已标记'); await load();
+      });
+      const rawItem = (item) => item && item.raw ? item.raw : item;
+      const valueOrDash = (value) => value === undefined || value === null || value === '' ? '-' : value;
+      const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info', revoked: 'error' }[status] || 'secondary');
+      const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '停用', used: '已使用', revoked: '已撤销' }[status] || valueOrDash(status));
+      const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_disable: '停用题库', library_cdk_create: '生成文库 CDK', library_cdk_redeem: '兑换文库 CDK', library_cdk_revoke: '撤销文库 CDK', app_release_update: '更新 APP 发布配置', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
+      const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
+      const handleResize = () => { if (chart) chart.resize(); };
+      watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
+      onMounted(() => { if (logged.value) load(); window.addEventListener('resize', handleResize); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); if (chart) chart.dispose(); });
+
+      return {
+        logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankPreviewDialog, bankEditing, bankForm, bankPreview, releaseConfig, releaseForm,
+        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, cdkBankOptions, createdCDKs, cdkSearch,
+        selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
+        platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, userDeviceHeaders,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, previewText, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, saveRelease,
+        showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, editBank, addQuestion, removeQuestion, addOption,
+        removeOption, saveBank, previewBankJSON, deleteBank, openNewCDK, createCDK, copyCDK, revokeCDK, rawItem, valueOrDash, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
+      };
     },
     template: `
-      <div v-if="!logged" class="login"><div class="login-box"><h1>xzitpocket control</h1><p>管理中心</p><div v-if="error" class="error">{{error}}</div><form class="form" @submit.prevent="login"><label>用户名<input v-model="loginForm.username" autocomplete="username"></label><label>密码<input v-model="loginForm.password" type="password" autocomplete="current-password"></label><button class="btn primary" :disabled="loading">登录</button></form></div></div>
-      <div v-else class="shell"><aside class="sidebar"><div class="brand">xzitpocket<small>control center</small></div><nav class="nav"><button v-for="item in nav" :key="item[0]" :class="{active:view===item[0]}" @click="switchView(item[0])">{{item[1]}}</button></nav><button class="logout" @click="logout">退出</button></aside><main class="main"><header class="topbar"><h1>{{title}}</h1><span class="admin-chip">{{admin && admin.username}} · {{admin && admin.role}}</span></header><section class="content"><div v-if="error" class="error" style="margin-bottom:14px">{{error}}</div>
-        <div v-if="view==='overview'"><div class="grid stats"><div class="stat"><label>DAU</label><strong>{{overview.dau||0}}</strong></div><div class="stat"><label>WAU</label><strong>{{overview.wau||0}}</strong></div><div class="stat"><label>MAU</label><strong>{{overview.mau||0}}</strong></div><div class="stat"><label>活跃设备</label><strong>{{overview.active_devices||0}}</strong></div><div class="stat"><label>用户总数</label><strong>{{overview.total_users||0}}</strong></div><div class="stat"><label>今日事件</label><strong>{{overview.today_events||0}}</strong></div></div><div class="panel"><h2>近 30 天趋势</h2><div ref="chartEl" class="chart"></div></div><div class="grid three"><div class="panel"><h2>平台分布</h2><div v-for="(value,key) in breakdown.platforms" :key="key" class="breakdown-row"><span>{{key}}</span><b>{{value}}</b></div><div v-if="!Object.keys(breakdown.platforms||{}).length" class="empty">暂无数据</div></div><div class="panel"><h2>版本分布</h2><div v-for="(value,key) in breakdown.versions" :key="key" class="breakdown-row"><span>{{key}}</span><b>{{value}}</b></div><div v-if="!Object.keys(breakdown.versions||{}).length" class="empty">暂无数据</div></div><div class="panel"><h2>付费入口</h2><div class="detail"><div><span>打开次数</span>{{breakdown.paid_entries||0}}</div><div><span>去重用户</span>{{breakdown.paid_users||0}}</div><div><span>匿名事件</span>{{breakdown.anonymous_events||0}}</div></div></div></div></div>
-        <div v-else-if="view==='users'"><div class="panel"><div class="toolbar"><button class="btn" @click="load">刷新</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>显示名</th><th>状态</th><th>设备数</th><th>最近登录</th><th></th></tr></thead><tbody><tr v-for="u in users" :key="u.id"><td>{{u.id}}</td><td>{{u.display_name||'-'}}</td><td><span class="badge" :class="{off:u.status!=='active'}">{{u.status}}</span></td><td>{{u.device_count}}</td><td>{{u.last_login_at}}</td><td><button class="btn" @click="showUser(u)">详情</button></td></tr></tbody></table><div v-if="!users.length" class="empty">暂无数据</div></div></div></div>
-        <div v-else-if="view==='devices'"><div class="panel"><div class="toolbar"><button class="btn" @click="load">刷新</button></div><div class="table-wrap"><table><thead><tr><th>设备码</th><th>平台</th><th>版本</th><th>安装 ID</th><th>最近活动</th><th>状态</th></tr></thead><tbody><tr v-for="d in devices" :key="d.id"><td>{{d.device_serial}}</td><td>{{d.platform}}</td><td>{{d.app_version}}</td><td>{{d.installation_id}}</td><td>{{d.last_seen_at}}</td><td><span class="badge" :class="{off:d.revoked_at}">{{d.revoked_at?'已撤销':'正常'}}</span></td></tr></tbody></table><div v-if="!devices.length" class="empty">暂无数据</div></div></div></div>
-        <div v-else-if="view==='risk'"><div class="panel"><div class="toolbar"><select v-model="riskFilter" @change="load"><option value="">全部</option><option value="false">未查看</option><option value="true">已查看</option></select><button class="btn" @click="load">刷新</button></div><div class="table-wrap"><table><thead><tr><th>类型</th><th>用户</th><th>设备</th><th>次数</th><th>时间</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="r in risks" :key="r.id"><td>{{r.type}}</td><td>{{r.user_id||'-'}}</td><td>{{r.device_id||'-'}}</td><td>{{r.observed_count}}</td><td>{{r.created_at}}</td><td>{{r.acknowledged_at?'已查看':'未查看'}}</td><td><button v-if="!r.acknowledged_at" class="btn" @click="acknowledge(r)">标记</button></td></tr></tbody></table><div v-if="!risks.length" class="empty">暂无数据</div></div></div></div>
-        <div v-else-if="view==='oauth'"><div class="panel"><div class="panel-head"><h2>OAuth 客户端</h2><button class="btn" @click="clientForm={client_id:'',client_name:'',client_secret:'',redirect_uris_text:'',scopes_text:'openid profile',status:'active'}">新建</button></div><div class="form inline-form"><input v-model="clientForm.client_id" placeholder="client_id"><input v-model="clientForm.client_name" placeholder="名称"><input v-model="clientForm.client_secret" type="password" placeholder="新 secret（可留空）"><input v-model="clientForm.redirect_uris_text" placeholder="回调地址，每行一个"><input v-model="clientForm.scopes_text" placeholder="scope，以空格分隔"><select v-model="clientForm.status"><option value="active">active</option><option value="disabled">disabled</option></select><button class="btn primary" @click="saveClient">保存客户端</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>回调地址</th><th>Scope</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="c in clients" :key="c.client_id"><td>{{c.client_id}}</td><td>{{c.client_name}}</td><td>{{(c.redirect_uris||[]).join(', ')}}</td><td>{{(c.scopes||[]).join(' ')}}</td><td>{{c.status}}</td><td><button class="btn" @click="editClient(c)">编辑</button></td></tr></tbody></table><div v-if="!clients.length" class="empty">暂无配置</div></div></div>
-          <div class="panel"><div class="panel-head"><h2>外部 Provider</h2><button class="btn" @click="providerForm={id:'',name:'',authorization_url:'',token_url:'',userinfo_url:'',client_id:'',client_secret:'',scopes_text:'openid profile',status:'active'}">新建</button></div><div class="form inline-form"><input v-model="providerForm.id" placeholder="provider id"><input v-model="providerForm.name" placeholder="名称"><input v-model="providerForm.authorization_url" placeholder="authorization URL"><input v-model="providerForm.token_url" placeholder="token URL"><input v-model="providerForm.userinfo_url" placeholder="userinfo URL"><input v-model="providerForm.client_id" placeholder="client id"><input v-model="providerForm.client_secret" type="password" placeholder="新 secret（可留空）"><input v-model="providerForm.scopes_text" placeholder="scope，以空格分隔"><select v-model="providerForm.status"><option value="active">active</option><option value="disabled">disabled</option></select><button class="btn primary" @click="saveProvider">保存 Provider</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>Client ID</th><th>Scope</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="p in providers" :key="p.id"><td>{{p.id}}</td><td>{{p.name}}</td><td>{{p.client_id}}</td><td>{{(p.scopes||[]).join(' ')}}</td><td>{{p.status}}</td><td><button class="btn" @click="editProvider(p)">编辑</button></td></tr></tbody></table><div v-if="!providers.length" class="empty">暂无配置</div></div></div>
-          <div class="panel"><div class="panel-head"><h2>付费服务</h2><button class="btn" @click="serviceForm={audience:'',secret:'',scopes_text:'',status:'active'}">新建</button></div><div class="form inline-form"><input v-model="serviceForm.audience" placeholder="audience"><input v-model="serviceForm.secret" type="password" placeholder="服务端 secret（可留空）"><input v-model="serviceForm.scopes_text" placeholder="scope，以空格分隔"><select v-model="serviceForm.status"><option value="active">active</option><option value="disabled">disabled</option></select><button class="btn primary" @click="saveService">保存服务</button></div><div class="table-wrap"><table><thead><tr><th>Audience</th><th>Scope</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="service in services" :key="service.audience"><td>{{service.audience}}</td><td>{{(service.scopes||[]).join(' ')}}</td><td>{{service.status}}</td><td><button class="btn" @click="editService(service)">编辑</button></td></tr></tbody></table></div></div></div>
-        <div v-else-if="view==='audit'"><div class="panel"><div class="toolbar"><button class="btn" @click="load">刷新</button></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>动作</th><th>操作者</th><th>目标</th><th>详情</th></tr></thead><tbody><tr v-for="a in audit" :key="a.id"><td>{{a.created_at}}</td><td>{{a.action}}</td><td>{{a.actor_id||'-'}}</td><td>{{a.target_type}} {{a.target_id}}</td><td class="muted">{{a.detail}}</td></tr></tbody></table><div v-if="!audit.length" class="empty">暂无数据</div></div></div></div>
-      </section></main></div>
-      <div v-if="selectedUser" class="modal-backdrop" @click.self="selectedUser=null"><div class="modal"><div class="modal-head"><h2>用户详情</h2><button class="close" @click="selectedUser=null">×</button></div><div class="detail" style="margin-top:16px"><div><span>ID</span>{{selectedUser.user.id}}</div><div><span>显示名</span>{{selectedUser.user.display_name||'-'}}</div><div><span>学号</span>{{selectedUser.student_id||'-'}}</div><div><span>伪名</span>{{selectedUser.user.student_alias||'-'}}</div><div><span>状态</span>{{selectedUser.user.status}}</div><div><span>最近登录</span>{{selectedUser.user.last_login_at}}</div></div><h3 style="font-size:14px;margin:20px 0 8px">设备</h3><div class="table-wrap"><table><thead><tr><th>设备码</th><th>平台</th><th>最近活动</th></tr></thead><tbody><tr v-for="d in selectedUser.devices" :key="d.id"><td>{{d.device_serial}}</td><td>{{d.platform}}</td><td>{{d.last_seen_at}}</td></tr></tbody></table></div><div class="toolbar" style="margin-top:18px"><select v-model="userStatus"><option value="">选择状态</option><option value="active">active</option><option value="disabled">disabled</option><option value="deleted">deleted</option></select><button class="btn primary" @click="setStatus(selectedUser.user)">更新状态</button></div></div></div>
+      <v-app>
+        <v-main v-if="!logged" class="login-page">
+          <v-container fluid class="login-shell pa-4">
+            <v-row align="center" justify="center" class="w-100">
+              <v-col cols="12" sm="8" md="5" lg="4" xl="3">
+                <v-card class="login-card" rounded="md" elevation="10">
+                  <v-card-item class="pa-6 pb-3">
+                    <template #prepend><v-avatar color="primary" variant="tonal" size="48"><v-icon icon="mdi-shield-account-outline" /></v-avatar></template>
+                    <v-card-title class="text-h5 font-weight-bold pa-0">掌上徐工控制台</v-card-title>
+                  </v-card-item>
+                  <v-card-text class="px-6 pb-6">
+                    <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4" closable @click:close="error=''">{{ error }}</v-alert>
+                    <v-form @submit.prevent="login">
+                      <v-text-field v-model="loginForm.key" label="管理密钥" type="password" autocomplete="current-password" prepend-inner-icon="mdi-key-outline" variant="outlined" density="comfortable" hide-details="auto" class="mb-4" />
+                      <v-btn type="submit" block size="large" color="primary" :loading="loading" prepend-icon="mdi-login">登录</v-btn>
+                    </v-form>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-container>
+        </v-main>
+        <template v-else>
+          <v-navigation-drawer v-model="drawer" :permanent="mdAndUp" :temporary="!mdAndUp" width="208" color="sidebar" theme="dark">
+             <div class="drawer-brand pa-5"><div class="text-subtitle-1 font-weight-bold text-white">掌上徐工控制台</div></div>
+            <v-divider class="mx-4 drawer-divider" />
+            <v-list nav density="comfortable" class="px-3 py-4" bg-color="transparent">
+              <v-list-item v-for="item in nav" :key="item.key" :active="view === item.key" :prepend-icon="item.icon" :title="item.label" active-color="primary" rounded="md" class="mb-1" @click="switchView(item.key)" />
+            </v-list>
+            <template #append><div class="pa-3"><v-divider class="mb-3 drawer-divider" /><v-btn block variant="outlined" color="white" prepend-icon="mdi-logout" @click="logout">退出</v-btn></div></template>
+          </v-navigation-drawer>
+          <v-main class="app-main">
+            <v-app-bar flat color="surface" height="72" class="topbar">
+              <v-app-bar-nav-icon v-if="!mdAndUp" aria-label="打开导航" @click="drawer = !drawer" />
+               <v-toolbar-title class="text-h6 font-weight-bold">{{ title }}</v-toolbar-title><v-spacer />
+              <v-tooltip text="刷新当前数据" theme="dark" location="bottom" content-class="refresh-tooltip"><template #activator="{ props }"><v-btn v-bind="props" icon variant="text" :loading="loading" aria-label="刷新当前数据" @click="load"><v-icon icon="mdi-refresh" /></v-btn></template></v-tooltip>
+            </v-app-bar>
+            <v-container fluid class="content pa-4 pa-md-6">
+              <v-progress-linear v-if="loading" indeterminate color="primary" class="loading-bar" />
+              <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4" closable @click:close="error=''">{{ error }}</v-alert>
+              <section v-if="view === 'overview'">
+                <v-row dense class="mb-4"><v-col v-for="stat in statCards" :key="stat.label" cols="12" sm="6" md="4" lg="2"><v-card variant="elevated" border class="stat-card h-100"><v-card-text class="d-flex align-center ga-3"><v-avatar :color="stat.color" variant="tonal" size="42"><v-icon :icon="stat.icon" /></v-avatar><div class="min-w-0"><div class="text-caption text-medium-emphasis">{{ stat.label }}</div><div class="text-h5 font-weight-bold mt-1">{{ stat.value }}</div></div></v-card-text></v-card></v-col></v-row>
+                <v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-timeline-variant" color="primary" /><span>近 30 天趋势</span><v-spacer /><v-chip size="small" variant="tonal" color="primary">{{ series.length }} 天</v-chip></v-card-title><v-divider /><v-card-text><div ref="chartEl" class="chart" aria-label="近 30 天用户、设备和事件趋势图" /></v-card-text></v-card>
+                <v-row dense><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-monitor-dashboard" color="secondary" /><span>平台分布</span></v-card-title><v-divider /><v-list v-if="platformRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in platformRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="secondary" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-tag-multiple-outline" color="info" /><span>版本分布</span></v-card-title><v-divider /><v-list v-if="versionRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in versionRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="info" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-key-chain" color="warning" /><span>文库CDK</span></v-card-title><v-divider /><v-list density="compact" lines="one" class="py-2"><v-list-item v-for="row in cdkActivationRows" :key="row.label" :title="row.label"><template #append><span class="font-weight-bold">{{ row.value }}</span></template></v-list-item></v-list></v-card></v-col></v-row>
+              </section>
+              <section v-else-if="view === 'users'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-group-outline" color="primary" /><span>用户列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="userHeaders" :items="users" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.display_name="{ item }">{{ valueOrDash(rawItem(item).display_name) }}</template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.last_login_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_login_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="showUser(rawItem(item))">详情</v-btn><v-btn v-if="rawItem(item).status === 'active'" size="small" variant="text" color="error" prepend-icon="mdi-account-cancel-outline" @click="disableUser(rawItem(item))">手动停用</v-btn></div></template></v-data-table></v-card></section>
+              <section v-else-if="view === 'devices'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cellphone-link" color="primary" /><span>设备列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="deviceHeaders" :items="devices" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.device_serial="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_serial) }}</span></template><template #item.installation_id="{ item }"><span class="mono table-ellipsis" :title="valueOrDash(rawItem(item).installation_id)">{{ valueOrDash(rawItem(item).installation_id) }}</span></template><template #item.last_seen_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_seen_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="rawItem(item).revoked_at ? 'error' : 'success'" variant="tonal">{{ rawItem(item).revoked_at ? '已撤销' : '正常' }}</v-chip></template></v-data-table></v-card></section>
+              <section v-else-if="view === 'risk'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-shield-alert-outline" color="warning" /><span>风控记录</span><v-spacer /><v-select v-model="riskFilter" :items="riskOptions" item-title="title" item-value="value" label="查看状态" variant="outlined" density="compact" hide-details style="max-width: 170px" @update:model-value="load" /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="riskHeaders" :items="risks" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.type="{ item }"><span>{{ riskTypeLabel(rawItem(item).type) }}</span></template><template #item.user_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).user_id) }}</span></template><template #item.device_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="riskStatusColor(rawItem(item))" variant="tonal">{{ rawItem(item).acknowledged_at ? '已查看' : '未查看' }}</v-chip></template><template #item.actions="{ item }"><v-btn v-if="!rawItem(item).acknowledged_at" size="small" variant="text" color="primary" prepend-icon="mdi-check" @click="acknowledge(rawItem(item))">标记</v-btn></template></v-data-table></v-card></section>
+              <section v-else-if="view === 'library'"><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 toolbar-wrap library-toolbar"><v-icon icon="mdi-book-open-page-variant" color="primary" /><span>文库题库</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="openNewBank">新建题库</v-btn><v-btn size="small" variant="tonal" color="secondary" prepend-icon="mdi-key-plus" @click="openNewCDK">生成 CDK</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="bankHeaders" :items="banks" item-value="id" :items-per-page="bankItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无题库"><template #item.orderId="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).orderId) }}</span></template><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.question_count="{ item }"><span class="font-weight-bold">{{ rawItem(item).question_count || 0 }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.new="{ item }"><v-chip size="small" :color="rawItem(item).new ? 'primary' : 'default'" variant="tonal">{{ rawItem(item).new ? '是' : '否' }}</v-chip></template><template #item.requiresCDK="{ item }"><v-chip size="small" :color="rawItem(item).requiresCDK ? 'secondary' : 'default'" variant="tonal">{{ rawItem(item).requiresCDK ? '需要' : '不需要' }}</v-chip></template><template #item.updated_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).updated_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-pencil-outline" @click="editBank(rawItem(item))">编辑</v-btn><v-btn v-if="rawItem(item).status !== 'disabled'" size="small" variant="text" color="error" prepend-icon="mdi-stop-circle-outline" @click="deleteBank(rawItem(item))">停用</v-btn></div></template></v-data-table><div v-if="bankTotal > bankItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="bankPage" :length="bankPageCount" density="comfortable" @update:model-value="loadBanks" /></div></v-card><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2 cdk-toolbar"><v-icon icon="mdi-key-chain" color="secondary" /><span>文库 CDK</span><v-spacer /><v-text-field v-model="cdkSearch" label="搜索 CDK、题库或学号" prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable class="cdk-search" @keyup.enter="searchCDKs" @click:clear="searchCDKs" /><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-magnify" :loading="loading" @click="searchCDKs">搜索</v-btn><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCDKs">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="cdkHeaders" :items="cdks" item-value="id" :items-per-page="cdkItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无 CDK"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.bound_student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).bound_student_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.used_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).used_at) }}</span></template><template #item.actions="{ item }"><v-btn v-if="rawItem(item).status === 'active'" size="small" variant="text" color="error" prepend-icon="mdi-cancel" @click="revokeCDK(rawItem(item))">撤销</v-btn></template></v-data-table><div v-if="cdkTotal > cdkItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="cdkPage" :length="Math.max(1, Math.ceil(cdkTotal / cdkItemsPerPage))" density="comfortable" @update:model-value="loadCDKs" /></div></v-card></section>
+              <section v-else-if="view === 'config'"><v-card variant="elevated" border class="config-card"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cog-outline" color="primary" /><span>配置</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-card-text><div class="text-subtitle-1 font-weight-bold mb-4">APP 发布配置</div><v-form @submit.prevent="saveRelease"><v-row dense align="center"><v-col cols="12" md="4"><v-text-field v-model="releaseForm.latestVersion" label="最新版版本号" placeholder="例如 2.0.4" variant="outlined" density="comfortable" hide-details="auto" /></v-col><v-col cols="12" md="8"><v-text-field v-model="releaseForm.downloadUrl" label="下载 URL" placeholder="https://..." type="url" variant="outlined" density="comfortable" hide-details="auto" /></v-col></v-row><div class="d-flex align-center flex-wrap ga-3 mt-5"><span v-if="releaseConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ releaseConfig.updatedAt }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存配置</v-btn></div></v-form></v-card-text></v-card></section>
+              <section v-else-if="view === 'audit'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-history" color="primary" /><span>审计日志</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="auditHeaders" :items="audit" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.action="{ item }"><span>{{ actionLabel(rawItem(item).action) }}</span></template><template #item.actor_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).actor_id) }}</span></template><template #item.target="{ item }"><span>{{ valueOrDash(rawItem(item).target_type) }} {{ valueOrDash(rawItem(item).target_id) }}</span></template><template #item.detail="{ item }"><span class="table-ellipsis audit-detail" :title="valueOrDash(rawItem(item).detail)">{{ valueOrDash(rawItem(item).detail) }}</span></template></v-data-table></v-card></section>
+            </v-container>
+          </v-main>
+        </template>
+
+        <v-dialog v-model="userDialog" max-width="760" scrollable><v-card v-if="selectedUser"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-details-outline" color="primary" /><span>用户详情</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="closeUser"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-row dense><v-col v-for="detail in userDetails" :key="detail.label" cols="12" sm="6"><v-sheet color="surface-variant" rounded="md" class="detail-item pa-3"><div class="text-caption text-medium-emphasis">{{ detail.label }}</div><div class="text-body-2 mt-1 text-break">{{ detail.value }}</div></v-sheet></v-col></v-row><div class="text-subtitle-2 font-weight-bold mt-6 mb-2">设备</div><v-data-table :headers="userDeviceHeaders" :items="selectedUser.devices || []" item-value="id" density="compact" hide-default-footer class="admin-table" no-data-text="暂无设备"><template #item.device_serial="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_serial) }}</span></template><template #item.last_seen_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_seen_at) }}</span></template></v-data-table><v-row dense align="center" class="mt-4"><v-col cols="12" sm="6"><v-select v-model="userStatus" :items="[{title:'选择状态',value:''},{title:'启用',value:'active'},{title:'停用',value:'disabled'}]" item-title="title" item-value="value" label="更新状态" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="auto"><v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="loading" @click="setStatus(selectedUser.user)">更新状态</v-btn></v-col></v-row></v-card-text></v-card></v-dialog>
+
+        <v-dialog v-model="bankDialog" max-width="1100" scrollable><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-book-edit-outline" color="primary" /><span>{{ bankEditing ? '编辑题库' : '新建题库' }}</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveBank"><v-row dense align="center" class="bank-meta-row"><v-col v-if="bankEditing" cols="12" sm="6" md="2"><v-text-field v-model="bankForm.id" label="题库 ID" readonly variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-text-field v-model.number="bankForm.orderId" label="顺序 ID" type="number" min="1" placeholder="自动分配" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-text-field v-model="bankForm.name" label="题库名称" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.new" :items="bankNewOptions" item-title="title" item-value="value" label="新题库" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.requiresCDK" :items="bankCDKOptions" item-title="title" item-value="value" label="需要 CDK 解锁" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.status" :items="bankStatusOptions" item-title="title" item-value="value" label="状态" variant="outlined" density="comfortable" hide-details /></v-col></v-row><v-divider class="my-4" /><div class="d-flex align-center mb-3"><div class="text-subtitle-1 font-weight-bold">题目</div><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="addQuestion">添加题目</v-btn></div><v-alert v-if="!bankForm.questions.length" type="info" variant="tonal" density="compact" class="mb-3">请至少添加一道题目</v-alert><v-card v-for="(question, qIndex) in bankForm.questions" :key="qIndex" variant="outlined" class="mb-4 question-editor"><v-card-title class="d-flex align-center ga-2 text-subtitle-1"><v-chip size="small" color="primary" variant="tonal">{{ qIndex + 1 }}</v-chip><span>题目 {{ qIndex + 1 }}</span><v-spacer /><v-btn icon variant="text" color="error" aria-label="删除题目" @click="removeQuestion(qIndex)"><v-icon icon="mdi-delete-outline" /></v-btn></v-card-title><v-card-text><v-row dense><v-col cols="12" sm="2"><v-text-field v-model.number="question.questionNumber" label="题号" type="number" min="1" variant="outlined" density="comfortable" /></v-col><v-col cols="12" sm="3"><v-select v-model="question.type" :items="questionTypeOptions" label="题型" variant="outlined" density="comfortable" /></v-col><v-col cols="12" sm="7"><v-text-field v-model="question.title" label="标题" variant="outlined" density="comfortable" /></v-col><v-col cols="12"><v-textarea v-model="question.questionText" label="题干" rows="2" auto-grow variant="outlined" density="comfortable" /></v-col></v-row><div v-if="question.type !== '填空题'" class="option-editor"><div class="d-flex align-center mb-2"><div class="text-body-2 font-weight-medium">选项</div><v-spacer /><v-btn size="x-small" variant="text" color="primary" prepend-icon="mdi-plus" @click="addOption(question)">添加选项</v-btn></div><v-row v-for="(option, optionIndex) in question.options" :key="optionIndex" dense align="center"><v-col cols="3" sm="2"><v-text-field v-model="option.label" label="标签" variant="outlined" density="compact" hide-details /></v-col><v-col cols="8" sm="9"><v-text-field v-model="option.text" label="选项内容" variant="outlined" density="compact" hide-details /></v-col><v-col cols="1"><v-btn icon size="small" variant="text" color="error" aria-label="删除选项" @click="removeOption(question, optionIndex)"><v-icon icon="mdi-close" /></v-btn></v-col></v-row></div><v-text-field v-model="question.correctAnswer" :label="question.type === '多选题' ? '正确答案（如 A,B）' : '正确答案'" :hint="question.type === '填空题' ? '填空题不需要选项' : '答案使用选项标签'" persistent-hint variant="outlined" density="comfortable" class="mt-3" /></v-card-text></v-card><div class="d-flex flex-wrap justify-end ga-2 mt-4"><v-btn variant="text" @click="bankDialog=false">取消</v-btn><v-btn variant="tonal" color="secondary" prepend-icon="mdi-code-json" @click="previewBankJSON">预览 JSON</v-btn><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存题库</v-btn></div></v-form></v-card-text></v-card></v-dialog>
+
+        <v-dialog v-model="cdkDialog" max-width="520"><v-card><v-card-title class="d-flex align-center ga-2 flex-wrap"><v-icon icon="mdi-key-plus" color="secondary" /><span>生成文库 CDK</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="createCDK"><v-select v-model="cdkForm.question_bank_id" :items="cdkBankOptions" item-title="name" item-value="id" label="对应题库" hint="一个 CDK 只能解锁一个题库，使用后绑定学号" persistent-hint variant="outlined" density="comfortable" class="mb-3" /><v-text-field v-model.number="cdkForm.count" label="生成数量" type="number" min="1" max="500" hint="一次最多生成 500 个，批量结果可复制" persistent-hint variant="outlined" density="comfortable" /><div class="d-flex justify-end ga-2 mt-4"><v-btn variant="text" @click="cdkDialog=false">取消</v-btn><v-btn type="submit" color="primary" prepend-icon="mdi-key-plus" :loading="loading">生成 CDK</v-btn></div></v-form></v-card-text></v-card></v-dialog>
+
+        <v-dialog v-model="cdkRevealDialog" max-width="720"><v-card v-if="createdCDKs.length"><v-card-title class="d-flex align-center"><v-icon icon="mdi-key-check" color="success" class="mr-2" /><span>CDK 已创建（{{ createdCDKs.length }} 个）</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkRevealDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="warning" variant="tonal" density="compact" class="mb-4">CDK 只显示这一次，请立即复制并妥善保存。</v-alert><v-textarea :model-value="createdCDKs.map(item => item.code).join('\\n')" label="CDK 列表" readonly variant="outlined" rows="8" class="mono cdk-reveal" /><div class="text-body-2 text-medium-emphasis">题库：{{ createdCDKs[0].question_bank_name }}</div></v-card-text><v-card-actions><v-spacer /><v-btn color="primary" prepend-icon="mdi-content-copy" @click="copyCDK">复制全部 CDK</v-btn><v-btn variant="text" @click="cdkRevealDialog=false">完成</v-btn></v-card-actions></v-card></v-dialog>
+
+        <v-dialog v-model="bankPreviewDialog" max-width="900" scrollable><v-card><v-card-title class="d-flex align-center"><span>JSON 预览</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankPreviewDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><pre class="json-preview">{{ previewText }}</pre></v-card-text></v-card></v-dialog>
+        <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
+      </v-app>
     `
-  }).mount('#app');
+  }).use(vuetify).mount('#app');
 })();

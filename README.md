@@ -1,57 +1,88 @@
-# xzitpocket-control
+# 掌上徐工控制台
 
-用于 xzitpocket 的管理、用户、付费服务鉴权和 OAuth 控制中心。
+`xzitpocket-control` 是一个 Go + SQLite 模块化单体服务，内置 Vue 3、Vuetify 4 和 ECharts 管理后台。它负责设备登记、用户会话、活跃统计、风控记录和文库题库管理。
 
-## 特性
+OA 登录始终由 xzitpocket 客户端完成。control 只接收客户端提交的学号、固定伪名和设备断言，不读取或访问 OA 密码、Cookie、Ticket 或 OA 响应。
 
-- Go 模块化单体服务；
-- SQLite WAL；
-- 客户端 OA 登录仍完全在客户端完成；
-- 设备 P-256 签名、一次性 challenge 和短期 control 会话；
-- 多设备用户关系；
-- 付费服务短期 Ed25519 JWT 和 JWKS；
-- APP 活跃统计和日聚合；
-- 只记录不处置的风控事件；
-- Vue 3 + ECharts CDN 管理后台；
-- OAuth Authorization Server 和外部 OAuth Client 基础流程。
+## 运行
 
-control 不接收 OA 密码、Cookie、TGT、Service Ticket 或 OA 响应，也不会访问 CAS/教务系统。
+需要 Go 1.23+。程序只从运行目录的 `data/.env` 读取配置，不读取系统环境变量。配置文件不存在时会自动创建，并生成三个随机密钥。
 
-## 本地运行
-
-需要 Go 1.23+（`modernc.org/sqlite` 当前版本要求）。
-
-~~~powershell
-$env:CONTROL_ADMIN_BOOTSTRAP = "replace-me"
+```powershell
 go run ./cmd/server
-~~~
+```
 
-默认地址：http://127.0.0.1:8080
+默认地址为 `http://127.0.0.1:8080`，管理后台和 API 同源。首次启动会创建 SQLite 数据库和唯一管理员。管理密钥由 `CONTROL_ADMIN_KEY` 设置，默认值为 `change-me`，部署前应修改 `data/.env`。
 
-首次启动会创建 SQLite 数据库、迁移表结构、服务端 Ed25519 签名密钥和管理员账号。
+配置模板见 [`data/.env.example`](data/.env.example)。`data/.env`、数据库和运行时密钥不会提交到仓库。
 
-## 常用检查
+## API
 
-~~~powershell
+API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_token>`；用户会话和题库读取使用 `Authorization: Bearer <access_token>`；管理员登录使用 `POST /admin/session` 提交 `{"key":"..."}`。
+
+客户端接口：
+
+- `POST /devices/register`
+- `POST /auth/challenges`
+- `POST /auth/assertions`
+- `POST /auth/refresh`
+- `POST /auth/revoke`
+- `GET /me`、`GET /me/devices`
+- `POST /telemetry/events`，请求体为事件数组
+- `GET /question-banks`、`GET /question-banks/{id}`
+- `POST /library/cdks/redeem`
+- `GET /app/release`，返回最新版版本号和下载 URL
+- `GET /healthz`
+
+管理接口：
+
+- `GET /admin/metrics/overview`、`/series`、`/breakdown`
+- `GET /admin/users`、`/admin/users/{id}`、`PATCH /admin/users/{id}/status`
+- `GET /admin/devices`、`GET /admin/risk-events`、`PATCH /admin/risk-events/{id}`
+- `GET/POST /admin/question-banks`、`GET/PUT/DELETE /admin/question-banks/{id}`
+- `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`
+- `GET /admin/audit`
+- `GET/PUT /admin/app/release`
+- `POST/DELETE /admin/session`
+
+题库创建和更新只接受 `{ "questionBank": ... }`。创建时不提交题库 ID，服务端按 `QB-001`、`QB-002` 顺序生成；可选的 `orderId` 用于控制 xzitpocket 展示顺序，未填写时自动分配，已使用的顺序 ID 会被拒绝。更新通过 URL 指定 ID。题库状态为 `active`、`draft` 或 `disabled`，停用后仍保留在管理员列表。题型固定为 `单选题`、`多选题`、`判断题`、`填空题`。
+
+题库可设置 `requiresCDK: true`。CDK 只绑定一个题库，首次兑换绑定学号，同一学号可在其他设备继续使用。CDK 明文只在创建响应中返回一次，数据库只保存哈希；管理员支持批量生成和按 CDK、题库、状态、学号搜索。
+
+APP 发布配置只有最新版版本号和下载 URL。管理员在“配置”页保存后会写入审计日志；客户端可通过无需登录的 `GET /api/v1/app/release` 读取：
+
+```json
+{
+  "latestVersion": "2.0.4",
+  "downloadUrl": "https://example.com/xzitpocket.apk"
+}
+```
+
+## 数据和结构
+
+当前数据库结构唯一来源是 [`internal/store/sqlite/schema.sql`](internal/store/sqlite/schema.sql)，启动时直接创建表和索引。SQLite 使用外键、WAL 和忙等待。所有题库写入在事务内完成，重要操作写入审计日志。
+
+```text
+xzitpocket-control/
+├─ cmd/server/
+├─ internal/app/
+├─ internal/config/
+├─ internal/crypto/
+├─ internal/httpapi/
+├─ internal/store/sqlite/
+├─ web/
+├─ data/
+├─ fmd/system-design.md
+└─ dist/
+```
+
+风控只记录两类异常：短时间登录次数过多、账号绑定设备过多。后台可查看和标记记录，但风控不会封禁、解绑或阻塞正常服务。control 不可用时不影响 OA 登录、APP 启动和免费功能。
+
+## 开发检查
+
+```powershell
 go test ./...
 go vet ./...
-~~~
-
-生产环境必须设置独立的 CONTROL_TOKEN_PEPPER、CONTROL_ID_PEPPER、CONTROL_ENCRYPTION_KEY 和管理员初始化口令，并通过 HTTPS 反向代理暴露服务。
-
-## API 快速索引
-
-客户端只需要上传 OA 登录完成后的 `student_id`、固定算法生成的 `student_alias` 和设备断言；control 从不接收 OA 密码、Cookie 或 Ticket。
-
-- `POST /api/v1/devices/register`：注册安装并取得 `device_serial`、`device_token`；
-- `POST /api/v1/auth/challenges`、`POST /api/v1/auth/assertions`：完成 control 用户会话；
-- `POST /api/v1/auth/refresh`、`POST /api/v1/auth/revoke`：会话轮换和退出；
-- `POST /api/v1/telemetry/events`：批量上报允许的活跃事件；
-- `POST /api/v1/services/{service}/tokens`：为文库等付费服务签发短期 JWT；
-- `GET /.well-known/jwks.json`：下游服务验证 JWT 的公钥；
-- `/oauth/authorize`、`/oauth/token`、`/oauth/userinfo`、`/oauth/revoke`：Authorization Code + PKCE；
-- `/api/v1/admin/*`：管理员统计、用户、设备、风控、OAuth 和审计接口。
-
-统计接口包括 `/api/v1/admin/metrics/overview`、`/api/v1/admin/metrics/series` 和 `/api/v1/admin/metrics/breakdown`。
-
-设备签名原文、固定伪名算法和付费设备绑定边界以 [`fmd/system-design.md`](fmd/system-design.md) 为准。风控只记录短时间登录尝试和设备数量异常，不会封禁、解绑、撤销令牌或阻塞任何服务。
+node --check web/app.js
+git diff --check
+```

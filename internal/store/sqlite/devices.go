@@ -32,22 +32,9 @@ func (s *Store) GetDeviceByInstallation(ctx context.Context, installationID stri
 	return scanDevice(row)
 }
 
-func (s *Store) GetDeviceBySerial(ctx context.Context, serial string) (Device, error) {
-	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, device_serial, installation_id, device_token_hash, public_key, platform, app_version, created_at, last_seen_at, revoked_at FROM devices WHERE device_serial = ?", serial)
-	return scanDevice(row)
-}
-
 func (s *Store) TouchDevice(ctx context.Context, id string, now time.Time) error {
 	_, err := s.DB.ExecContext(ctx,
 		"UPDATE devices SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL",
-		millis(now), id)
-	return err
-}
-
-func (s *Store) RevokeDevice(ctx context.Context, id string, now time.Time) error {
-	_, err := s.DB.ExecContext(ctx,
-		"UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
 		millis(now), id)
 	return err
 }
@@ -81,13 +68,6 @@ func (s *Store) BindUserDevice(ctx context.Context, userID, deviceID string, now
 	_, err := s.DB.ExecContext(ctx,
 		"INSERT INTO user_devices(user_id, device_id, first_bound_at, last_login_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, device_id) DO UPDATE SET last_login_at = excluded.last_login_at, unbound_at = NULL",
 		userID, deviceID, millis(now), millis(now))
-	return err
-}
-
-func (s *Store) UnbindUserDevice(ctx context.Context, userID, deviceID string, now time.Time) error {
-	_, err := s.DB.ExecContext(ctx,
-		"UPDATE user_devices SET unbound_at = ? WHERE user_id = ? AND device_id = ? AND unbound_at IS NULL",
-		millis(now), userID, deviceID)
 	return err
 }
 
