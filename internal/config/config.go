@@ -48,7 +48,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Addr:               configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
 		DBPath:             dbPath,
-		PublicBaseURL:      strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "http://127.0.0.1:8080"), "/"),
+		PublicBaseURL:      strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
 		AdminKey:           configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
 		EventRetentionDays: intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
 		RiskLoginWindow:    durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
@@ -138,7 +138,7 @@ func defaultDotEnvValues() (map[string]string, error) {
 	return map[string]string{
 		"CONTROL_ADDR":                 "127.0.0.1:8080",
 		"CONTROL_DB":                   "data/control.db",
-		"CONTROL_PUBLIC_BASE_URL":      "http://127.0.0.1:8080",
+		"CONTROL_PUBLIC_BASE_URL":      "https://con.xuda.live",
 		"CONTROL_TOKEN_PEPPER":         tokenPepper,
 		"CONTROL_ID_PEPPER":            idPepper,
 		"CONTROL_ENCRYPTION_KEY":       encryptionKey,
