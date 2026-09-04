@@ -166,14 +166,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminQuestionBankDetail(w, r, segment(path, 2))
 	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "question-banks"):
 		s.adminQuestionBankUpdate(w, r, segment(path, 2))
-	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "question-banks"):
-		s.adminQuestionBankDelete(w, r, segment(path, 2))
+	case r.Method == http.MethodPatch && pathMatchesIDSuffix(path, "status", "admin", "question-banks"):
+		s.adminQuestionBankStatus(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/library-cdks":
 		s.adminLibraryCDKs(w, r)
 	case r.Method == http.MethodPost && path == "/admin/library-cdks":
 		s.adminLibraryCDKCreate(w, r)
 	case r.Method == http.MethodPatch && pathMatchesID(path, "admin", "library-cdks"):
-		s.adminLibraryCDKRevoke(w, r, segment(path, 2))
+		s.adminLibraryCDKStatus(w, r, segment(path, 2))
 	default:
 		writeError(w, r, app.Err("not_found", "接口不存在", http.StatusNotFound))
 	}

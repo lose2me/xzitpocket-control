@@ -2,7 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     display_name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS question_banks (
     order_id INTEGER NOT NULL UNIQUE CHECK (order_id > 0),
     is_new INTEGER NOT NULL DEFAULT 1 CHECK (is_new IN (0, 1)),
     name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
     requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -128,10 +128,9 @@ CREATE TABLE IF NOT EXISTS library_cdks (
     bound_student_id_hash TEXT,
     bound_student_id_ciphertext TEXT,
     bound_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'revoked')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'disabled')),
     created_at INTEGER NOT NULL,
-    used_at INTEGER,
-    revoked_at INTEGER
+    used_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS risk_events (

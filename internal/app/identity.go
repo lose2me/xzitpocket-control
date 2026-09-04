@@ -213,10 +213,6 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	if err != nil {
 		return SessionOutput{}, err
 	}
-	if user.Status != "active" {
-		a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "user_unavailable", sourceHash)
-		return SessionOutput{}, Err("user_unavailable", "用户不可用", http.StatusForbidden)
-	}
 	now := time.Now().UTC()
 	if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, now); err != nil {
 		return SessionOutput{}, err

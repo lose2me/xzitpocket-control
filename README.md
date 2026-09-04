@@ -39,15 +39,15 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 - `GET /admin/metrics/overview`、`/series`、`/breakdown`
 - `GET /admin/users`、`/admin/users/{id}`、`PATCH /admin/users/{id}/status`
 - `GET /admin/devices`、`GET /admin/risk-events`、`PATCH /admin/risk-events/{id}`
-- `GET/POST /admin/question-banks`、`GET/PUT/DELETE /admin/question-banks/{id}`
-- `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`
+- `GET/POST /admin/question-banks`、`GET/PUT /admin/question-banks/{id}`、`PATCH /admin/question-banks/{id}/status`
+- `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`（请求体 `{"status":"active"}` 或 `{"status":"disabled"}`）
 - `GET /admin/audit`
 - `GET/PUT /admin/app/release`
 - `POST/DELETE /admin/session`
 
 题库创建和更新只接受 `{ "questionBank": ... }`。创建时不提交题库 ID，服务端按 `QB-001`、`QB-002` 顺序生成；可选的 `orderId` 用于控制 xzitpocket 展示顺序，未填写时自动分配，已使用的顺序 ID 会被拒绝。更新通过 URL 指定 ID。题库状态为 `active`、`draft` 或 `disabled`，停用后仍保留在管理员列表。题型固定为 `单选题`、`多选题`、`判断题`、`填空题`。
 
-题库可设置 `requiresCDK: true`。CDK 只绑定一个题库，首次兑换绑定学号，同一学号可在其他设备继续使用。CDK 明文只在创建响应中返回一次，数据库只保存哈希；管理员支持批量生成和按 CDK、题库、状态、学号搜索。
+题库可设置 `requiresCDK: true`。CDK 只绑定一个题库，首次兑换绑定学号，同一学号可在其他设备继续使用。CDK 为 `CDK-` 加 16 位短码，明文只在创建响应中返回一次，数据库只保存哈希。CDK 支持启用、已兑换、禁用三种状态；禁用不清除绑定，管理员可重新启用。管理员支持批量生成和按 CDK、题库、状态、学号搜索。
 
 APP 发布配置只有最新版版本号和下载 URL。管理员在“配置”页保存后会写入审计日志；客户端可通过无需登录的 `GET /api/v1/app/release` 读取：
 

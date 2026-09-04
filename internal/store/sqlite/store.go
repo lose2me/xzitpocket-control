@@ -162,8 +162,8 @@ type QuestionBankSummary struct {
 	UpdatedAt     time.Time
 }
 
-// LibraryCDK is a single-use unlock code for one question bank. The plaintext
-// code is deliberately never stored and is only returned by the create call.
+// LibraryCDK is an unlock code for one question bank. The plaintext code is
+// deliberately never stored and is only returned by the create call.
 type LibraryCDK struct {
 	ID                       string
 	QuestionBankID           string
@@ -175,7 +175,6 @@ type LibraryCDK struct {
 	Status                   string
 	CreatedAt                time.Time
 	UsedAt                   *time.Time
-	RevokedAt                *time.Time
 }
 
 type EventInput struct {

@@ -135,6 +135,21 @@ func TestControlFlow(t *testing.T) {
 	if _, leaked := detail["access_ciphertext"]; leaked {
 		t.Fatal("secret ciphertext leaked in user detail")
 	}
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "disabled"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
+		t.Fatalf("disable user status = %d, want %d", status, http.StatusOK)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusOK {
+		t.Fatalf("disabled user /me status = %d, want %d", status, http.StatusOK)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []map[string]any{{"event_id": "disabled-user-event", "type": "foreground", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{}}}, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusAccepted {
+		t.Fatalf("disabled user telemetry status = %d, want %d", status, http.StatusAccepted)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/question-banks", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusForbidden {
+		t.Fatalf("disabled user question-bank status = %d, want %d", status, http.StatusForbidden)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
+		t.Fatalf("enable user status = %d, want %d", status, http.StatusOK)
+	}
 
 	for _, path := range []string{
 		"/api/v1/admin/metrics/series?days=7",

@@ -77,12 +77,18 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 		t.Fatalf("invalid batch CDK create response: %#v", cdk)
 	}
 	code := createdItems[0].(map[string]any)["code"].(string)
-	if code == "" || createdItems[0].(map[string]any)["question_bank_id"] != bankID {
+	if len(code) != len("CDK-")+16 || !strings.HasPrefix(code, "CDK-") || createdItems[0].(map[string]any)["question_bank_id"] != bankID {
 		t.Fatalf("invalid CDK create response: %#v", cdk)
 	}
 	redeemed := requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": code}, userHeaders)
 	if redeemed["redeemed"] != true || redeemed["question_bank_id"] != bankID {
 		t.Fatalf("invalid redemption response: %#v", redeemed)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/library-cdks/"+createdItems[0].(map[string]any)["id"].(string), http.MethodPatch, map[string]any{"status": "disabled"}, adminHeaders); status != http.StatusOK {
+		t.Fatalf("used CDK disable status = %d, want %d", status, http.StatusOK)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/library-cdks/"+createdItems[0].(map[string]any)["id"].(string), http.MethodPatch, map[string]any{"status": "active"}, adminHeaders); status != http.StatusOK {
+		t.Fatalf("disabled CDK enable status = %d, want %d", status, http.StatusOK)
 	}
 	requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+bankID, http.MethodGet, nil, userHeaders)
 	requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": strings.ToLower(code)}, userHeaders)
@@ -109,7 +115,7 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	if codeSearch["total"].(float64) != 1 {
 		t.Fatalf("CDK code search total = %#v", codeSearch)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/admin/question-banks/"+bankID, http.MethodDelete, nil, adminHeaders); status != http.StatusOK {
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/question-banks/"+bankID+"/status", http.MethodPatch, map[string]any{"status": "disabled"}, adminHeaders); status != http.StatusOK {
 		t.Fatalf("question bank disable status = %d, want %d", status, http.StatusOK)
 	}
 	adminBanks := requestWithHeaders(t, ts.URL+"/api/v1/admin/question-banks?status=disabled", http.MethodGet, nil, adminHeaders)

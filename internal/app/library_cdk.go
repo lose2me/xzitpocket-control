@@ -46,11 +46,11 @@ func canonicalLibraryCDKCode(value string) string {
 }
 
 func validLibraryCDKCode(value string) bool {
-	if len(value) < len(libraryCDKCodePrefix)+8 || len(value) > 128 || !strings.HasPrefix(value, libraryCDKCodePrefix) {
+	if len(value) != len(libraryCDKCodePrefix)+16 || !strings.HasPrefix(value, libraryCDKCodePrefix) {
 		return false
 	}
 	for _, r := range value[len(libraryCDKCodePrefix):] {
-		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+		if (r < 'A' || r > 'Z') && (r < '2' || r > '7') {
 			return false
 		}
 	}
@@ -58,13 +58,12 @@ func validLibraryCDKCode(value string) bool {
 }
 
 func newLibraryCDKCode() (string, error) {
-	var raw [15]byte
+	var raw [10]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
 	}
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])
-	// Grouping improves transcription while canonicalization remains trivial.
-	return libraryCDKCodePrefix + encoded[:4] + "-" + encoded[4:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
+	return libraryCDKCodePrefix + encoded, nil
 }
 
 func (a *App) CreateLibraryCDK(ctx context.Context, in LibraryCDKCreateInput, actor string) (CreatedLibraryCDKView, error) {
@@ -75,8 +74,8 @@ func (a *App) CreateLibraryCDK(ctx context.Context, in LibraryCDKCreateInput, ac
 	return items[0], nil
 }
 
-// CreateLibraryCDKs generates one or more independent codes for the selected
-// question bank. Plaintext codes are returned only from this response.
+// CreateLibraryCDKs generates one or more independent short codes for the
+// selected question bank. Plaintext codes are returned only from this response.
 func (a *App) CreateLibraryCDKs(ctx context.Context, in LibraryCDKCreateInput, actor string) ([]CreatedLibraryCDKView, error) {
 	bankID := strings.TrimSpace(in.QuestionBankID)
 	if !questionBankIDPattern.MatchString(bankID) {
@@ -144,10 +143,6 @@ func libraryCDKView(cdk sqlite.LibraryCDK, encryptionKey []byte) LibraryCDKView 
 		value := cdk.UsedAt.Format(time.RFC3339)
 		view.UsedAt = &value
 	}
-	if cdk.RevokedAt != nil {
-		value := cdk.RevokedAt.Format(time.RFC3339)
-		view.RevokedAt = &value
-	}
 	return view
 }
 
@@ -193,8 +188,8 @@ func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code str
 	if errors.Is(err, sqlite.ErrLibraryCDKNotFound) {
 		return LibraryCDKRedemption{}, Err("library_cdk_not_found", "CDK 不存在", http.StatusNotFound)
 	}
-	if errors.Is(err, sqlite.ErrLibraryCDKRevoked) {
-		return LibraryCDKRedemption{}, Err("library_cdk_revoked", "CDK 已撤销", http.StatusConflict)
+	if errors.Is(err, sqlite.ErrLibraryCDKDisabled) {
+		return LibraryCDKRedemption{}, Err("library_cdk_disabled", "CDK 已禁用", http.StatusConflict)
 	}
 	if errors.Is(err, sqlite.ErrLibraryCDKBound) {
 		return LibraryCDKRedemption{}, Err("library_cdk_bound", "CDK 已绑定其他学号", http.StatusConflict)
@@ -206,21 +201,21 @@ func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code str
 	return LibraryCDKRedemption{Redeemed: true, QuestionBankID: cdk.QuestionBankID, Status: cdk.Status}, nil
 }
 
-func (a *App) RevokeLibraryCDK(ctx context.Context, id, actor string) error {
+func (a *App) SetLibraryCDKStatus(ctx context.Context, id, status, actor string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ErrNotFound
 	}
-	if err := a.Store.RevokeLibraryCDK(ctx, id, time.Now().UTC()); err != nil {
+	if status != "active" && status != "disabled" {
+		return Err("invalid_library_cdk_status", "CDK 状态无效", http.StatusBadRequest)
+	}
+	if err := a.Store.SetLibraryCDKStatus(ctx, id, status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		if errors.Is(err, sqlite.ErrLibraryCDKUnavailable) {
-			return Err("library_cdk_unavailable", "CDK 已使用或撤销", http.StatusConflict)
-		}
 		return err
 	}
-	_ = a.Store.AddAudit(ctx, actor, "library_cdk_revoke", "library_cdk", id, "{}", time.Now().UTC())
+	_ = a.Store.AddAudit(ctx, actor, "library_cdk_status", "library_cdk", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
 	return nil
 }
 
@@ -255,13 +250,7 @@ func (a *App) GetQuestionBankForUser(ctx context.Context, id, userID string) (Qu
 }
 
 func (a *App) ListQuestionBanksForUser(ctx context.Context, limit, offset int, userID string) ([]QuestionBankSummaryView, int, error) {
-	identity, err := a.Store.GetIdentityByUser(ctx, userID, identityProvider)
-	if errors.Is(err, sql.ErrNoRows) {
-		identity.StudentIDHash = ""
-	} else if err != nil {
-		return nil, 0, err
-	}
-	items, total, err := a.Store.ListAccessibleQuestionBanks(ctx, limit, offset, identity.StudentIDHash)
+	items, total, err := a.Store.ListAccessibleQuestionBanks(ctx, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

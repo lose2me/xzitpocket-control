@@ -127,6 +127,28 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}}
 	now = now.UTC()
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	deviceRows, err := s.DB.QueryContext(ctx, `SELECT platform, app_version, COUNT(*)
+		FROM devices WHERE revoked_at IS NULL GROUP BY platform, app_version`)
+	if err != nil {
+		return result, err
+	}
+	defer deviceRows.Close()
+	for deviceRows.Next() {
+		var platform, version string
+		var count int
+		if err := deviceRows.Scan(&platform, &version, &count); err != nil {
+			return result, err
+		}
+		if platform != "" {
+			result.Platforms[platform] += count
+		}
+		if version != "" {
+			result.Versions[version] += count
+		}
+	}
+	if err := deviceRows.Err(); err != nil {
+		return result, err
+	}
 	rows, err := s.DB.QueryContext(ctx, "SELECT user_id, type, properties_json FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?", millis(start), millis(now))
 	if err != nil {
 		return result, err
@@ -143,12 +165,6 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 		var props map[string]any
 		if json.Unmarshal([]byte(raw), &props) != nil {
 			continue
-		}
-		if platform, ok := props["platform"].(string); ok && platform != "" {
-			result.Platforms[platform]++
-		}
-		if version, ok := props["app_version"].(string); ok && version != "" {
-			result.Versions[version]++
 		}
 		if !userID.Valid && activeType[eventType] {
 			result.AnonymousEvents++

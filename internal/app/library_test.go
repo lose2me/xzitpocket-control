@@ -43,7 +43,7 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if got.QuestionBank.ID != "QB-001" || len(got.QuestionBank.Questions) != 2 || got.QuestionBank.Questions[0].Options == nil || len(got.QuestionBank.Questions[1].Options) != 2 {
 		t.Fatalf("unexpected public bank: %#v", got)
 	}
-	if err := a.DisableQuestionBank(context.Background(), "QB-001", "admin"); err != nil {
+	if err := a.SetQuestionBankStatus(context.Background(), "QB-001", "disabled", "admin"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.GetQuestionBank(context.Background(), "QB-001"); err == nil {

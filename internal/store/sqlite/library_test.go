@@ -93,7 +93,7 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 	if got.Name != "已更新" || len(got.Questions) != 1 || got.Questions[0].ID != "q-2" || len(got.Questions[0].Options) != 0 {
 		t.Fatalf("unexpected replacement: %#v", got)
 	}
-	if err := store.DisableQuestionBank(ctx, bank.ID, now.Add(2*time.Minute)); err != nil {
+	if err := store.SetQuestionBankStatus(ctx, bank.ID, "disabled", now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	items, total, err := func() ([]QuestionBankSummary, int, error) {

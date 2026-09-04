@@ -65,7 +65,7 @@ func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, err
 // ListAccessibleQuestionBanks returns every active bank. A CDK-protected bank
 // is listed before it is unlocked; reading its questions remains protected by
 // GetQuestionBankForUser.
-func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset int, studentHash string) ([]QuestionBankSummary, int, error) {
+func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset int) ([]QuestionBankSummary, int, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -350,8 +350,11 @@ func advanceQuestionBankOrderCounterTx(ctx context.Context, tx *sql.Tx, orderID 
 	return err
 }
 
-func (s *Store) DisableQuestionBank(ctx context.Context, id string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET status = 'disabled', updated_at = ? WHERE id = ? AND status <> 'disabled'", millis(now), id)
+func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, now time.Time) error {
+	if status != "active" && status != "draft" && status != "disabled" {
+		return errors.New("invalid question bank status")
+	}
+	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET status = ?, updated_at = ? WHERE id = ?", status, millis(now), id)
 	if err != nil {
 		return err
 	}
@@ -360,16 +363,6 @@ func (s *Store) DisableQuestionBank(ctx context.Context, id string, now time.Tim
 		return err
 	}
 	if affected != 1 {
-		var status string
-		if err := s.DB.QueryRowContext(ctx, "SELECT status FROM question_banks WHERE id = ?", id).Scan(&status); errors.Is(err, sql.ErrNoRows) {
-			return sql.ErrNoRows
-		} else if err != nil {
-			return err
-		}
-		// Repeating the stop action is idempotent when the bank is already disabled.
-		if status == "disabled" {
-			return nil
-		}
 		return sql.ErrNoRows
 	}
 	return nil
@@ -415,10 +408,9 @@ func (s *Store) HasLibraryAccess(ctx context.Context, bankID, studentHash string
 }
 
 var (
-	ErrLibraryCDKNotFound    = errors.New("library cdk not found")
-	ErrLibraryCDKRevoked     = errors.New("library cdk revoked")
-	ErrLibraryCDKBound       = errors.New("library cdk bound to another student")
-	ErrLibraryCDKUnavailable = errors.New("library cdk already used or revoked")
+	ErrLibraryCDKNotFound = errors.New("library cdk not found")
+	ErrLibraryCDKDisabled = errors.New("library cdk disabled")
+	ErrLibraryCDKBound    = errors.New("library cdk bound to another student")
 )
 
 func (s *Store) CreateLibraryCDK(ctx context.Context, cdk LibraryCDK) error {
@@ -438,10 +430,10 @@ func (s *Store) CreateLibraryCDKs(ctx context.Context, cdks []LibraryCDK) error 
 	defer func() { _ = tx.Rollback() }()
 	for _, cdk := range cdks {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO library_cdks
-			(id, code_hash, question_bank_id, bound_student_id_hash, bound_student_id_ciphertext, bound_user_id, status, created_at, used_at, revoked_at)
-			VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)`,
+			(id, code_hash, question_bank_id, bound_student_id_hash, bound_student_id_ciphertext, bound_user_id, status, created_at, used_at)
+			VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
 			cdk.ID, cdk.CodeHash, cdk.QuestionBankID, cdk.BoundStudentIDHash, cdk.BoundStudentIDCiphertext, cdk.BoundUserID,
-			cdk.Status, millis(cdk.CreatedAt), nullableMillis(cdk.UsedAt), nullableMillis(cdk.RevokedAt)); err != nil {
+			cdk.Status, millis(cdk.CreatedAt), nullableMillis(cdk.UsedAt)); err != nil {
 			return err
 		}
 	}
@@ -531,7 +523,7 @@ func libraryCDKListQuery(limit, offset int, search ...string) (string, []any) {
 	where, args := libraryCDKWhere(search...)
 	query := `SELECT c.id, c.code_hash, c.question_bank_id, b.name,
 		COALESCE(c.bound_student_id_hash, ''), COALESCE(c.bound_student_id_ciphertext, ''), COALESCE(c.bound_user_id, ''), c.status,
-		c.created_at, c.used_at, c.revoked_at
+		c.created_at, c.used_at
 		FROM library_cdks c JOIN question_banks b ON b.id = c.question_bank_id
 		` + where + ` ORDER BY c.created_at DESC, c.id LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
@@ -554,7 +546,7 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 	defer func() { _ = tx.Rollback() }()
 	row := tx.QueryRowContext(ctx, `SELECT c.id, c.code_hash, c.question_bank_id, b.name,
 		COALESCE(c.bound_student_id_hash, ''), COALESCE(c.bound_student_id_ciphertext, ''), COALESCE(c.bound_user_id, ''), c.status,
-		c.created_at, c.used_at, c.revoked_at
+		c.created_at, c.used_at
 		FROM library_cdks c JOIN question_banks b ON b.id = c.question_bank_id WHERE c.code_hash = ?`, codeHash)
 	cdk, err := scanLibraryCDK(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -563,8 +555,8 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 	if err != nil {
 		return LibraryCDK{}, err
 	}
-	if cdk.Status == "revoked" {
-		return LibraryCDK{}, ErrLibraryCDKRevoked
+	if cdk.Status == "disabled" {
+		return LibraryCDK{}, ErrLibraryCDKDisabled
 	}
 	if cdk.BoundStudentIDHash != "" {
 		if cdk.BoundStudentIDHash != studentHash {
@@ -596,8 +588,13 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 	return cdk, nil
 }
 
-func (s *Store) RevokeLibraryCDK(ctx context.Context, id string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, "UPDATE library_cdks SET status = 'revoked', revoked_at = ? WHERE id = ? AND status = 'active'", millis(now), id)
+func (s *Store) SetLibraryCDKStatus(ctx context.Context, id, status string) error {
+	if status != "active" && status != "disabled" {
+		return errors.New("invalid library cdk status")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE library_cdks
+		SET status = CASE WHEN ? = 'disabled' THEN 'disabled' WHEN bound_student_id_hash IS NULL THEN 'active' ELSE 'used' END
+		WHERE id = ?`, status, id)
 	if err != nil {
 		return err
 	}
@@ -606,15 +603,7 @@ func (s *Store) RevokeLibraryCDK(ctx context.Context, id string, now time.Time) 
 		return err
 	}
 	if count != 1 {
-		var exists int
-		err := s.DB.QueryRowContext(ctx, "SELECT 1 FROM library_cdks WHERE id = ?", id).Scan(&exists)
-		if errors.Is(err, sql.ErrNoRows) {
-			return sql.ErrNoRows
-		}
-		if err != nil {
-			return err
-		}
-		return ErrLibraryCDKUnavailable
+		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -624,15 +613,14 @@ type scanner interface{ Scan(dest ...any) error }
 func scanLibraryCDK(row scanner) (LibraryCDK, error) {
 	var item LibraryCDK
 	var created int64
-	var used, revoked sql.NullInt64
+	var used sql.NullInt64
 	if err := row.Scan(&item.ID, &item.CodeHash, &item.QuestionBankID, &item.QuestionBankName,
 		&item.BoundStudentIDHash, &item.BoundStudentIDCiphertext, &item.BoundUserID, &item.Status,
-		&created, &used, &revoked); err != nil {
+		&created, &used); err != nil {
 		return LibraryCDK{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UsedAt = nullableTime(used)
-	item.RevokedAt = nullableTime(revoked)
 	return item, nil
 }
 

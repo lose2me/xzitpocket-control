@@ -131,9 +131,6 @@ func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPri
 	if err != nil {
 		return SessionPrincipal{}, err
 	}
-	if user.Status != "active" {
-		return SessionPrincipal{}, Err("user_unavailable", "用户不可用", http.StatusForbidden)
-	}
 	device, err := a.Store.GetDeviceByID(ctx, session.DeviceID)
 	if err != nil {
 		return SessionPrincipal{}, err

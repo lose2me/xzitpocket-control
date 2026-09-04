@@ -99,7 +99,6 @@ type LibraryCDKView struct {
 	BoundUserID      string  `json:"bound_user_id,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 	UsedAt           *string `json:"used_at,omitempty"`
-	RevokedAt        *string `json:"revoked_at,omitempty"`
 }
 
 type CreatedLibraryCDKView struct {
@@ -359,16 +358,17 @@ func (a *App) UpdateQuestionBank(ctx context.Context, id string, in QuestionBank
 	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339)}, nil
 }
 
-// DisableQuestionBank keeps the bank visible to administrators with an
-// explicit disabled status.
-func (a *App) DisableQuestionBank(ctx context.Context, id, actor string) error {
-	now := time.Now().UTC()
-	if err := a.Store.DisableQuestionBank(ctx, strings.TrimSpace(id), now); err != nil {
+func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor string) error {
+	id = strings.TrimSpace(id)
+	status = strings.TrimSpace(status)
+	if status != "active" && status != "draft" && status != "disabled" {
+		return Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
+	}
+	if err := a.Store.SetQuestionBankStatus(ctx, id, status, time.Now().UTC()); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	_ = a.Store.AddAudit(ctx, actor, "question_bank_disable", "question_bank", id, "{}", now)
-	return nil
+	return a.Store.AddAudit(ctx, actor, "question_bank_status", "question_bank", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
 }

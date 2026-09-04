@@ -59,6 +59,19 @@ func TestQuestionBankAutoIDAndLibraryCDKRedemption(t *testing.T) {
 	if err != nil || allowed {
 		t.Fatalf("unbound student access = %v, %v", allowed, err)
 	}
+	if err := store.SetLibraryCDKStatus(ctx, cdk.ID, "disabled"); err != nil {
+		t.Fatalf("disable used CDK: %v", err)
+	}
+	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "student-a", "cipher-a", "user-a", now.Add(5*time.Minute)); err != ErrLibraryCDKDisabled {
+		t.Fatalf("disabled CDK redemption error = %v, want %v", err, ErrLibraryCDKDisabled)
+	}
+	if err := store.SetLibraryCDKStatus(ctx, cdk.ID, "active"); err != nil {
+		t.Fatalf("enable used CDK: %v", err)
+	}
+	allowed, err = store.HasLibraryAccess(ctx, first.ID, "student-a")
+	if err != nil || !allowed {
+		t.Fatalf("re-enabled used CDK access = %v, %v", allowed, err)
+	}
 }
 
 func TestLibraryCDKConcurrentRedemptionBindsOnce(t *testing.T) {

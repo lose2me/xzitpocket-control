@@ -49,7 +49,7 @@ func TestMetricsHandleAnonymousEventsAndCalendarWindows(t *testing.T) {
 	}
 	_, _, err = store.InsertEvents(context.Background(), []EventInput{
 		{EventID: "calendar-window", UserID: user.ID, DeviceID: device.ID, Type: "app_start", OccurredAt: dayStart.AddDate(0, 0, -6).Add(time.Hour), ReceivedAt: now, Properties: `{"platform":"android"}`},
-		{EventID: "anonymous", DeviceID: device.ID, Type: "app_start", OccurredAt: now.Add(-time.Hour), ReceivedAt: now, Properties: `{"platform":"android"}`},
+		{EventID: "anonymous", DeviceID: device.ID, Type: "app_start", OccurredAt: now.Add(-time.Hour), ReceivedAt: now, Properties: `{"platform":"android","app_version":"1.0.0"}`},
 		{EventID: "library", UserID: user.ID, DeviceID: device.ID, Type: "library_open", OccurredAt: now.Add(-time.Hour), ReceivedAt: now, Properties: `{"library":"main"}`},
 	})
 	if err != nil {
@@ -73,6 +73,9 @@ func TestMetricsHandleAnonymousEventsAndCalendarWindows(t *testing.T) {
 	}
 	if breakdown.LibraryEntries != 1 || breakdown.LibraryUsers != 1 {
 		t.Fatalf("library metrics = (%d, %d), want (1, 1)", breakdown.LibraryEntries, breakdown.LibraryUsers)
+	}
+	if breakdown.Platforms["android"] != 1 || breakdown.Versions["1.0.0"] != 1 {
+		t.Fatalf("device distributions = platforms %#v, versions %#v; want one device", breakdown.Platforms, breakdown.Versions)
 	}
 }
 
