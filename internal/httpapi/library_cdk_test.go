@@ -71,17 +71,17 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/question-banks/"+bankID, http.MethodGet, nil, userHeaders); status != http.StatusForbidden {
 		t.Fatalf("locked question bank status = %d, want %d", status, http.StatusForbidden)
 	}
-	cdk := requestWithHeaders(t, ts.URL+"/api/v1/admin/library-cdks", http.MethodPost, map[string]any{"question_bank_id": bankID, "count": 3}, adminHeaders)
+	cdk := requestWithHeaders(t, ts.URL+"/api/v1/admin/library-cdks", http.MethodPost, map[string]any{"count": 3}, adminHeaders)
 	createdItems, batchOK := cdk["items"].([]any)
 	if !batchOK || len(createdItems) != 3 {
 		t.Fatalf("invalid batch CDK create response: %#v", cdk)
 	}
 	code := createdItems[0].(map[string]any)["code"].(string)
-	if len(code) != len("CDK-")+16 || !strings.HasPrefix(code, "CDK-") || createdItems[0].(map[string]any)["question_bank_id"] != bankID {
+	if len(code) != len("CDK-")+16 || !strings.HasPrefix(code, "CDK-") {
 		t.Fatalf("invalid CDK create response: %#v", cdk)
 	}
-	redeemed := requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": code}, userHeaders)
-	if redeemed["redeemed"] != true || redeemed["question_bank_id"] != bankID {
+	redeemed := requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": code, "question_bank_id": bankID}, userHeaders)
+	if redeemed["redeemed"] != true {
 		t.Fatalf("invalid redemption response: %#v", redeemed)
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/library-cdks/"+createdItems[0].(map[string]any)["id"].(string), http.MethodPatch, map[string]any{"status": "disabled"}, adminHeaders); status != http.StatusOK {
@@ -91,7 +91,7 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 		t.Fatalf("disabled CDK enable status = %d, want %d", status, http.StatusOK)
 	}
 	requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+bankID, http.MethodGet, nil, userHeaders)
-	requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": strings.ToLower(code)}, userHeaders)
+	requestWithHeaders(t, ts.URL+"/api/v1/library/cdks/redeem", http.MethodPost, map[string]string{"code": strings.ToLower(code), "question_bank_id": bankID}, userHeaders)
 	listed := requestWithHeaders(t, ts.URL+"/api/v1/admin/library-cdks", http.MethodGet, nil, adminHeaders)
 	items := listed["items"].([]any)
 	if len(items) != 3 {
@@ -106,10 +106,6 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	}
 	if !bound {
 		t.Fatalf("CDK binding was not visible to administrator: %#v", listed)
-	}
-	search := requestWithHeaders(t, ts.URL+"/api/v1/admin/library-cdks?q="+bankID, http.MethodGet, nil, adminHeaders)
-	if search["total"].(float64) != 3 {
-		t.Fatalf("CDK search total = %#v", search)
 	}
 	codeSearch := requestWithHeaders(t, ts.URL+"/api/v1/admin/library-cdks?q="+code, http.MethodGet, nil, adminHeaders)
 	if codeSearch["total"].(float64) != 1 {

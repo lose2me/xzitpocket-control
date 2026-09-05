@@ -97,10 +97,10 @@ func TestMetricsBreakdownCountsCDKActivations(t *testing.T) {
 	weekUsed := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 	oldUsed := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	if err := store.CreateLibraryCDKs(ctx, []LibraryCDK{
-		{ID: "cdk-metrics-today", CodeHash: "metrics-today", QuestionBankID: "QB-CDK-METRICS", Status: "used", CreatedAt: now, UsedAt: &todayUsed},
-		{ID: "cdk-metrics-week", CodeHash: "metrics-week", QuestionBankID: "QB-CDK-METRICS", Status: "used", CreatedAt: now, UsedAt: &weekUsed},
-		{ID: "cdk-metrics-old", CodeHash: "metrics-old", QuestionBankID: "QB-CDK-METRICS", Status: "used", CreatedAt: now, UsedAt: &oldUsed},
-		{ID: "cdk-metrics-active", CodeHash: "metrics-active", QuestionBankID: "QB-CDK-METRICS", Status: "active", CreatedAt: now},
+		{ID: "cdk-metrics-today", CodeHash: "metrics-today", Status: "used", CreatedAt: now, UsedAt: &todayUsed},
+		{ID: "cdk-metrics-week", CodeHash: "metrics-week", Status: "used", CreatedAt: now, UsedAt: &weekUsed},
+		{ID: "cdk-metrics-old", CodeHash: "metrics-old", Status: "used", CreatedAt: now, UsedAt: &oldUsed},
+		{ID: "cdk-metrics-active", CodeHash: "metrics-active", Status: "active", CreatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}

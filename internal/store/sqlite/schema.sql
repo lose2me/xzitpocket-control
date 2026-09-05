@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS question_options (
 CREATE TABLE IF NOT EXISTS library_cdks (
     id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL UNIQUE,
-    question_bank_id TEXT NOT NULL REFERENCES question_banks(id) ON DELETE RESTRICT,
+    question_bank_id TEXT REFERENCES question_banks(id) ON DELETE RESTRICT,
     bound_student_id_hash TEXT,
     bound_student_id_ciphertext TEXT,
     bound_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,

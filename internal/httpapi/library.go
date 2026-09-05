@@ -88,13 +88,14 @@ func (s *Server) redeemLibraryCDK(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Code string `json:"code"`
+		Code           string `json:"code"`
+		QuestionBankID string `json:"question_bank_id"`
 	}
 	if err := decodeJSON(r, &in, 16<<10); err != nil {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	out, err := s.App.RedeemLibraryCDK(r.Context(), p, in.Code)
+	out, err := s.App.RedeemLibraryCDK(r.Context(), p, in.Code, in.QuestionBankID)
 	if err != nil {
 		writeError(w, r, err)
 		return

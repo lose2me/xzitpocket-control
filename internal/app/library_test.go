@@ -72,6 +72,10 @@ func TestLibraryCDKUnlocksQuestionBankForStudent(t *testing.T) {
 	if _, err := a.GetQuestionBankForUser(ctx, created.QuestionBank.ID, "missing-user"); err == nil {
 		t.Fatal("protected bank should remain locked without a student identity")
 	}
+	second, err := a.CreateQuestionBank(ctx, QuestionBankInput{New: false, RequiresCDK: true, Name: "另一受限题库", Questions: []QuestionInput{{QuestionNumber: 1, Type: "填空题", Title: "题", QuestionText: "题干", CorrectAnswer: "答案"}}}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	student := "2023000001"
 	studentHash := controlcrypto.HMACHex(a.Cfg.IDPepper, student)
@@ -82,14 +86,20 @@ func TestLibraryCDKUnlocksQuestionBankForStudent(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := SessionPrincipal{User: user}
-	cdk, err := a.CreateLibraryCDK(ctx, LibraryCDKCreateInput{QuestionBankID: created.QuestionBank.ID}, "admin")
+	cdk, err := a.CreateLibraryCDK(ctx, LibraryCDKCreateInput{}, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.RedeemLibraryCDK(ctx, p, cdk.Code); err != nil {
+	if _, err := a.RedeemLibraryCDK(ctx, p, cdk.Code, created.QuestionBank.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.GetQuestionBankForUser(ctx, created.QuestionBank.ID, user.ID); err != nil {
 		t.Fatalf("unlocked bank should be readable: %v", err)
+	}
+	if _, err := a.GetQuestionBankForUser(ctx, second.QuestionBank.ID, user.ID); err == nil {
+		t.Fatal("one CDK should unlock only the selected question bank")
+	}
+	if _, err := a.RedeemLibraryCDK(ctx, p, cdk.Code, second.QuestionBank.ID); err == nil {
+		t.Fatal("a bound CDK should not be reusable for another question bank")
 	}
 }

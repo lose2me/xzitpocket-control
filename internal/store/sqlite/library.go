@@ -392,16 +392,10 @@ func boolInt(value bool) int {
 }
 
 func (s *Store) HasLibraryAccess(ctx context.Context, bankID, studentHash string) (bool, error) {
-	var requires, count int
-	if err := s.DB.QueryRowContext(ctx, "SELECT requires_cdk FROM question_banks WHERE id = ?", bankID).Scan(&requires); err != nil {
-		return false, err
-	}
-	if requires == 0 {
-		return true, nil
-	}
 	if studentHash == "" {
 		return false, nil
 	}
+	var count int
 	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM library_cdks
 		WHERE question_bank_id = ? AND bound_student_id_hash = ? AND status = 'used'`, bankID, studentHash).Scan(&count)
 	return count > 0, err
@@ -431,7 +425,7 @@ func (s *Store) CreateLibraryCDKs(ctx context.Context, cdks []LibraryCDK) error 
 	for _, cdk := range cdks {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO library_cdks
 			(id, code_hash, question_bank_id, bound_student_id_hash, bound_student_id_ciphertext, bound_user_id, status, created_at, used_at)
-			VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
+			VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
 			cdk.ID, cdk.CodeHash, cdk.QuestionBankID, cdk.BoundStudentIDHash, cdk.BoundStudentIDCiphertext, cdk.BoundUserID,
 			cdk.Status, millis(cdk.CreatedAt), nullableMillis(cdk.UsedAt)); err != nil {
 			return err
@@ -521,10 +515,10 @@ func libraryCDKWhere(search ...string) (string, []any) {
 
 func libraryCDKListQuery(limit, offset int, search ...string) (string, []any) {
 	where, args := libraryCDKWhere(search...)
-	query := `SELECT c.id, c.code_hash, c.question_bank_id, b.name,
+	query := `SELECT c.id, c.code_hash, COALESCE(c.question_bank_id, ''),
 		COALESCE(c.bound_student_id_hash, ''), COALESCE(c.bound_student_id_ciphertext, ''), COALESCE(c.bound_user_id, ''), c.status,
 		c.created_at, c.used_at
-		FROM library_cdks c JOIN question_banks b ON b.id = c.question_bank_id
+		FROM library_cdks c LEFT JOIN question_banks b ON b.id = c.question_bank_id
 		` + where + ` ORDER BY c.created_at DESC, c.id LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	return query, args
@@ -532,22 +526,22 @@ func libraryCDKListQuery(limit, offset int, search ...string) (string, []any) {
 
 func libraryCDKCountQuery(search ...string) (string, []any) {
 	where, args := libraryCDKWhere(search...)
-	return "SELECT COUNT(*) FROM library_cdks c JOIN question_banks b ON b.id = c.question_bank_id" + where, args
+	return "SELECT COUNT(*) FROM library_cdks c LEFT JOIN question_banks b ON b.id = c.question_bank_id" + where, args
 }
 
 // RedeemLibraryCDK atomically binds an unused code to one student. Repeating
 // the same code for the same student is idempotent; another student gets a
 // conflict and the code remains bound to its original student.
-func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, studentCiphertext, userID string, now time.Time) (LibraryCDK, error) {
+func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, bankID, studentHash, studentCiphertext, userID string, now time.Time) (LibraryCDK, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return LibraryCDK{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	row := tx.QueryRowContext(ctx, `SELECT c.id, c.code_hash, c.question_bank_id, b.name,
+	row := tx.QueryRowContext(ctx, `SELECT c.id, c.code_hash, COALESCE(c.question_bank_id, ''),
 		COALESCE(c.bound_student_id_hash, ''), COALESCE(c.bound_student_id_ciphertext, ''), COALESCE(c.bound_user_id, ''), c.status,
 		c.created_at, c.used_at
-		FROM library_cdks c JOIN question_banks b ON b.id = c.question_bank_id WHERE c.code_hash = ?`, codeHash)
+		FROM library_cdks c WHERE c.code_hash = ?`, codeHash)
 	cdk, err := scanLibraryCDK(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LibraryCDK{}, ErrLibraryCDKNotFound
@@ -558,6 +552,9 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 	if cdk.Status == "disabled" {
 		return LibraryCDK{}, ErrLibraryCDKDisabled
 	}
+	if cdk.QuestionBankID != "" && cdk.QuestionBankID != bankID {
+		return LibraryCDK{}, ErrLibraryCDKBound
+	}
 	if cdk.BoundStudentIDHash != "" {
 		if cdk.BoundStudentIDHash != studentHash {
 			return LibraryCDK{}, ErrLibraryCDKBound
@@ -565,10 +562,13 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 		if err := tx.Commit(); err != nil {
 			return LibraryCDK{}, err
 		}
+		if cdk.QuestionBankID != bankID {
+			return LibraryCDK{}, ErrLibraryCDKBound
+		}
 		return cdk, nil
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE library_cdks SET bound_student_id_hash = ?, bound_student_id_ciphertext = ?, bound_user_id = ?, status = 'used', used_at = ?
-		WHERE id = ? AND status = 'active' AND bound_student_id_hash IS NULL`, studentHash, studentCiphertext, nullableString(userID), millis(now), cdk.ID)
+	result, err := tx.ExecContext(ctx, `UPDATE library_cdks SET question_bank_id = ?, bound_student_id_hash = ?, bound_student_id_ciphertext = ?, bound_user_id = ?, status = 'used', used_at = ?
+		WHERE id = ? AND status = 'active' AND bound_student_id_hash IS NULL`, bankID, studentHash, studentCiphertext, nullableString(userID), millis(now), cdk.ID)
 	if err != nil {
 		return LibraryCDK{}, err
 	}
@@ -579,7 +579,7 @@ func (s *Store) RedeemLibraryCDK(ctx context.Context, codeHash, studentHash, stu
 	if affected != 1 {
 		return LibraryCDK{}, ErrLibraryCDKBound
 	}
-	cdk.BoundStudentIDHash, cdk.BoundStudentIDCiphertext, cdk.BoundUserID, cdk.Status = studentHash, studentCiphertext, userID, "used"
+	cdk.QuestionBankID, cdk.BoundStudentIDHash, cdk.BoundStudentIDCiphertext, cdk.BoundUserID, cdk.Status = bankID, studentHash, studentCiphertext, userID, "used"
 	used := now
 	cdk.UsedAt = &used
 	if err := tx.Commit(); err != nil {
@@ -614,7 +614,7 @@ func scanLibraryCDK(row scanner) (LibraryCDK, error) {
 	var item LibraryCDK
 	var created int64
 	var used sql.NullInt64
-	if err := row.Scan(&item.ID, &item.CodeHash, &item.QuestionBankID, &item.QuestionBankName,
+	if err := row.Scan(&item.ID, &item.CodeHash, &item.QuestionBankID,
 		&item.BoundStudentIDHash, &item.BoundStudentIDCiphertext, &item.BoundUserID, &item.Status,
 		&created, &used); err != nil {
 		return LibraryCDK{}, err

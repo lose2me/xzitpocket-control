@@ -91,14 +91,13 @@ type AdminQuestionBankView struct {
 }
 
 type LibraryCDKView struct {
-	ID               string  `json:"id"`
-	QuestionBankID   string  `json:"question_bank_id"`
-	QuestionBankName string  `json:"question_bank_name"`
-	Status           string  `json:"status"`
-	BoundStudentID   string  `json:"bound_student_id,omitempty"`
-	BoundUserID      string  `json:"bound_user_id,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UsedAt           *string `json:"used_at,omitempty"`
+	ID             string  `json:"id"`
+	QuestionBankID string  `json:"question_bank_id,omitempty"`
+	Status         string  `json:"status"`
+	BoundStudentID string  `json:"bound_student_id,omitempty"`
+	BoundUserID    string  `json:"bound_user_id,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+	UsedAt         *string `json:"used_at,omitempty"`
 }
 
 type CreatedLibraryCDKView struct {

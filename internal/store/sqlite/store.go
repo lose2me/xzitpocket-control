@@ -162,12 +162,11 @@ type QuestionBankSummary struct {
 	UpdatedAt     time.Time
 }
 
-// LibraryCDK is an unlock code for one question bank. The plaintext code is
-// deliberately never stored and is only returned by the create call.
+// LibraryCDK is an unassigned code that binds to one question bank on redemption.
+// The plaintext code is deliberately never stored and is only returned by the create call.
 type LibraryCDK struct {
 	ID                       string
 	QuestionBankID           string
-	QuestionBankName         string
 	CodeHash                 string
 	BoundStudentIDHash       string
 	BoundStudentIDCiphertext string

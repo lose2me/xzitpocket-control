@@ -17,11 +17,8 @@ import (
 
 const libraryCDKCodePrefix = "CDK-"
 
-// LibraryCDKCreateInput identifies the one question bank unlocked by a new
-// code. A code is intentionally single-purpose and cannot be retargeted.
 type LibraryCDKCreateInput struct {
-	QuestionBankID string `json:"question_bank_id"`
-	Count          int    `json:"count,omitempty"`
+	Count int `json:"count,omitempty"`
 }
 
 type LibraryCDKRedemption struct {
@@ -39,8 +36,7 @@ func canonicalLibraryCDKCode(value string) string {
 		return r
 	}, value)
 	if strings.HasPrefix(value, "CDK") {
-		payload := strings.ReplaceAll(value[3:], "-", "")
-		return libraryCDKCodePrefix + payload
+		return libraryCDKCodePrefix + strings.ReplaceAll(value[3:], "-", "")
 	}
 	return value
 }
@@ -62,8 +58,7 @@ func newLibraryCDKCode() (string, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
 	}
-	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])
-	return libraryCDKCodePrefix + encoded, nil
+	return libraryCDKCodePrefix + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:]), nil
 }
 
 func (a *App) CreateLibraryCDK(ctx context.Context, in LibraryCDKCreateInput, actor string) (CreatedLibraryCDKView, error) {
@@ -74,23 +69,7 @@ func (a *App) CreateLibraryCDK(ctx context.Context, in LibraryCDKCreateInput, ac
 	return items[0], nil
 }
 
-// CreateLibraryCDKs generates one or more independent short codes for the
-// selected question bank. Plaintext codes are returned only from this response.
 func (a *App) CreateLibraryCDKs(ctx context.Context, in LibraryCDKCreateInput, actor string) ([]CreatedLibraryCDKView, error) {
-	bankID := strings.TrimSpace(in.QuestionBankID)
-	if !questionBankIDPattern.MatchString(bankID) {
-		return nil, Err("invalid_question_bank_id", "题库 ID 无效", http.StatusBadRequest)
-	}
-	bank, err := a.Store.GetQuestionBank(ctx, bankID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if bank.Status != "active" {
-		return nil, Err("question_bank_unavailable", "题库未启用，不能生成 CDK", http.StatusConflict)
-	}
 	count := in.Count
 	if count <= 0 {
 		count = 1
@@ -103,37 +82,35 @@ func (a *App) CreateLibraryCDKs(ctx context.Context, in LibraryCDKCreateInput, a
 		cdks := make([]sqlite.LibraryCDK, 0, count)
 		codes := make([]string, 0, count)
 		for i := 0; i < count; i++ {
-			code, codeErr := newLibraryCDKCode()
-			if codeErr != nil {
-				return nil, codeErr
+			code, err := newLibraryCDKCode()
+			if err != nil {
+				return nil, err
 			}
-			cdkID, idErr := controlcrypto.NewID("cdk")
-			if idErr != nil {
-				return nil, idErr
+			id, err := controlcrypto.NewID("cdk")
+			if err != nil {
+				return nil, err
 			}
-			cdks = append(cdks, sqlite.LibraryCDK{ID: cdkID, CodeHash: controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalLibraryCDKCode(code)), QuestionBankID: bankID, Status: "active", CreatedAt: now})
+			cdks = append(cdks, sqlite.LibraryCDK{ID: id, CodeHash: controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalLibraryCDKCode(code)), Status: "active", CreatedAt: now})
 			codes = append(codes, code)
 		}
-		err = a.Store.CreateLibraryCDKs(ctx, cdks)
-		if err == nil {
-			views := make([]CreatedLibraryCDKView, 0, len(cdks))
-			for i, cdk := range cdks {
-				view := libraryCDKView(cdk, a.Cfg.EncryptionKey)
-				view.QuestionBankName = bank.Name
-				views = append(views, CreatedLibraryCDKView{LibraryCDKView: view, Code: codes[i]})
-				_ = a.Store.AddAudit(ctx, actor, "library_cdk_create", "library_cdk", cdk.ID, controlcrypto.JSON(map[string]any{"question_bank_id": bankID, "batch_count": count}), now)
+		if err := a.Store.CreateLibraryCDKs(ctx, cdks); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				continue
 			}
-			return views, nil
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, err
 		}
+		views := make([]CreatedLibraryCDKView, 0, len(cdks))
+		for i, cdk := range cdks {
+			views = append(views, CreatedLibraryCDKView{LibraryCDKView: libraryCDKView(cdk, a.Cfg.EncryptionKey), Code: codes[i]})
+			_ = a.Store.AddAudit(ctx, actor, "library_cdk_create", "library_cdk", cdk.ID, controlcrypto.JSON(map[string]any{"batch_count": count}), now)
+		}
+		return views, nil
 	}
 	return nil, errors.New("could not generate a unique library cdk")
 }
 
 func libraryCDKView(cdk sqlite.LibraryCDK, encryptionKey []byte) LibraryCDKView {
-	view := LibraryCDKView{ID: cdk.ID, QuestionBankID: cdk.QuestionBankID, QuestionBankName: cdk.QuestionBankName, Status: cdk.Status, BoundUserID: cdk.BoundUserID, CreatedAt: cdk.CreatedAt.Format(time.RFC3339)}
+	view := LibraryCDKView{ID: cdk.ID, QuestionBankID: cdk.QuestionBankID, Status: cdk.Status, BoundUserID: cdk.BoundUserID, CreatedAt: cdk.CreatedAt.Format(time.RFC3339)}
 	if cdk.BoundStudentIDCiphertext != "" {
 		if student, err := controlcrypto.Decrypt(encryptionKey, cdk.BoundStudentIDCiphertext); err == nil {
 			view.BoundStudentID = student
@@ -171,10 +148,24 @@ func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, search ...
 	return result, total, nil
 }
 
-func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code string) (LibraryCDKRedemption, error) {
+func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code, bankID string) (LibraryCDKRedemption, error) {
 	code = canonicalLibraryCDKCode(code)
 	if !validLibraryCDKCode(code) {
 		return LibraryCDKRedemption{}, Err("invalid_library_cdk", "CDK 格式无效", http.StatusBadRequest)
+	}
+	bankID = strings.TrimSpace(bankID)
+	if !questionBankIDPattern.MatchString(bankID) {
+		return LibraryCDKRedemption{}, Err("invalid_question_bank_id", "题库 ID 无效", http.StatusBadRequest)
+	}
+	bank, bankErr := a.Store.GetQuestionBank(ctx, bankID)
+	if errors.Is(bankErr, sql.ErrNoRows) {
+		return LibraryCDKRedemption{}, ErrNotFound
+	}
+	if bankErr != nil {
+		return LibraryCDKRedemption{}, bankErr
+	}
+	if bank.Status != "active" || !bank.RequiresCDK {
+		return LibraryCDKRedemption{}, Err("invalid_library_target", "请选择需要 CDK 的启用题库", http.StatusBadRequest)
 	}
 	identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -183,8 +174,7 @@ func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code str
 	if err != nil {
 		return LibraryCDKRedemption{}, err
 	}
-	studentCiphertext := identity.StudentIDCiphertext
-	cdk, err := a.Store.RedeemLibraryCDK(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, code), identity.StudentIDHash, studentCiphertext, p.User.ID, time.Now().UTC())
+	cdk, err := a.Store.RedeemLibraryCDK(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, code), bankID, identity.StudentIDHash, identity.StudentIDCiphertext, p.User.ID, time.Now().UTC())
 	if errors.Is(err, sqlite.ErrLibraryCDKNotFound) {
 		return LibraryCDKRedemption{}, Err("library_cdk_not_found", "CDK 不存在", http.StatusNotFound)
 	}
@@ -197,7 +187,7 @@ func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code str
 	if err != nil {
 		return LibraryCDKRedemption{}, err
 	}
-	_ = a.Store.AddAudit(ctx, p.User.ID, "library_cdk_redeem", "library_cdk", cdk.ID, controlcrypto.JSON(map[string]string{"question_bank_id": cdk.QuestionBankID}), time.Now().UTC())
+	_ = a.Store.AddAudit(ctx, p.User.ID, "library_cdk_redeem", "library_cdk", cdk.ID, "{}", time.Now().UTC())
 	return LibraryCDKRedemption{Redeemed: true, QuestionBankID: cdk.QuestionBankID, Status: cdk.Status}, nil
 }
 

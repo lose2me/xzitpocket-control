@@ -2,13 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestQuestionBankAutoIDAndLibraryCDKRedemption(t *testing.T) {
+func TestGenericLibraryCDKRedemptionAndAccess(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -19,58 +19,47 @@ func TestQuestionBankAutoIDAndLibraryCDKRedemption(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	first, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "一", Status: "active", RequiresCDK: true, CreatedAt: now, UpdatedAt: now})
-	if err != nil {
+	if err := store.CreateQuestionBank(ctx, QuestionBank{ID: "QB-001", Name: "题库", Status: "active", RequiresCDK: true, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "二", Status: "active", CreatedAt: now, UpdatedAt: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.ID != "QB-001" || second.ID != "QB-002" {
-		t.Fatalf("unexpected generated IDs: %q, %q", first.ID, second.ID)
-	}
-	if err := store.CreateUser(ctx, User{ID: "user-a", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	cdk := LibraryCDK{ID: "cdk-1", CodeHash: "hash-1", QuestionBankID: first.ID, Status: "active", CreatedAt: now}
+	cdk := LibraryCDK{ID: "cdk-1", CodeHash: "hash-1", Status: "active", CreatedAt: now}
 	if err := store.CreateLibraryCDK(ctx, cdk); err != nil {
 		t.Fatal(err)
 	}
-	used, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "student-a", "cipher-a", "user-a", now.Add(time.Minute))
+	used, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "QB-001", "student-a", "cipher-a", "", now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if used.Status != "used" || used.BoundStudentIDHash != "student-a" {
-		t.Fatalf("unexpected redeemed CDK: %#v", used)
+		t.Fatalf("unexpected redemption: %#v", used)
 	}
-	// A retry from the same student is intentionally idempotent.
-	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "student-a", "cipher-a", "user-a", now.Add(2*time.Minute)); err != nil {
-		t.Fatalf("same-student redemption should be idempotent: %v", err)
-	}
-	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "student-b", "cipher-b", "user-b", now.Add(3*time.Minute)); err != ErrLibraryCDKBound {
-		t.Fatalf("different-student redemption error = %v, want %v", err, ErrLibraryCDKBound)
-	}
-	allowed, err := store.HasLibraryAccess(ctx, first.ID, "student-a")
+	allowed, err := store.HasLibraryAccess(ctx, "QB-001", "student-a")
 	if err != nil || !allowed {
-		t.Fatalf("bound student access = %v, %v", allowed, err)
+		t.Fatalf("generic access = %v, %v", allowed, err)
 	}
-	allowed, err = store.HasLibraryAccess(ctx, first.ID, "student-b")
+	allowed, err = store.HasLibraryAccess(ctx, "QB-001", "student-b")
 	if err != nil || allowed {
-		t.Fatalf("unbound student access = %v, %v", allowed, err)
+		t.Fatalf("unbound access = %v, %v", allowed, err)
+	}
+	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "QB-001", "student-b", "cipher-b", "", now.Add(2*time.Minute)); !errors.Is(err, ErrLibraryCDKBound) {
+		t.Fatalf("different-student error = %v", err)
 	}
 	if err := store.SetLibraryCDKStatus(ctx, cdk.ID, "disabled"); err != nil {
-		t.Fatalf("disable used CDK: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "student-a", "cipher-a", "user-a", now.Add(5*time.Minute)); err != ErrLibraryCDKDisabled {
-		t.Fatalf("disabled CDK redemption error = %v, want %v", err, ErrLibraryCDKDisabled)
+	if _, err := store.RedeemLibraryCDK(ctx, cdk.CodeHash, "QB-001", "student-a", "cipher-a", "user-a", now.Add(3*time.Minute)); !errors.Is(err, ErrLibraryCDKDisabled) {
+		t.Fatalf("disabled redemption error = %v", err)
+	}
+	allowed, err = store.HasLibraryAccess(ctx, "QB-001", "student-a")
+	if err != nil || allowed {
+		t.Fatalf("disabled bound CDK should be unavailable: %v, %v", allowed, err)
 	}
 	if err := store.SetLibraryCDKStatus(ctx, cdk.ID, "active"); err != nil {
-		t.Fatalf("enable used CDK: %v", err)
+		t.Fatal(err)
 	}
-	allowed, err = store.HasLibraryAccess(ctx, first.ID, "student-a")
+	allowed, err = store.HasLibraryAccess(ctx, "QB-001", "student-a")
 	if err != nil || !allowed {
-		t.Fatalf("re-enabled used CDK access = %v, %v", allowed, err)
+		t.Fatalf("re-enabled bound CDK should restore access: %v, %v", allowed, err)
 	}
 }
 
@@ -85,37 +74,32 @@ func TestLibraryCDKConcurrentRedemptionBindsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := store.CreateQuestionBank(ctx, QuestionBank{ID: "QB-001", Name: "并发", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.CreateQuestionBank(ctx, QuestionBank{ID: "QB-001", Name: "题库", Status: "active", RequiresCDK: true, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateLibraryCDK(ctx, LibraryCDK{ID: "cdk-concurrent", CodeHash: "hash-concurrent", QuestionBankID: "QB-001", Status: "active", CreatedAt: now}); err != nil {
+	if err := store.CreateLibraryCDK(ctx, LibraryCDK{ID: "cdk-concurrent", CodeHash: "hash-concurrent", Status: "active", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	results := make(chan error, 2)
-	var group sync.WaitGroup
 	for _, student := range []string{"student-a", "student-b"} {
-		student := student
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			_, redeemErr := store.RedeemLibraryCDK(ctx, "hash-concurrent", student, "", "", now)
-			results <- redeemErr
-		}()
+		go func(student string) {
+			_, err := store.RedeemLibraryCDK(ctx, "hash-concurrent", "QB-001", student, "", "", now)
+			results <- err
+		}(student)
 	}
-	group.Wait()
-	close(results)
-	successes, conflicts := 0, 0
-	for redeemErr := range results {
-		if redeemErr == nil {
-			successes++
-		} else if redeemErr == ErrLibraryCDKBound {
-			conflicts++
-		} else {
-			t.Fatalf("unexpected concurrent redemption error: %v", redeemErr)
+	var success, bound int
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrLibraryCDKBound):
+			bound++
+		default:
+			t.Fatalf("unexpected redemption error: %v", err)
 		}
 	}
-	if successes != 1 || conflicts != 1 {
-		t.Fatalf("concurrent redemption results = successes %d, conflicts %d", successes, conflicts)
+	if success != 1 || bound != 1 {
+		t.Fatalf("success=%d bound=%d", success, bound)
 	}
 }
 
@@ -130,17 +114,14 @@ func TestLibraryCDKSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := store.CreateQuestionBank(ctx, QuestionBank{ID: "QB-SEARCH", Name: "搜索题库", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.CreateLibraryCDKs(ctx, []LibraryCDK{{ID: "cdk-search-1", CodeHash: "search-hash-1", Status: "active", CreatedAt: now}, {ID: "cdk-search-2", CodeHash: "search-hash-2", Status: "used", CreatedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateLibraryCDKs(ctx, []LibraryCDK{{ID: "cdk-search-1", CodeHash: "search-hash-1", QuestionBankID: "QB-SEARCH", Status: "active", CreatedAt: now}, {ID: "cdk-search-2", CodeHash: "search-hash-2", QuestionBankID: "QB-SEARCH", Status: "used", CreatedAt: now}}); err != nil {
-		t.Fatal(err)
-	}
-	items, total, err := store.ListLibraryCDKs(ctx, 50, 0, "QB-SEARCH")
+	items, total, err := store.ListLibraryCDKs(ctx, 50, 0, "cdk-search-1")
 	if err != nil {
-		t.Fatalf("search query failed: %v", err)
+		t.Fatal(err)
 	}
-	if total != 2 || len(items) != 2 {
-		t.Fatalf("search result = %d/%d, want 2/2", total, len(items))
+	if total != 1 || len(items) != 1 || items[0].ID != "cdk-search-1" {
+		t.Fatalf("unexpected CDK search: %d %#v", total, items)
 	}
 }

@@ -134,8 +134,7 @@
       const cdkItemsPerPage = ref(25);
       const cdkDialog = ref(false);
       const cdkRevealDialog = ref(false);
-      const cdkForm = ref({ question_bank_id: '', count: 1 });
-      const cdkBankOptions = ref([]);
+      const cdkForm = ref({ count: 1 });
       const createdCDKs = ref([]);
       const cdkSearch = ref('');
       const releaseConfig = ref({ latestVersion: '', downloadUrl: '', updatedAt: '' });
@@ -227,9 +226,10 @@
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '14%' }
       ];
       const cdkHeaders = [
-        { title: 'CDK ID', key: 'id', sortable: false, width: '18%' }, { title: '对应题库', key: 'question_bank_name', width: '18%' },
-        { title: '状态', key: 'status', width: '12%' }, { title: '绑定学号', key: 'bound_student_id', sortable: false, width: '14%' },
-        { title: '创建时间', key: 'created_at', width: '15%' }, { title: '使用时间', key: 'used_at', width: '15%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+        { title: 'CDK ID', key: 'id', sortable: false, width: '20%' },
+        { title: '题库', key: 'question_bank_id', sortable: false, width: '14%' },
+        { title: '状态', key: 'status', width: '13%' }, { title: '绑定学号', key: 'bound_student_id', sortable: false, width: '16%' },
+        { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
       const riskOptions = [{ title: '全部', value: '' }, { title: '未查看', value: 'false' }, { title: '已查看', value: 'true' }];
       const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
@@ -390,16 +390,13 @@
       });
       const openNewCDK = () => {
         call(async () => {
-          const out = await api('/api/v1/admin/question-banks?status=active&limit=200&offset=0');
-          cdkBankOptions.value = out.items || [];
-          cdkForm.value = { question_bank_id: cdkBankOptions.value[0]?.id || '', count: 1 };
+          cdkForm.value = { count: 1 };
           createdCDKs.value = []; cdkDialog.value = true;
         });
       };
       const createCDK = () => call(async () => {
-        if (!cdkForm.value.question_bank_id) throw new Error('请选择题库');
         const count = Math.max(1, Math.min(500, Number(cdkForm.value.count) || 1));
-        const out = await api('/api/v1/admin/library-cdks', { method: 'POST', body: JSON.stringify({ question_bank_id: cdkForm.value.question_bank_id, count }) });
+        const out = await api('/api/v1/admin/library-cdks', { method: 'POST', body: JSON.stringify({ count }) });
         createdCDKs.value = out.items || [out];
         cdkDialog.value = false; cdkRevealDialog.value = true; notify(count > 1 ? ('已生成 ' + count + ' 个 CDK') : 'CDK 已创建'); await loadCDKs();
       });
@@ -452,7 +449,7 @@
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成文库 CDK', library_cdk_redeem: '兑换文库 CDK', library_cdk_status: '更新文库 CDK 状态', app_release_update: '更新 APP 发布配置', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); };
       watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
@@ -462,7 +459,7 @@
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit,
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankPreviewDialog, bankEditing, bankForm, bankPreview, releaseConfig, releaseForm,
-        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, cdkBankOptions, createdCDKs, cdkSearch,
+        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
         selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
         platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, previewText, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, saveRelease,
@@ -530,9 +527,9 @@
 
         <v-dialog v-model="bankDialog" max-width="1100" scrollable><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-book-edit-outline" color="primary" /><span>{{ bankEditing ? '编辑题库' : '新建题库' }}</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveBank"><v-row dense align="center" class="bank-meta-row"><v-col v-if="bankEditing" cols="12" sm="6" md="2"><v-text-field v-model="bankForm.id" label="题库 ID" readonly variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-text-field v-model.number="bankForm.orderId" label="顺序 ID" type="number" min="1" placeholder="自动分配" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-text-field v-model="bankForm.name" label="题库名称" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.new" :items="bankNewOptions" item-title="title" item-value="value" label="新题库" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.requiresCDK" :items="bankCDKOptions" item-title="title" item-value="value" label="需要 CDK 解锁" variant="outlined" density="comfortable" hide-details /></v-col><v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.status" :items="bankStatusOptions" item-title="title" item-value="value" label="状态" variant="outlined" density="comfortable" hide-details /></v-col></v-row><v-divider class="my-4" /><div class="d-flex align-center mb-3"><div class="text-subtitle-1 font-weight-bold">题目</div><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="addQuestion">添加题目</v-btn></div><v-alert v-if="!bankForm.questions.length" type="info" variant="tonal" density="compact" class="mb-3">请至少添加一道题目</v-alert><v-card v-for="(question, qIndex) in bankForm.questions" :key="qIndex" variant="outlined" class="mb-4 question-editor"><v-card-title class="d-flex align-center ga-2 text-subtitle-1"><v-chip size="small" color="primary" variant="tonal">{{ qIndex + 1 }}</v-chip><span>题目 {{ qIndex + 1 }}</span><v-spacer /><v-btn icon variant="text" color="error" aria-label="删除题目" @click="removeQuestion(qIndex)"><v-icon icon="mdi-delete-outline" /></v-btn></v-card-title><v-card-text><v-row dense><v-col cols="12" sm="2"><v-text-field v-model.number="question.questionNumber" label="题号" type="number" min="1" variant="outlined" density="comfortable" /></v-col><v-col cols="12" sm="3"><v-select v-model="question.type" :items="questionTypeOptions" label="题型" variant="outlined" density="comfortable" /></v-col><v-col cols="12" sm="7"><v-text-field v-model="question.title" label="标题" variant="outlined" density="comfortable" /></v-col><v-col cols="12"><v-textarea v-model="question.questionText" label="题干" rows="2" auto-grow variant="outlined" density="comfortable" /></v-col></v-row><div v-if="question.type !== '填空题'" class="option-editor"><div class="d-flex align-center mb-2"><div class="text-body-2 font-weight-medium">选项</div><v-spacer /><v-btn size="x-small" variant="text" color="primary" prepend-icon="mdi-plus" @click="addOption(question)">添加选项</v-btn></div><v-row v-for="(option, optionIndex) in question.options" :key="optionIndex" dense align="center"><v-col cols="3" sm="2"><v-text-field v-model="option.label" label="标签" variant="outlined" density="compact" hide-details /></v-col><v-col cols="8" sm="9"><v-text-field v-model="option.text" label="选项内容" variant="outlined" density="compact" hide-details /></v-col><v-col cols="1"><v-btn icon size="small" variant="text" color="error" aria-label="删除选项" @click="removeOption(question, optionIndex)"><v-icon icon="mdi-close" /></v-btn></v-col></v-row></div><v-text-field v-model="question.correctAnswer" :label="question.type === '多选题' ? '正确答案（如 A,B）' : '正确答案'" :hint="question.type === '填空题' ? '填空题不需要选项' : '答案使用选项标签'" persistent-hint variant="outlined" density="comfortable" class="mt-3" /></v-card-text></v-card><div class="d-flex flex-wrap justify-end ga-2 mt-4"><v-btn variant="text" @click="bankDialog=false">取消</v-btn><v-btn variant="tonal" color="secondary" prepend-icon="mdi-code-json" @click="previewBankJSON">预览 JSON</v-btn><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存题库</v-btn></div></v-form></v-card-text></v-card></v-dialog>
 
-        <v-dialog v-model="cdkDialog" max-width="520"><v-card><v-card-title class="d-flex align-center ga-2 flex-wrap"><v-icon icon="mdi-key-plus" color="secondary" /><span>生成文库 CDK</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="createCDK"><v-select v-model="cdkForm.question_bank_id" :items="cdkBankOptions" item-title="name" item-value="id" label="对应题库" hint="一个 CDK 只能解锁一个题库，使用后绑定学号" persistent-hint variant="outlined" density="comfortable" class="mb-3" /><v-text-field v-model.number="cdkForm.count" label="生成数量" type="number" min="1" max="500" hint="一次最多生成 500 个，批量结果可复制" persistent-hint variant="outlined" density="comfortable" /><div class="d-flex justify-end ga-2 mt-4"><v-btn variant="text" @click="cdkDialog=false">取消</v-btn><v-btn type="submit" color="primary" prepend-icon="mdi-key-plus" :loading="loading">生成 CDK</v-btn></div></v-form></v-card-text></v-card></v-dialog>
+        <v-dialog v-model="cdkDialog" max-width="520"><v-card><v-card-title class="d-flex align-center ga-2 flex-wrap"><v-icon icon="mdi-key-plus" color="secondary" /><span>生成通用 CDK</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="createCDK"><v-alert type="info" variant="tonal" density="compact" class="mb-3">兑换时选择一个需要 CDK 的文库题库；每个 CDK 只能绑定一个题库。</v-alert><v-text-field v-model.number="cdkForm.count" label="生成数量" type="number" min="1" max="500" hint="一次最多生成 500 个，批量结果可复制" persistent-hint variant="outlined" density="comfortable" /><div class="d-flex justify-end ga-2 mt-4"><v-btn variant="text" @click="cdkDialog=false">取消</v-btn><v-btn type="submit" color="primary" prepend-icon="mdi-key-plus" :loading="loading">生成 CDK</v-btn></div></v-form></v-card-text></v-card></v-dialog>
 
-        <v-dialog v-model="cdkRevealDialog" max-width="720"><v-card v-if="createdCDKs.length"><v-card-title class="d-flex align-center"><v-icon icon="mdi-key-check" color="success" class="mr-2" /><span>CDK 已创建（{{ createdCDKs.length }} 个）</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkRevealDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="warning" variant="tonal" density="compact" class="mb-4">CDK 只显示这一次，请立即复制并妥善保存。</v-alert><v-textarea :model-value="createdCDKs.map(item => item.code).join('\\n')" label="CDK 列表" readonly variant="outlined" rows="8" class="mono cdk-reveal" /><div class="text-body-2 text-medium-emphasis">题库：{{ createdCDKs[0].question_bank_name }}</div></v-card-text><v-card-actions><v-spacer /><v-btn color="primary" prepend-icon="mdi-content-copy" @click="copyCDK">复制全部 CDK</v-btn><v-btn variant="text" @click="cdkRevealDialog=false">完成</v-btn></v-card-actions></v-card></v-dialog>
+        <v-dialog v-model="cdkRevealDialog" max-width="720"><v-card v-if="createdCDKs.length"><v-card-title class="d-flex align-center"><v-icon icon="mdi-key-check" color="success" class="mr-2" /><span>通用 CDK 已创建（{{ createdCDKs.length }} 个）</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkRevealDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="warning" variant="tonal" density="compact" class="mb-4">CDK 只显示这一次，请立即复制并妥善保存。</v-alert><v-textarea :model-value="createdCDKs.map(item => item.code).join('\\n')" label="CDK 列表" readonly variant="outlined" rows="8" class="mono cdk-reveal" /></v-card-text><v-card-actions><v-spacer /><v-btn color="primary" prepend-icon="mdi-content-copy" @click="copyCDK">复制全部 CDK</v-btn><v-btn variant="text" @click="cdkRevealDialog=false">完成</v-btn></v-card-actions></v-card></v-dialog>
 
         <v-dialog v-model="bankPreviewDialog" max-width="900" scrollable><v-card><v-card-title class="d-flex align-center"><span>JSON 预览</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankPreviewDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><pre class="json-preview">{{ previewText }}</pre></v-card-text></v-card></v-dialog>
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
