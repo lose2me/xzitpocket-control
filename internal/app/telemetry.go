@@ -94,6 +94,11 @@ func (a *App) CleanupTelemetry(ctx context.Context) {
 	} else if n > 0 {
 		a.Logger.Info("cleaned telemetry events", "count", n)
 	}
+	if n, err := a.Store.CleanupErrorReports(ctx, before); err != nil {
+		a.Logger.Warn("cleanup error reports failed", "error", err)
+	} else if n > 0 {
+		a.Logger.Info("cleaned error reports", "count", n)
+	}
 	if n, err := a.Store.CleanupChallenges(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
 		a.Logger.Warn("cleanup challenges failed", "error", err)
 	} else if n > 0 {

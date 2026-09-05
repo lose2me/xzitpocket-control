@@ -17,7 +17,7 @@ func TestMigrateCreatesCurrentSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	for _, table := range []string{"question_banks", "questions", "question_options", "question_bank_id_counter", "library_cdks"} {
+	for _, table := range []string{"question_banks", "questions", "question_options", "question_bank_id_counter", "library_cdks", "error_reports"} {
 		if err := store.DB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}

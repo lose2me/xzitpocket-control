@@ -75,6 +75,22 @@ CREATE TABLE IF NOT EXISTS activity_events (
     UNIQUE(device_id, event_id)
 );
 
+CREATE TABLE IF NOT EXISTS error_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    student_id_hash TEXT NOT NULL,
+    app_version TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    error_text TEXT NOT NULL DEFAULT '',
+    stack_trace TEXT NOT NULL DEFAULT '',
+    occurred_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS question_banks (
     id TEXT PRIMARY KEY,
     order_id INTEGER NOT NULL UNIQUE CHECK (order_id > 0),
@@ -188,6 +204,8 @@ VALUES (1, '', '', 0);
 
 CREATE INDEX IF NOT EXISTS idx_events_time_type ON activity_events(occurred_at, type);
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON activity_events(user_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_error_reports_student_time ON error_reports(student_id_hash, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_error_reports_user_time ON error_reports(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_device ON sessions(user_id, device_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_risk_time_type ON risk_events(created_at, type);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at);

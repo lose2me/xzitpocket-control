@@ -114,6 +114,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.myDevices(w, r)
 	case r.Method == http.MethodPost && path == "/telemetry/events":
 		s.telemetry(w, r)
+	case r.Method == http.MethodPost && path == "/error-reports":
+		if !s.allow(r, "error-report", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.errorReport(w, r)
 	case r.Method == http.MethodGet && path == "/app/release":
 		s.appRelease(w, r)
 	case r.Method == http.MethodGet && path == "/question-banks":
@@ -154,6 +160,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminRiskAcknowledge(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/audit":
 		s.adminAudit(w, r)
+	case r.Method == http.MethodGet && path == "/admin/error-reports":
+		s.adminErrorReports(w, r)
 	case r.Method == http.MethodGet && path == "/admin/app/release":
 		s.adminAppRelease(w, r)
 	case r.Method == http.MethodPut && path == "/admin/app/release":

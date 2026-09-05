@@ -29,6 +29,7 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 - `POST /auth/revoke`
 - `GET /me`、`GET /me/devices`
 - `POST /telemetry/events`，请求体为事件数组
+- `POST /error-reports`，仅接受已登录用户的错误日志，并按用户学号归档
 - `GET /question-banks`、`GET /question-banks/{id}`
 - `POST /library/cdks/redeem`，请求体为 `{"code":"CDK-...","question_bank_id":"QB-..."}`
 - `GET /app/release`，返回最新版版本号和下载 URL
@@ -38,6 +39,7 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 
 - `GET /admin/metrics/overview`、`/series`、`/breakdown`
 - `GET /admin/users`、`/admin/users/{id}`、`PATCH /admin/users/{id}/status`
+- `GET /admin/error-reports`
 - `GET /admin/devices`、`GET /admin/risk-events`、`PATCH /admin/risk-events/{id}`
 - `GET/POST /admin/question-banks`、`GET/PUT /admin/question-banks/{id}`、`PATCH /admin/question-banks/{id}/status`
 - `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`（请求体 `{"status":"active"}` 或 `{"status":"disabled"}`）

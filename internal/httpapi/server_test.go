@@ -104,6 +104,19 @@ func TestControlFlow(t *testing.T) {
 		t.Fatalf("unexpected initial app release config: %#v", initialRelease)
 	}
 	adminHeaders := map[string]string{"Authorization": "Bearer " + adminAccess}
+	errorReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
+		"event_id": "error-report-test", "occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"app_version": "2.0.0", "platform": "android", "title": "登录失败",
+		"message": "测试错误", "error": "测试异常", "stack_trace": "测试堆栈",
+	}, map[string]string{"Authorization": "Bearer " + access})
+	if errorReport["accepted"] != true {
+		t.Fatalf("error report was not accepted: %#v", errorReport)
+	}
+	reports := requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports?limit=100", http.MethodGet, nil, adminHeaders)
+	reportItems, _ := reports["items"].([]any)
+	if reports["total"].(float64) != 1 || len(reportItems) != 1 || reportItems[0].(map[string]any)["student_id"] != student {
+		t.Fatalf("error report was not grouped by student: %#v", reports)
+	}
 	updatedRelease := requestWithHeaders(t, ts.URL+"/api/v1/admin/app/release", http.MethodPut,
 		map[string]string{"latestVersion": "2.0.4", "downloadUrl": "https://download.example.test/xzitpocket.apk"}, adminHeaders)
 	if updatedRelease["latestVersion"] != "2.0.4" || updatedRelease["downloadUrl"] != "https://download.example.test/xzitpocket.apk" {

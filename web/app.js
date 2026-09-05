@@ -109,6 +109,11 @@
   });
   const clone = (value) => JSON.parse(JSON.stringify(value));
 
+  const injectErrorReportsPage = (template) => template.replace(
+    `              <section v-else-if="view === 'config'">`,
+    `              <section v-else-if="view === 'error-reports'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-bug-outline" color="error" /><span>错误</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="errorReportHeaders" :items="errorReports" item-value="id" show-expand :items-per-page="errorReportsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无错误"><template #item.occurred_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).occurred_at) }}</span></template><template #item.student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).student_id) }}</span></template><template #item.title="{ item }"><span>{{ valueOrDash(rawItem(item).title) }}</span></template><template #item.message="{ item }"><span class="table-ellipsis" :title="valueOrDash(rawItem(item).message)">{{ valueOrDash(rawItem(item).message) }}</span></template><template #item.app_version="{ item }"><span>{{ valueOrDash(rawItem(item).app_version) }}</span></template><template #item.platform="{ item }"><span>{{ valueOrDash(rawItem(item).platform) }}</span></template><template #expanded-row="{ columns, item }"><tr><td :colspan="columns.length"><div class="pa-4"><div class="text-subtitle-2 font-weight-bold mb-2">{{ valueOrDash(rawItem(item).title) }}</div><pre class="json-preview error-report-detail">{{ [rawItem(item).message, rawItem(item).error, rawItem(item).stack_trace].filter(Boolean).join('\\n\\n') }}</pre><div class="text-caption text-medium-emphasis mt-2">设备：{{ valueOrDash(rawItem(item).device_id) }} · 接收时间：{{ valueOrDash(rawItem(item).received_at) }}</div></div></td></tr></template></v-data-table><div v-if="errorReportsTotal > errorReportsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="errorReportsPage" :length="Math.max(1, Math.ceil(errorReportsTotal / errorReportsPerPage))" density="comfortable" @update:model-value="loadErrorReports" /></div></v-card></section>\n              <section v-else-if="view === 'config'">`,
+  );
+
   createApp({
     setup() {
       const { mdAndUp } = useDisplay();
@@ -124,6 +129,10 @@
       const devices = ref([]);
       const risks = ref([]);
       const audit = ref([]);
+      const errorReports = ref([]);
+      const errorReportsTotal = ref(0);
+      const errorReportsPage = ref(1);
+      const errorReportsPerPage = ref(25);
       const banks = ref([]);
       const bankTotal = ref(0);
       const bankPage = ref(1);
@@ -160,6 +169,7 @@
         { key: 'users', label: '用户', icon: 'mdi-account-group-outline' },
         { key: 'devices', label: '设备', icon: 'mdi-cellphone-link' },
         { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
+        { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
         { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
         { key: 'audit', label: '审计', icon: 'mdi-history' }
@@ -214,6 +224,14 @@
         { title: '时间', key: 'created_at', width: '18%' }, { title: '动作', key: 'action', width: '18%' },
         { title: '操作者', key: 'actor_id', sortable: false, width: '16%' }, { title: '目标', key: 'target', sortable: false, width: '22%' },
         { title: '详情', key: 'detail', sortable: false, width: '26%' }
+      ];
+      const errorReportHeaders = [
+        { title: '时间', key: 'occurred_at', width: '17%' },
+        { title: '学号', key: 'student_id', sortable: false, width: '14%' },
+        { title: '标题', key: 'title', width: '18%' },
+        { title: '错误摘要', key: 'message', sortable: false, width: '28%' },
+        { title: '版本', key: 'app_version', width: '10%' },
+        { title: '平台', key: 'platform', width: '10%' },
       ];
       const userDeviceHeaders = [
         { title: '设备码', key: 'device_serial', sortable: false }, { title: '平台', key: 'platform' },
@@ -293,6 +311,12 @@
         releaseConfig.value = out || {};
         releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '' };
       };
+      const loadErrorReports = async () => {
+        const offset = (errorReportsPage.value - 1) * errorReportsPerPage.value;
+        const out = await api('/api/v1/admin/error-reports?limit=' + errorReportsPerPage.value + '&offset=' + offset);
+        errorReports.value = out.items || [];
+        errorReportsTotal.value = out.total || 0;
+      };
       const searchCDKs = () => call(async () => { cdkPage.value = 1; await loadCDKs(); });
       const loadLibrary = async () => { await Promise.all([loadBanks(), loadCDKs()]); };
       const load = async () => {
@@ -302,6 +326,7 @@
           else if (view.value === 'users') users.value = (await api('/api/v1/admin/users?limit=100')).items || [];
           else if (view.value === 'devices') devices.value = (await api('/api/v1/admin/devices?limit=100')).items || [];
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100' + (riskFilter.value ? '&acknowledged=' + riskFilter.value : ''))).items || [];
+          else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
           else if (view.value === 'config') await loadRelease();
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
@@ -457,17 +482,17 @@
       onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); if (chart) chart.dispose(); });
 
       return {
-        logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit,
+        logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankPreviewDialog, bankEditing, bankForm, bankPreview, releaseConfig, releaseForm,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
         selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
-        platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, previewText, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, saveRelease,
+        platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, previewText, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadErrorReports, saveRelease,
         showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, editBank, addQuestion, removeQuestion, addOption,
         removeOption, saveBank, previewBankJSON, deleteBank, openNewCDK, createCDK, copyCDK, setCDKStatus, rawItem, valueOrDash, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
       };
     },
-    template: `
+    template: injectErrorReportsPage(`
       <v-app>
         <v-main v-if="!logged" class="login-page">
           <v-container fluid class="login-shell pa-4">
@@ -534,6 +559,6 @@
         <v-dialog v-model="bankPreviewDialog" max-width="900" scrollable><v-card><v-card-title class="d-flex align-center"><span>JSON 预览</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankPreviewDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><pre class="json-preview">{{ previewText }}</pre></v-card-text></v-card></v-dialog>
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
       </v-app>
-    `
+    `)
   }).use(vuetify).mount('#app');
 })();
