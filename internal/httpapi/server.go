@@ -53,14 +53,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Cache-Control", "no-store")
 	ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
 	r = r.WithContext(ctx)
 	if r.Method == http.MethodOptions {
+		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.URL.Path == "/healthz" {
+		w.Header().Set("Cache-Control", "no-store")
 		if err := s.App.Store.DB.PingContext(r.Context()); err != nil {
 			writeError(w, r, app.Err("database_unavailable", "数据库不可用", http.StatusServiceUnavailable))
 			return
@@ -69,8 +70,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == apiPrefix || strings.HasPrefix(r.URL.Path, apiPrefix+"/") {
+		w.Header().Set("Cache-Control", "no-store")
 		s.handleAPI(w, r)
 		return
+	}
+	// Static assets: cache immutable vendor libraries long; other UI files are
+	// revalidated so admin updates propagate without a hard refresh.
+	if strings.HasPrefix(r.URL.Path, "/vendor/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	s.Static.ServeHTTP(w, r)
 }
