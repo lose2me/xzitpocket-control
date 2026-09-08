@@ -69,7 +69,25 @@ func TestControlFlow(t *testing.T) {
 	if access == "" || refresh == "" {
 		t.Fatalf("missing session: %#v", session1)
 	}
+	sessionUser := session1["user"].(map[string]any)
+	sessionDevice := session1["device"].(map[string]any)
+	oldConnection := time.Now().UTC().Add(-24 * time.Hour)
+	if _, err := store.DB.ExecContext(context.Background(), "UPDATE users SET last_login_at = ? WHERE id = ?", oldConnection.UnixMilli(), sessionUser["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(context.Background(), "UPDATE devices SET last_seen_at = ? WHERE id = ?", oldConnection.UnixMilli(), sessionDevice["id"]); err != nil {
+		t.Fatal(err)
+	}
+	connectedAfter := time.Now().UTC().Add(-time.Second)
 	_ = request(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access})
+	connectedUser, err := store.GetUser(context.Background(), sessionUser["id"].(string))
+	if err != nil || connectedUser.LastLoginAt.Before(connectedAfter) {
+		t.Fatalf("control connection did not update user time: %v, %v", connectedUser.LastLoginAt, err)
+	}
+	connectedDevice, err := store.GetDeviceByID(context.Background(), sessionDevice["id"].(string))
+	if err != nil || connectedDevice.LastSeenAt.Before(connectedAfter) {
+		t.Fatalf("control connection did not update device time: %v, %v", connectedDevice.LastSeenAt, err)
+	}
 
 	questionBank := map[string]any{"questionBank": map[string]any{"new": true, "name": "计算机基础知识测验", "questions": []any{
 		map[string]any{"questionNumber": 1, "type": "单选题", "title": "第1题", "questionText": "以下哪个是计算机的核心部件？", "options": []any{map[string]any{"label": "A", "text": "显示器"}, map[string]any{"label": "B", "text": "CPU"}}, "correctAnswer": "B"},

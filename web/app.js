@@ -99,6 +99,16 @@
     return body;
   }
 
+  const padDatePart = (value) => String(value).padStart(2, '0');
+  const formatDateTime = (value) => {
+    if (value === undefined || value === null || value === '') return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const chinaTime = new Date(parsed.getTime() + 8 * 60 * 60 * 1000);
+    return chinaTime.getUTCFullYear() + '-' + padDatePart(chinaTime.getUTCMonth() + 1) + '-' + padDatePart(chinaTime.getUTCDate())
+      + ' ' + padDatePart(chinaTime.getUTCHours()) + ':' + padDatePart(chinaTime.getUTCMinutes()) + ':' + padDatePart(chinaTime.getUTCSeconds());
+  };
+
   const emptyQuestion = (number) => ({
     questionNumber: number,
     type: '单选题',
@@ -247,18 +257,18 @@
           { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
           { label: '伪名', value: valueOrDash(user.student_alias) },
           { label: '状态', value: statusLabel(user.status) },
-          { label: '最近登录', value: valueOrDash(user.last_login_at) }
+          { label: '最近连接', value: formatDateTime(user.last_login_at) }
         ];
       });
       const userHeaders = [
         { title: 'ID', key: 'id', sortable: false, width: '18%' }, { title: '显示名', key: 'display_name', width: '20%' },
         { title: '状态', key: 'status', width: '14%' }, { title: '设备数', key: 'device_count', align: 'center', width: '12%' },
-        { title: '最近登录', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
+        { title: '最近连接（北京时间）', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
       ];
       const deviceHeaders = [
         { title: '设备码', key: 'device_serial', sortable: false, width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
         { title: '版本', key: 'app_version', width: '14%' }, { title: '安装标识', key: 'installation_id', sortable: false, width: '24%' },
-        { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
+        { title: '最近活动（北京时间）', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
       ];
       const riskHeaders = [
         { title: '类型', key: 'type', width: '18%' }, { title: '用户', key: 'user_id', sortable: false, width: '16%' },
@@ -367,7 +377,7 @@
       };
       const loadRelease = async () => {
         const out = await api('/api/v1/admin/app/release');
-        releaseConfig.value = out || {};
+        releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
         releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '' };
       };
       const loadErrorReports = async () => {
@@ -487,7 +497,7 @@
         if (!latestVersion) throw new Error('请填写最新版版本号');
         if (!downloadUrl) throw new Error('请填写下载 URL');
         const out = await api('/api/v1/admin/app/release', { method: 'PUT', body: JSON.stringify({ latestVersion, downloadUrl }) });
-        releaseConfig.value = out || {};
+        releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
         releaseForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl };
         notify('APP 发布配置已保存');
       });
@@ -572,7 +582,10 @@
         notify('已清空 ' + (out.deleted || 0) + ' 条错误记录');
       });
       const rawItem = (item) => item && item.raw ? item.raw : item;
-      const valueOrDash = (value) => value === undefined || value === null || value === '' ? '-' : value;
+      const valueOrDash = (value) => {
+        if (value === undefined || value === null || value === '') return '-';
+        return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ? formatDateTime(value) : value;
+      };
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));

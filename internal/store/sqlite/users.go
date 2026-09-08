@@ -76,14 +76,15 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 }
 
 func (s *Store) UpdateUserLogin(ctx context.Context, id, displayName string, now time.Time) error {
-	if displayName == "" {
-		_, err := s.DB.ExecContext(ctx,
-			"UPDATE users SET last_login_at = ? WHERE id = ?", millis(now), id)
-		return err
-	}
 	_, err := s.DB.ExecContext(ctx,
-		"UPDATE users SET display_name = ?, last_login_at = ? WHERE id = ?",
-		displayName, millis(now), id)
+		"UPDATE users SET display_name = CASE WHEN ? <> '' THEN ? ELSE display_name END, last_login_at = ? WHERE id = ?",
+		displayName, displayName, millis(now), id)
+	return err
+}
+
+func (s *Store) TouchUserConnection(ctx context.Context, id string, now time.Time) error {
+	_, err := s.DB.ExecContext(ctx,
+		"UPDATE users SET last_login_at = ? WHERE id = ?", millis(now), id)
 	return err
 }
 

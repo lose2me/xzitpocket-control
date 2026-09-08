@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// Control operates for a China-based campus. Use its fixed UTC+8 civil time
+// for dashboard day/week/month boundaries; persisted timestamps remain UTC.
+var controlLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+const activeEventTypesSQL = "('app_start','foreground','heartbeat','control_login_success','library_open')"
+
+var activeEventTypes = map[string]bool{
+	"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true,
+}
+
+func controlDayStart(now time.Time) time.Time {
+	local := now.In(controlLocation)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, controlLocation)
+}
+
 func (s *Store) InsertEvents(ctx context.Context, events []EventInput) (accepted, duplicates int, err error) {
 	if len(events) == 0 {
 		return 0, 0, nil
@@ -69,14 +84,12 @@ type Overview struct {
 
 func (s *Store) MetricsOverview(ctx context.Context, now time.Time) (Overview, error) {
 	var result Overview
-	now = now.UTC()
 	nowMs := millis(now)
-	dayStartTime := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dayStartTime := controlDayStart(now)
 	dayStart := millis(dayStartTime)
 	weekStart := millis(dayStartTime.AddDate(0, 0, -6))
 	monthStart := millis(dayStartTime.AddDate(0, 0, -29))
-	activeTypes := "('app_start','foreground','heartbeat','control_login_success','library_open')"
-	query := "SELECT COUNT(DISTINCT user_id) FROM activity_events WHERE user_id IS NOT NULL AND occurred_at >= ? AND occurred_at <= ? AND type IN " + activeTypes
+	query := "SELECT COUNT(DISTINCT user_id) FROM activity_events WHERE user_id IS NOT NULL AND occurred_at >= ? AND occurred_at <= ? AND type IN " + activeEventTypesSQL
 	if err := s.DB.QueryRowContext(ctx, query, dayStart, nowMs).Scan(&result.DAU); err != nil {
 		return Overview{}, err
 	}
@@ -86,7 +99,7 @@ func (s *Store) MetricsOverview(ctx context.Context, now time.Time) (Overview, e
 	if err := s.DB.QueryRowContext(ctx, query, monthStart, nowMs).Scan(&result.MAU); err != nil {
 		return Overview{}, err
 	}
-	deviceQuery := "SELECT COUNT(DISTINCT device_id) FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ? AND type IN " + activeTypes
+	deviceQuery := "SELECT COUNT(DISTINCT device_id) FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ? AND type IN " + activeEventTypesSQL
 	if err := s.DB.QueryRowContext(ctx, deviceQuery, dayStart, nowMs).Scan(&result.ActiveDevices); err != nil {
 		return Overview{}, err
 	}
@@ -125,8 +138,7 @@ type MetricsBreakdown struct {
 
 func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBreakdown, error) {
 	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}}
-	now = now.UTC()
-	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	start := controlDayStart(now)
 	deviceRows, err := s.DB.QueryContext(ctx, `SELECT platform, app_version, COUNT(*)
 		FROM devices WHERE revoked_at IS NULL GROUP BY platform, app_version`)
 	if err != nil {
@@ -155,7 +167,6 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 	}
 	defer rows.Close()
 	libraryUsers := map[string]bool{}
-	activeType := map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true}
 	for rows.Next() {
 		var userID sql.NullString
 		var eventType, raw string
@@ -166,7 +177,7 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 		if json.Unmarshal([]byte(raw), &props) != nil {
 			continue
 		}
-		if !userID.Valid && activeType[eventType] {
+		if !userID.Valid && activeEventTypes[eventType] {
 			result.AnonymousEvents++
 		}
 		if eventType == "library_open" {
@@ -187,7 +198,7 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 		return result, err
 	}
 	// CDK activation means a successful redemption. "This week" uses the
-	// calendar week beginning Monday in UTC, matching the dashboard's date
+	// calendar week beginning Monday in Asia/Shanghai, matching the dashboard's date
 	// boundaries elsewhere in this package.
 	weekStart := start.AddDate(0, 0, -((int(start.Weekday()) + 6) % 7))
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM library_cdks WHERE status = 'used' AND used_at IS NOT NULL AND used_at >= ? AND used_at <= ?", millis(start), millis(now)).Scan(&result.CDKActivationsToday); err != nil {
@@ -209,10 +220,13 @@ func (s *Store) MetricsSeries(ctx context.Context, days int, now time.Time) ([]S
 	if days > 365 {
 		days = 365
 	}
-	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -(days - 1))
-	rows, err := s.DB.QueryContext(ctx,
-		"SELECT date(occurred_at / 1000, 'unixepoch') AS day, COUNT(DISTINCT user_id), COUNT(DISTINCT device_id), COUNT(*) FROM activity_events WHERE occurred_at >= ? GROUP BY day ORDER BY day",
-		millis(start))
+	start := controlDayStart(now).AddDate(0, 0, -(days - 1))
+	query := "SELECT date(occurred_at / 1000, 'unixepoch', '+8 hours') AS day, " +
+		"COUNT(DISTINCT CASE WHEN type IN " + activeEventTypesSQL + " THEN user_id END), " +
+		"COUNT(DISTINCT CASE WHEN type IN " + activeEventTypesSQL + " THEN device_id END), COUNT(*) " +
+		"FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ? GROUP BY day ORDER BY day"
+	rows, err := s.DB.QueryContext(ctx, query,
+		millis(start), millis(now))
 	if err != nil {
 		return nil, err
 	}

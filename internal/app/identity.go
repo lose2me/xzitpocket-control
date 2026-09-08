@@ -320,7 +320,6 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	if installationID == "" || installationID != device.Installation {
 		return SessionOutput{}, Err("installation_mismatch", "安装标识不匹配", http.StatusUnauthorized)
 	}
-	_ = a.Store.TouchDevice(ctx, device.ID, now)
 	if signedAt == "" {
 		return SessionOutput{}, Err("signature_required", "需要设备签名", http.StatusUnauthorized)
 	}
@@ -349,10 +348,18 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	if err != nil {
 		return SessionOutput{}, Err("refresh_replayed", "刷新令牌已失效", http.StatusUnauthorized)
 	}
+	if err := a.Store.TouchDevice(ctx, device.ID, now); err != nil {
+		a.Logger.Warn("touch device after session refresh failed", "device_id", device.ID, "error", err)
+	}
+	device.LastSeenAt = now
 	user, err := a.Store.GetUser(ctx, rotated.UserID)
 	if err != nil {
 		return SessionOutput{}, err
 	}
+	if err := a.Store.TouchUserConnection(ctx, user.ID, now); err != nil {
+		a.Logger.Warn("touch user after session refresh failed", "user_id", user.ID, "error", err)
+	}
+	user.LastLoginAt = now
 	identity, _ := a.Store.GetIdentityByUser(ctx, user.ID, identityProvider)
 	return SessionOutput{User: toUserView(user, identity.StudentAlias), Device: toDeviceView(device), AccessToken: access, RefreshToken: nextRefresh, ExpiresAt: accessExpiry.Format(time.RFC3339), RefreshExpiresAt: refreshExpiry.Format(time.RFC3339)}, nil
 }

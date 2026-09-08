@@ -108,7 +108,11 @@ func (a *App) AuthenticateDevice(ctx context.Context, token string) (DevicePrinc
 	if d.RevokedAt != nil {
 		return DevicePrincipal{}, Err("device_revoked", "设备已撤销", http.StatusUnauthorized)
 	}
-	_ = a.Store.TouchDevice(ctx, d.ID, time.Now().UTC())
+	now := time.Now().UTC()
+	if err := a.Store.TouchDevice(ctx, d.ID, now); err != nil {
+		a.Logger.Warn("touch device failed", "device_id", d.ID, "error", err)
+	}
+	d.LastSeenAt = now
 	return DevicePrincipal{Device: d, Token: token}, nil
 }
 
@@ -138,7 +142,18 @@ func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPri
 	if device.RevokedAt != nil {
 		return SessionPrincipal{}, Err("device_revoked", "设备已撤销", http.StatusUnauthorized)
 	}
-	_ = a.Store.TouchSession(ctx, session.ID, now)
+	if err := a.Store.TouchSession(ctx, session.ID, now); err != nil {
+		a.Logger.Warn("touch session failed", "session_id", session.ID, "error", err)
+	}
+	if err := a.Store.TouchDevice(ctx, device.ID, now); err != nil {
+		a.Logger.Warn("touch device failed", "device_id", device.ID, "error", err)
+	}
+	if err := a.Store.TouchUserConnection(ctx, user.ID, now); err != nil {
+		a.Logger.Warn("touch control user connection failed", "user_id", user.ID, "error", err)
+	}
+	session.LastUsedAt = now
+	device.LastSeenAt = now
+	user.LastLoginAt = now
 	return SessionPrincipal{Session: session, User: user, Device: device, Token: token}, nil
 }
 

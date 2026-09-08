@@ -79,6 +79,49 @@ func TestMetricsHandleAnonymousEventsAndCalendarWindows(t *testing.T) {
 	}
 }
 
+func TestMetricsUseShanghaiCalendarDay(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// 16:00 UTC is midnight in Asia/Shanghai. Only the second event belongs
+	// to September 2 on the control dashboard.
+	now := time.Date(2026, 9, 1, 16, 30, 0, 0, time.UTC)
+	for _, item := range []struct {
+		userID, deviceID, suffix, eventType string
+		occurred                            time.Time
+	}{
+		{userID: "usr-before-midnight", deviceID: "dev-before-midnight", suffix: "before", eventType: "app_start", occurred: time.Date(2026, 9, 1, 15, 59, 0, 0, time.UTC)},
+		{userID: "usr-after-midnight", deviceID: "dev-after-midnight", suffix: "after", eventType: "app_start", occurred: time.Date(2026, 9, 1, 16, 1, 0, 0, time.UTC)},
+		{userID: "usr-logout-only", deviceID: "dev-logout-only", suffix: "logout", eventType: "logout", occurred: time.Date(2026, 9, 1, 16, 2, 0, 0, time.UTC)},
+	} {
+		if err := store.CreateUser(ctx, User{ID: item.userID, Status: "active", CreatedAt: item.occurred, LastLoginAt: item.occurred}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateDevice(ctx, Device{ID: item.deviceID, DeviceSerial: "serial-calendar-" + item.suffix, Installation: "install-calendar-" + item.suffix, TokenHash: "token-calendar-" + item.suffix, PublicKey: "key", CreatedAt: item.occurred, LastSeenAt: item.occurred}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.InsertEvents(ctx, []EventInput{{EventID: "event-calendar-" + item.suffix, UserID: item.userID, DeviceID: item.deviceID, Type: item.eventType, OccurredAt: item.occurred, ReceivedAt: now, Properties: `{}`}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	overview, err := store.MetricsOverview(ctx, now)
+	if err != nil || overview.DAU != 1 || overview.TodayEvents != 2 {
+		t.Fatalf("Shanghai day overview = %#v, %v", overview, err)
+	}
+	series, err := store.MetricsSeries(ctx, 1, now)
+	if err != nil || len(series) != 1 || series[0].Day != "2026-09-02" || series[0].Users != 1 || series[0].Devices != 1 || series[0].Events != 2 {
+		t.Fatalf("Shanghai day series = %#v, %v", series, err)
+	}
+}
+
 func TestMetricsBreakdownCountsCDKActivations(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {

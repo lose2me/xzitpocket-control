@@ -80,6 +80,8 @@ xzitpocket-control/
 
 风控只记录两类异常：短时间登录次数过多、账号绑定设备过多。后台可查看和标记记录，但风控不会封禁、解绑或阻塞正常服务。control 不可用时不影响 OA 登录、APP 启动和免费功能。
 
+管理后台时间统一显示为北京时间。用户“最近连接”和设备“最近活动”会在成功访问 control 会话接口时更新；DAU、WAU、MAU 及趋势图中的用户/设备数按北京时间自然日统计 `app_start`、`foreground`、`heartbeat`、`control_login_success`、`library_open` 等活跃事件，趋势图事件数保留全部已接收事件。
+
 ## 开发检查
 
 ```powershell
