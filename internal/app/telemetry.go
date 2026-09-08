@@ -49,6 +49,8 @@ func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, sessi
 	now := time.Now().UTC()
 	events := make([]sqlite.EventInput, 0, len(input))
 	userID := ""
+	platform, appVersion := "", ""
+	var platformAt, appVersionAt time.Time
 	if session != nil {
 		userID = session.User.ID
 		device = DevicePrincipal{Device: session.Device, Token: session.Token}
@@ -67,6 +69,12 @@ func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, sessi
 		if err != nil {
 			return nil, Err("invalid_event_properties", "事件属性无效", http.StatusBadRequest)
 		}
+		if value, ok := telemetryClientInfo(item.Properties, "platform", 32); ok && (platformAt.IsZero() || occurred.After(platformAt)) {
+			platform, platformAt = value, occurred
+		}
+		if value, ok := telemetryClientInfo(item.Properties, "app_version", 64); ok && (appVersionAt.IsZero() || occurred.After(appVersionAt)) {
+			appVersion, appVersionAt = value, occurred
+		}
 		events = append(events, sqlite.EventInput{EventID: item.EventID, UserID: userID, DeviceID: device.Device.ID, Type: item.Type, OccurredAt: occurred, ReceivedAt: now, Properties: props})
 	}
 	accepted, duplicates, err := a.Store.InsertEvents(ctx, events)
@@ -74,7 +82,22 @@ func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, sessi
 		a.Logger.Warn("insert telemetry failed", "error", err)
 		return nil, err
 	}
+	if platform != "" || appVersion != "" {
+		if err := a.Store.UpdateDeviceClientInfo(ctx, device.Device.ID, platform, appVersion); err != nil {
+			a.Logger.Warn("update device client info failed", "device_id", device.Device.ID, "error", err)
+			return nil, err
+		}
+	}
 	return map[string]any{"accepted": accepted, "duplicates": duplicates}, nil
+}
+
+func telemetryClientInfo(properties map[string]any, key string, maxLength int) (string, bool) {
+	raw, ok := properties[key].(string)
+	if !ok {
+		return "", false
+	}
+	value := strings.TrimSpace(raw)
+	return value, value != "" && len(value) <= maxLength
 }
 
 func (a *App) MetricsOverview(ctx context.Context) (sqlite.Overview, error) {

@@ -74,7 +74,14 @@ func TestControlFlow(t *testing.T) {
 	questionBank := map[string]any{"questionBank": map[string]any{"new": true, "name": "计算机基础知识测验", "questions": []any{
 		map[string]any{"questionNumber": 1, "type": "单选题", "title": "第1题", "questionText": "以下哪个是计算机的核心部件？", "options": []any{map[string]any{"label": "A", "text": "显示器"}, map[string]any{"label": "B", "text": "CPU"}}, "correctAnswer": "B"},
 	}}}
-	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android", "app_version": "2.0.0"}}}, map[string]string{"Authorization": "Bearer " + access})
+	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android", "app_version": "2.0.4"}}}, map[string]string{"Authorization": "Bearer " + access})
+	updatedDevice, err := store.GetDeviceByInstallation(context.Background(), d1.installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedDevice.AppVersion != "2.0.4" {
+		t.Fatalf("device app version = %q, want telemetry version 2.0.4", updatedDevice.AppVersion)
+	}
 
 	d2 := newTestDevice(t, "inst-two")
 	reg2 := register(t, ts.URL, d2)
@@ -178,6 +185,11 @@ func TestControlFlow(t *testing.T) {
 	metrics := requestWithHeaders(t, ts.URL+"/api/v1/admin/metrics/overview", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
 	if metrics["total_users"] == nil {
 		t.Fatalf("unexpected metrics: %#v", metrics)
+	}
+	breakdown := requestWithHeaders(t, ts.URL+"/api/v1/admin/metrics/breakdown", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
+	versions, _ := breakdown["versions"].(map[string]any)
+	if versions["2.0.4"] != float64(1) {
+		t.Fatalf("version breakdown = %#v, want one 2.0.4 device", versions)
 	}
 	users := requestWithHeaders(t, ts.URL+"/api/v1/admin/users", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
 	items, ok := users["items"].([]any)

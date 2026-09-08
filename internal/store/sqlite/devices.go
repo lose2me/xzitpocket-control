@@ -39,6 +39,15 @@ func (s *Store) TouchDevice(ctx context.Context, id string, now time.Time) error
 	return err
 }
 
+func (s *Store) UpdateDeviceClientInfo(ctx context.Context, id, platform, appVersion string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE devices SET
+		platform = CASE WHEN ? <> '' THEN ? ELSE platform END,
+		app_version = CASE WHEN ? <> '' THEN ? ELSE app_version END
+		WHERE id = ? AND revoked_at IS NULL`,
+		platform, platform, appVersion, appVersion, id)
+	return err
+}
+
 func (s *Store) ListDevices(ctx context.Context, limit, offset int) ([]Device, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		"SELECT id, device_serial, installation_id, device_token_hash, public_key, platform, app_version, created_at, last_seen_at, revoked_at FROM devices ORDER BY last_seen_at DESC LIMIT ? OFFSET ?",
