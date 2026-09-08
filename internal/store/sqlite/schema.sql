@@ -91,6 +91,11 @@ CREATE TABLE IF NOT EXISTS error_reports (
     received_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS error_report_ignored_students (
+    student_id_hash TEXT PRIMARY KEY,
+    ignored_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS question_banks (
     id TEXT PRIMARY KEY,
     order_id INTEGER NOT NULL UNIQUE CHECK (order_id > 0),

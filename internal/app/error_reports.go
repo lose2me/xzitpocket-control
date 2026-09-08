@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type ErrorReportView struct {
 	StackTrace string `json:"stack_trace,omitempty"`
 	OccurredAt string `json:"occurred_at"`
 	ReceivedAt string `json:"received_at"`
+	Ignored    bool   `json:"ignored"`
 }
 
 func (a *App) InsertErrorReport(ctx context.Context, p SessionPrincipal, in ErrorReportInput) (bool, error) {
@@ -87,8 +89,36 @@ func (a *App) ListErrorReports(ctx context.Context, limit, offset int) ([]ErrorR
 			ID: item.ID, EventID: item.EventID, UserID: item.UserID, DeviceID: item.DeviceID, StudentID: studentID,
 			AppVersion: item.AppVersion, Platform: item.Platform, Title: item.Title, Message: item.Message,
 			ErrorText: item.ErrorText, StackTrace: item.StackTrace,
-			OccurredAt: item.OccurredAt.Format(time.RFC3339), ReceivedAt: item.ReceivedAt.Format(time.RFC3339),
+			OccurredAt: item.OccurredAt.Format(time.RFC3339), ReceivedAt: item.ReceivedAt.Format(time.RFC3339), Ignored: item.Ignored,
 		})
 	}
 	return result, total, nil
+}
+
+func (a *App) SetErrorReportStudentIgnored(ctx context.Context, reportID int64, ignored bool, actor string) error {
+	if reportID <= 0 {
+		return Err("invalid_error_report", "错误报告标识无效", http.StatusBadRequest)
+	}
+	if err := a.Store.SetErrorReportStudentIgnoredByReportID(ctx, reportID, ignored, time.Now().UTC()); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		return err
+	}
+	action := "error_report_student_allow"
+	if ignored {
+		action = "error_report_student_ignore"
+	}
+	return a.Store.AddAudit(ctx, actor, action, "error_report", strconv.FormatInt(reportID, 10), controlcrypto.JSON(map[string]bool{"ignored": ignored}), time.Now().UTC())
+}
+
+func (a *App) ClearErrorReports(ctx context.Context, actor string) (int64, error) {
+	count, err := a.Store.ClearErrorReports(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if err := a.Store.AddAudit(ctx, actor, "error_reports_clear", "error_reports", "all", controlcrypto.JSON(map[string]int64{"deleted": count}), time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

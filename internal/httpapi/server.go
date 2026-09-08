@@ -171,6 +171,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminAudit(w, r)
 	case r.Method == http.MethodGet && path == "/admin/error-reports":
 		s.adminErrorReports(w, r)
+	case r.Method == http.MethodDelete && path == "/admin/error-reports":
+		s.adminErrorReportsClear(w, r)
+	case r.Method == http.MethodPatch && pathMatchesID(path, "admin", "error-reports"):
+		s.adminErrorReportStudentIgnored(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/app/release":
 		s.adminAppRelease(w, r)
 	case r.Method == http.MethodPut && path == "/admin/app/release":

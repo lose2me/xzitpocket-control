@@ -39,7 +39,7 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 
 - `GET /admin/metrics/overview`、`/series`、`/breakdown`
 - `GET /admin/users`、`/admin/users/{id}`、`PATCH /admin/users/{id}/status`
-- `GET /admin/error-reports`
+- `GET/DELETE /admin/error-reports`、`PATCH /admin/error-reports/{id}`（`DELETE` 清空全部错误记录并恢复所有学号的错误上报；`PATCH` 请求体 `{"ignored":true}` 忽略该学号后续的错误上报，`false` 恢复接收）
 - `GET /admin/devices`、`GET /admin/risk-events`、`PATCH /admin/risk-events/{id}`
 - `GET/POST /admin/question-banks`、`GET/PUT /admin/question-banks/{id}`、`PATCH /admin/question-banks/{id}/status`
 - `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`（请求体 `{"status":"active"}` 或 `{"status":"disabled"}`）

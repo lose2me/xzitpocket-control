@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -116,6 +117,49 @@ func TestControlFlow(t *testing.T) {
 	reportItems, _ := reports["items"].([]any)
 	if reports["total"].(float64) != 1 || len(reportItems) != 1 || reportItems[0].(map[string]any)["student_id"] != student {
 		t.Fatalf("error report was not grouped by student: %#v", reports)
+	}
+	reportID := strconv.FormatInt(int64(reportItems[0].(map[string]any)["id"].(float64)), 10)
+	ignored := requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports/"+reportID, http.MethodPatch, map[string]bool{"ignored": true}, adminHeaders)
+	if ignored["ignored"] != true {
+		t.Fatalf("error report ignore failed: %#v", ignored)
+	}
+	reports = requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports?limit=100", http.MethodGet, nil, adminHeaders)
+	reportItems, _ = reports["items"].([]any)
+	if len(reportItems) != 1 || reportItems[0].(map[string]any)["ignored"] != true {
+		t.Fatalf("error report ignored state missing: %#v", reports)
+	}
+	discardedReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
+		"event_id": "error-report-ignored", "occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "应被忽略",
+	}, map[string]string{"Authorization": "Bearer " + access})
+	if discardedReport["accepted"] != false {
+		t.Fatalf("ignored error report was accepted: %#v", discardedReport)
+	}
+	allowed := requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports/"+reportID, http.MethodPatch, map[string]bool{"ignored": false}, adminHeaders)
+	if allowed["ignored"] != false {
+		t.Fatalf("error report allow failed: %#v", allowed)
+	}
+	acceptedReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
+		"event_id": "error-report-allowed", "occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "应被接收",
+	}, map[string]string{"Authorization": "Bearer " + access})
+	if acceptedReport["accepted"] != true {
+		t.Fatalf("allowed error report was discarded: %#v", acceptedReport)
+	}
+	clearedReports := requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports", http.MethodDelete, nil, adminHeaders)
+	if clearedReports["deleted"] != float64(2) {
+		t.Fatalf("error reports were not cleared: %#v", clearedReports)
+	}
+	reports = requestWithHeaders(t, ts.URL+"/api/v1/admin/error-reports?limit=100", http.MethodGet, nil, adminHeaders)
+	if reports["total"] != float64(0) || len(reports["items"].([]any)) != 0 {
+		t.Fatalf("cleared error reports remain visible: %#v", reports)
+	}
+	reportAfterClear := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
+		"event_id": "error-report-after-clear", "occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "清空后应被接收",
+	}, map[string]string{"Authorization": "Bearer " + access})
+	if reportAfterClear["accepted"] != true {
+		t.Fatalf("error report after clear was discarded: %#v", reportAfterClear)
 	}
 	updatedRelease := requestWithHeaders(t, ts.URL+"/api/v1/admin/app/release", http.MethodPut,
 		map[string]string{"latestVersion": "2.0.4", "downloadUrl": "https://download.example.test/xzitpocket.apk"}, adminHeaders)
