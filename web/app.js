@@ -263,12 +263,12 @@
       const userHeaders = [
         { title: 'ID', key: 'id', sortable: false, width: '18%' }, { title: '显示名', key: 'display_name', width: '20%' },
         { title: '状态', key: 'status', width: '14%' }, { title: '设备数', key: 'device_count', align: 'center', width: '12%' },
-        { title: '最近连接（北京时间）', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
+        { title: '最近连接', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
       ];
       const deviceHeaders = [
         { title: '设备码', key: 'device_serial', sortable: false, width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
         { title: '版本', key: 'app_version', width: '14%' }, { title: '安装标识', key: 'installation_id', sortable: false, width: '24%' },
-        { title: '最近活动（北京时间）', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
+        { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
       ];
       const riskHeaders = [
         { title: '类型', key: 'type', width: '18%' }, { title: '用户', key: 'user_id', sortable: false, width: '16%' },
@@ -412,14 +412,15 @@
         chart.clear();
         chart.setOption({
           animationDuration: 350, tooltip: { trigger: 'axis' },
-          legend: { data: ['用户', '设备', '事件'], top: 0, textStyle: { color: '#5e6d76' } },
+          legend: { data: ['总用户', 'DAU', 'WAU', '今日事件'], top: 0, textStyle: { color: '#5e6d76' } },
           grid: { left: 42, right: 18, top: 34, bottom: 30 },
           xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
           yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
           series: [
-            { name: '用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
-            { name: '设备', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.devices), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
-            { name: '事件', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.events), itemStyle: { color: '#b7791f' }, lineStyle: { width: 3 } }
+            { name: '总用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.total_users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
+            { name: 'DAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.dau), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
+            { name: 'WAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.wau), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } },
+            { name: '今日事件', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.today_events), itemStyle: { color: '#b7791f' }, lineStyle: { width: 3 } }
           ]
         });
       };
@@ -650,7 +651,7 @@
               <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4" closable @click:close="error=''">{{ error }}</v-alert>
               <section v-if="view === 'overview'">
                 <v-row dense class="mb-4"><v-col v-for="stat in statCards" :key="stat.label" cols="12" sm="6" md="4" lg="2"><v-card variant="elevated" border class="stat-card h-100"><v-card-text class="d-flex align-center ga-3"><v-avatar :color="stat.color" variant="tonal" size="42"><v-icon :icon="stat.icon" /></v-avatar><div class="min-w-0"><div class="text-caption text-medium-emphasis">{{ stat.label }}</div><div class="text-h5 font-weight-bold mt-1">{{ stat.value }}</div></div></v-card-text></v-card></v-col></v-row>
-                <v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-timeline-variant" color="primary" /><span>近 30 天趋势</span><v-spacer /><v-chip size="small" variant="tonal" color="primary">{{ series.length }} 天</v-chip></v-card-title><v-divider /><v-card-text><div ref="chartEl" class="chart" aria-label="近 30 天用户、设备和事件趋势图" /></v-card-text></v-card>
+                <v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-timeline-variant" color="primary" /><span>近 30 天趋势</span><v-spacer /><v-chip size="small" variant="tonal" color="primary">{{ series.length }} 天</v-chip></v-card-title><v-divider /><v-card-text><div ref="chartEl" class="chart" aria-label="近 30 天总用户、DAU、WAU 和今日事件趋势图" /></v-card-text></v-card>
                 <v-row dense><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-monitor-dashboard" color="secondary" /><span>平台分布</span></v-card-title><v-divider /><v-list v-if="platformRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in platformRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="secondary" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-tag-multiple-outline" color="info" /><span>版本分布</span></v-card-title><v-divider /><v-list v-if="versionRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in versionRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="info" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-key-chain" color="warning" /><span>文库CDK</span></v-card-title><v-divider /><v-list density="compact" lines="one" class="py-2"><v-list-item v-for="row in cdkActivationRows" :key="row.label" :title="row.label"><template #append><span class="font-weight-bold">{{ row.value }}</span></template></v-list-item></v-list></v-card></v-col></v-row>
               </section>
               <section v-else-if="view === 'users'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-group-outline" color="primary" /><span>用户列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="userHeaders" :items="users" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.display_name="{ item }">{{ valueOrDash(rawItem(item).display_name) }}</template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.last_login_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_login_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="showUser(rawItem(item))">详情</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-account-check-outline' : 'mdi-account-cancel-outline'" @click="disableUser(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn></div></template></v-data-table></v-card></section>

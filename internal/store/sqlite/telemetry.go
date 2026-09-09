@@ -99,8 +99,10 @@ func (s *Store) MetricsOverview(ctx context.Context, now time.Time) (Overview, e
 	if err := s.DB.QueryRowContext(ctx, query, monthStart, nowMs).Scan(&result.MAU); err != nil {
 		return Overview{}, err
 	}
-	deviceQuery := "SELECT COUNT(DISTINCT device_id) FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ? AND type IN " + activeEventTypesSQL
-	if err := s.DB.QueryRowContext(ctx, deviceQuery, dayStart, nowMs).Scan(&result.ActiveDevices); err != nil {
+	// A device is active when any event was received in the rolling 72-hour window.
+	activeDeviceStart := millis(now.Add(-72 * time.Hour))
+	deviceQuery := "SELECT COUNT(DISTINCT device_id) FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?"
+	if err := s.DB.QueryRowContext(ctx, deviceQuery, activeDeviceStart, nowMs).Scan(&result.ActiveDevices); err != nil {
 		return Overview{}, err
 	}
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE status = 'active'").Scan(&result.TotalUsers); err != nil {
@@ -117,10 +119,11 @@ func (s *Store) MetricsOverview(ctx context.Context, now time.Time) (Overview, e
 }
 
 type SeriesPoint struct {
-	Day     string `json:"day"`
-	Users   int    `json:"users"`
-	Devices int    `json:"devices"`
-	Events  int    `json:"events"`
+	Day         string `json:"day"`
+	TotalUsers  int    `json:"total_users"`
+	DAU         int    `json:"dau"`
+	WAU         int    `json:"wau"`
+	TodayEvents int    `json:"today_events"`
 }
 
 type MetricsBreakdown struct {
@@ -221,36 +224,74 @@ func (s *Store) MetricsSeries(ctx context.Context, days int, now time.Time) ([]S
 		days = 365
 	}
 	start := controlDayStart(now).AddDate(0, 0, -(days - 1))
-	query := "SELECT date(occurred_at / 1000, 'unixepoch', '+8 hours') AS day, " +
-		"COUNT(DISTINCT CASE WHEN type IN " + activeEventTypesSQL + " THEN user_id END), " +
-		"COUNT(DISTINCT CASE WHEN type IN " + activeEventTypesSQL + " THEN device_id END), COUNT(*) " +
-		"FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ? GROUP BY day ORDER BY day"
-	rows, err := s.DB.QueryContext(ctx, query,
-		millis(start), millis(now))
+	queryStart := start.AddDate(0, 0, -6)
+	rows, err := s.DB.QueryContext(ctx, `SELECT occurred_at, user_id, type
+		FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?`, millis(queryStart), millis(now))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	byDay := map[string]SeriesPoint{}
+	dailyUsers := make(map[string]map[string]struct{})
+	dailyEvents := make(map[string]int)
 	for rows.Next() {
-		var point SeriesPoint
-		if err := rows.Scan(&point.Day, &point.Users, &point.Devices, &point.Events); err != nil {
+		var occurred int64
+		var userID sql.NullString
+		var eventType string
+		if err := rows.Scan(&occurred, &userID, &eventType); err != nil {
 			return nil, err
 		}
-		byDay[point.Day] = point
+		day := fromMillis(occurred).In(controlLocation).Format("2006-01-02")
+		if occurred >= millis(start) {
+			dailyEvents[day]++
+		}
+		if activeEventTypes[eventType] && userID.Valid && userID.String != "" {
+			if dailyUsers[day] == nil {
+				dailyUsers[day] = make(map[string]struct{})
+			}
+			dailyUsers[day][userID.String] = struct{}{}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	createdRows, err := s.DB.QueryContext(ctx, "SELECT created_at FROM users WHERE created_at <= ?", millis(now))
+	if err != nil {
+		return nil, err
+	}
+	defer createdRows.Close()
+	createdByDay := make(map[string]int)
+	initialUsers := 0
+	startKey := start.Format("2006-01-02")
+	for createdRows.Next() {
+		var created int64
+		if err := createdRows.Scan(&created); err != nil {
+			return nil, err
+		}
+		day := fromMillis(created).In(controlLocation).Format("2006-01-02")
+		if day < startKey {
+			initialUsers++
+		} else {
+			createdByDay[day]++
+		}
+	}
+	if err := createdRows.Err(); err != nil {
+		return nil, err
+	}
+
 	result := make([]SeriesPoint, 0, days)
+	totalUsers := initialUsers
 	for i := 0; i < days; i++ {
 		day := start.AddDate(0, 0, i)
 		key := day.Format("2006-01-02")
-		if point, ok := byDay[key]; ok {
-			result = append(result, point)
-		} else {
-			result = append(result, SeriesPoint{Day: key})
+		totalUsers += createdByDay[key]
+		wauUsers := make(map[string]struct{})
+		for windowDay := i - 6; windowDay <= i; windowDay++ {
+			windowKey := start.AddDate(0, 0, windowDay).Format("2006-01-02")
+			for userID := range dailyUsers[windowKey] {
+				wauUsers[userID] = struct{}{}
+			}
 		}
+		result = append(result, SeriesPoint{Day: key, TotalUsers: totalUsers, DAU: len(dailyUsers[key]), WAU: len(wauUsers), TodayEvents: dailyEvents[key]})
 	}
 	return result, nil
 }

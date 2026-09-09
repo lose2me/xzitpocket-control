@@ -100,6 +100,7 @@ func TestMetricsUseShanghaiCalendarDay(t *testing.T) {
 		{userID: "usr-before-midnight", deviceID: "dev-before-midnight", suffix: "before", eventType: "app_start", occurred: time.Date(2026, 9, 1, 15, 59, 0, 0, time.UTC)},
 		{userID: "usr-after-midnight", deviceID: "dev-after-midnight", suffix: "after", eventType: "app_start", occurred: time.Date(2026, 9, 1, 16, 1, 0, 0, time.UTC)},
 		{userID: "usr-logout-only", deviceID: "dev-logout-only", suffix: "logout", eventType: "logout", occurred: time.Date(2026, 9, 1, 16, 2, 0, 0, time.UTC)},
+		{userID: "usr-old-device", deviceID: "dev-old-device", suffix: "old", eventType: "app_start", occurred: time.Date(2026, 8, 29, 15, 59, 0, 0, time.UTC)},
 	} {
 		if err := store.CreateUser(ctx, User{ID: item.userID, Status: "active", CreatedAt: item.occurred, LastLoginAt: item.occurred}); err != nil {
 			t.Fatal(err)
@@ -113,11 +114,11 @@ func TestMetricsUseShanghaiCalendarDay(t *testing.T) {
 	}
 
 	overview, err := store.MetricsOverview(ctx, now)
-	if err != nil || overview.DAU != 1 || overview.TodayEvents != 2 {
+	if err != nil || overview.DAU != 1 || overview.ActiveDevices != 3 || overview.TodayEvents != 2 {
 		t.Fatalf("Shanghai day overview = %#v, %v", overview, err)
 	}
 	series, err := store.MetricsSeries(ctx, 1, now)
-	if err != nil || len(series) != 1 || series[0].Day != "2026-09-02" || series[0].Users != 1 || series[0].Devices != 1 || series[0].Events != 2 {
+	if err != nil || len(series) != 1 || series[0].Day != "2026-09-02" || series[0].TotalUsers != 4 || series[0].DAU != 1 || series[0].WAU != 3 || series[0].TodayEvents != 2 {
 		t.Fatalf("Shanghai day series = %#v, %v", series, err)
 	}
 }
