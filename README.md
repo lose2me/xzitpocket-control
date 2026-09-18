@@ -33,6 +33,7 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 - `GET /question-banks`、`GET /question-banks/{id}`
 - `POST /library/cdks/redeem`，请求体为 `{"code":"CDK-...","question_bank_id":"QB-..."}`
 - `GET /app/release`，返回最新版版本号和下载 URL
+- `GET /course-adjustments`，返回公开的目标日期到原始日期课程覆盖映射
 - `GET /healthz`
 
 管理接口：
@@ -45,6 +46,7 @@ API 前缀为 `/api/v1`。设备登记使用 `Authorization: Device <device_toke
 - `GET/POST /admin/library-cdks`、`PATCH /admin/library-cdks/{id}`（请求体 `{"status":"active"}` 或 `{"status":"disabled"}`）
 - `GET /admin/audit`
 - `GET/PUT /admin/app/release`
+- `GET/PUT /admin/course-adjustments`
 - `POST/DELETE /admin/session`
 
 题库创建和更新只接受 `{ "questionBank": ... }`。创建时不提交题库 ID，服务端按 `QB-001`、`QB-002` 顺序生成；可选的 `orderId` 用于控制 xzitpocket 展示顺序，未填写时自动分配，已使用的顺序 ID 会被拒绝。更新通过 URL 指定 ID。题库状态为 `active`、`draft` 或 `disabled`，停用后仍保留在管理员列表。题型固定为 `单选题`、`多选题`、`判断题`、`填空题`。
@@ -59,6 +61,16 @@ APP 发布配置只有最新版版本号和下载 URL。管理员在“配置”
   "downloadUrl": "https://example.com/xzitpocket.apk"
 }
 ```
+
+课程调整配置也是“配置”页中的 JSON 对象，键和值均为 `YYYYMMDD` 日期；键是目标日期，值是原始日期，例如：
+
+```json
+{
+  "20260916": "20260917"
+}
+```
+
+客户端每次从教务系统取得原始课表后，按原始快照覆盖目标日期；上述示例会先清空 9 月 16 日，再用原始 9 月 17 日课程覆盖它，原始 9 月 17 日仍保留。若要清空 9 月 17 日，写 `{ "20260917": "" }`。映射不会读取已经覆盖后的结果，因此不会产生连锁调换。空对象表示不调整。
 
 ## 数据和结构
 

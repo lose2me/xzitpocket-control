@@ -224,6 +224,18 @@ func (s *Server) adminQuestionBankUpdate(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) adminQuestionBankDelete(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	if err := s.App.DeleteQuestionBank(r.Context(), id, p.Admin.ID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func (s *Server) adminQuestionBankStatus(w http.ResponseWriter, r *http.Request, id string) {
 	p, ok := s.authAdmin(w, r)
 	if !ok || !checkAdminCSRF(w, r) {

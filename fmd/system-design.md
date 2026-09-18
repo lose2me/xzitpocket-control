@@ -142,8 +142,10 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | GET/POST | `/admin/library-cdks` |
 | PATCH | `/admin/library-cdks/{id}` |
 | GET | `/app/release`（公开读取 APP 发布信息） |
+| GET | `/course-adjustments`（公开读取课程调整配置） |
 | GET | `/admin/app/release` |
 | PUT | `/admin/app/release` |
+| GET/PUT | `/admin/course-adjustments` |
 | POST/DELETE | `/admin/session` |
 
 题库创建和更新只接受 `{ "questionBank": ... }`；创建不带题库 ID，更新通过 URL 指定 ID。`orderId` 可在创建或更新时设置，必须是未占用的正整数；省略时创建自动分配、更新保留原值。错误统一返回 `error.code`、`error.message` 和 `request_id`。
@@ -160,6 +162,10 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 ```
 
 版本号必须以数字开头，下载地址必须是绝对 HTTP 或 HTTPS 地址；control 不负责托管安装包文件。
+
+## 6.2 课程调整配置
+
+“配置”页还维护课程调整 JSON。键和值均为 `YYYYMMDD`，键是目标日期，值是原始日期；例如 `{"20260916":"20260917"}` 表示先清空 16 日，再用原始课表中的 17 日课程覆盖 16 日，17 日原课程仍保留。若要清空 17 日，写 `{"20260917":""}`。客户端以教务系统返回的原始课表为唯一输入，一次性计算每个目标日期，不沿用已覆盖结果，因此不会出现连锁反应。空对象表示不调整。
 
 ## 7. 配置与数据
 

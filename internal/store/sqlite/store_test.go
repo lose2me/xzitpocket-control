@@ -27,6 +27,37 @@ func TestMigrateCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
+func TestMigrateAddsUserProfileColumns(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE users (
+		id TEXT PRIMARY KEY,
+		status TEXT NOT NULL DEFAULT 'active',
+		display_name TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		last_login_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, "INSERT INTO users(id, status, display_name, created_at, last_login_at) VALUES ('usr_old', 'active', '旧用户', 1, 1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var displayName, majorName, className string
+	if err := store.DB.QueryRowContext(ctx, "SELECT display_name, major_name, class_name FROM users WHERE id = 'usr_old'").Scan(&displayName, &majorName, &className); err != nil {
+		t.Fatal(err)
+	}
+	if displayName != "旧用户" || majorName != "" || className != "" {
+		t.Fatalf("migrated user = (%q, %q, %q)", displayName, majorName, className)
+	}
+}
+
 func TestMetricsHandleAnonymousEventsAndCalendarWindows(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {

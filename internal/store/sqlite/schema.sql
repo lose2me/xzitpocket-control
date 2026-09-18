@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     display_name TEXT NOT NULL DEFAULT '',
+    major_name TEXT NOT NULL DEFAULT '',
+    class_name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL
 );
@@ -206,6 +208,28 @@ CREATE TABLE IF NOT EXISTS app_release_config (
 
 INSERT OR IGNORE INTO app_release_config(id, latest_version, download_url, updated_at)
 VALUES (1, '', '', 0);
+
+-- Singleton public school-calendar configuration managed by the admin console.
+-- The payload is stored as normalized JSON so clients can cache it verbatim.
+CREATE TABLE IF NOT EXISTS school_calendar_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    days_json TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO school_calendar_config(id, days_json, updated_at)
+VALUES (1, '[]', 0);
+
+-- Singleton course-adjustment configuration. The JSON object maps a target
+-- calendar date (YYYYMMDD) to the original source date (YYYYMMDD).
+CREATE TABLE IF NOT EXISTS course_adjustments_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    adjustments_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO course_adjustments_config(id, adjustments_json, updated_at)
+VALUES (1, '{}', 0);
 
 CREATE INDEX IF NOT EXISTS idx_events_time_type ON activity_events(occurred_at, type);
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON activity_events(user_id, occurred_at);

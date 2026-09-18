@@ -58,7 +58,50 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	for _, migration := range []struct {
+		column     string
+		definition string
+	}{
+		{column: "major_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{column: "class_name", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.ensureColumn(ctx, "users", migration.column, migration.definition); err != nil {
+			return fmt.Errorf("migrate users.%s: %w", migration.column, err)
+		}
+	}
 	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = s.DB.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition)
+	return err
 }
 
 type Device struct {
@@ -78,6 +121,8 @@ type User struct {
 	ID          string    `json:"id"`
 	Status      string    `json:"status"`
 	DisplayName string    `json:"display_name"`
+	MajorName   string    `json:"major_name"`
+	ClassName   string    `json:"class_name"`
 	StudentID   string    `json:"-"`
 	Alias       string    `json:"student_alias,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`

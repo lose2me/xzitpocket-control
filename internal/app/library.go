@@ -371,3 +371,15 @@ func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor strin
 	}
 	return a.Store.AddAudit(ctx, actor, "question_bank_status", "question_bank", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
 }
+
+func (a *App) DeleteQuestionBank(ctx context.Context, id, actor string) error {
+	id = strings.TrimSpace(id)
+	if err := a.Store.DeleteQuestionBank(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	_ = a.Store.AddAudit(ctx, actor, "question_bank_delete", "question_bank", id, "{}", time.Now().UTC())
+	return nil
+}

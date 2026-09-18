@@ -109,67 +109,35 @@
       + ' ' + padDatePart(chinaTime.getUTCHours()) + ':' + padDatePart(chinaTime.getUTCMinutes()) + ':' + padDatePart(chinaTime.getUTCSeconds());
   };
 
-  const emptyQuestion = (number) => ({
-    questionNumber: number,
-    type: '单选题',
-    title: '第' + number + '题',
-    questionText: '',
-    options: [{ label: 'A', text: '' }, { label: 'B', text: '' }],
-    correctAnswer: ''
+  const emptyBankTemplate = () => ({
+    questionBank: {
+      new: true,
+      name: '',
+      requiresCDK: false,
+      questions: [
+        { questionNumber: 1, type: '单选题', title: '第1题', questionText: '', options: [{ label: 'A', text: '' }, { label: 'B', text: '' }], correctAnswer: 'A' }
+      ]
+    }
   });
-  const BANK_EDITOR_PAGE_SIZE = 12;
-  const emptyBankForm = () => ({ id: '', orderId: null, new: true, name: '', status: 'active', requiresCDK: false, questions: [] });
-  const normalizeEditorQuestion = (question, index) => ({
-    questionNumber: Number(question.questionNumber) || index + 1,
-    type: question.type || '单选题',
-    title: question.title || '',
-    questionText: question.questionText || '',
-    options: Array.isArray(question.options) ? question.options : [],
-    correctAnswer: question.correctAnswer || ''
-  });
-
-  const BankQuestionEditor = {
-    props: {
-      question: { type: Object, required: true },
-      questionIndex: { type: Number, required: true },
-      questionTypeOptions: { type: Array, required: true }
-    },
-    emits: ['remove', 'add-option', 'remove-option'],
-    template: `
-      <v-card variant="outlined" class="mb-4 question-editor">
-        <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
-          <v-chip size="small" color="primary" variant="tonal">{{ questionIndex + 1 }}</v-chip>
-          <span>题目 {{ questionIndex + 1 }}</span><v-spacer />
-          <v-btn icon variant="text" color="error" aria-label="删除题目" @click="$emit('remove', questionIndex)"><v-icon icon="mdi-delete-outline" /></v-btn>
-        </v-card-title>
-        <v-card-text>
-          <v-row dense>
-            <v-col cols="12" sm="2"><v-text-field v-model.number="question.questionNumber" label="题号" type="number" min="1" variant="outlined" density="comfortable" /></v-col>
-            <v-col cols="12" sm="3"><v-select v-model="question.type" :items="questionTypeOptions" label="题型" variant="outlined" density="comfortable" /></v-col>
-            <v-col cols="12" sm="7"><v-text-field v-model="question.title" label="标题" variant="outlined" density="comfortable" /></v-col>
-            <v-col cols="12"><v-textarea v-model="question.questionText" label="题干" rows="2" auto-grow variant="outlined" density="comfortable" /></v-col>
-          </v-row>
-          <div v-if="question.type !== '填空题'" class="option-editor">
-            <div class="d-flex align-center mb-2"><div class="text-body-2 font-weight-medium">选项</div><v-spacer /><v-btn size="x-small" variant="text" color="primary" prepend-icon="mdi-plus" @click="$emit('add-option', question)">添加选项</v-btn></div>
-            <v-row v-for="(option, optionIndex) in question.options" :key="optionIndex" dense align="center">
-              <v-col cols="3" sm="2"><v-text-field v-model="option.label" label="标签" variant="outlined" density="compact" hide-details /></v-col>
-              <v-col cols="8" sm="9"><v-text-field v-model="option.text" label="选项内容" variant="outlined" density="compact" hide-details /></v-col>
-              <v-col cols="1"><v-btn icon size="small" variant="text" color="error" aria-label="删除选项" @click="$emit('remove-option', question, optionIndex)"><v-icon icon="mdi-close" /></v-btn></v-col>
-            </v-row>
-          </div>
-          <v-text-field v-model="question.correctAnswer" :label="question.type === '多选题' ? '正确答案（如 A,B）' : '正确答案'" :hint="question.type === '填空题' ? '填空题不需要选项' : '答案使用选项标签'" persistent-hint variant="outlined" density="comfortable" class="mt-3" />
-        </v-card-text>
-      </v-card>
-    `
-  };
 
   const injectErrorReportsPage = (template) => template.replace(
     `              <section v-else-if="view === 'config'">`,
     `              <section v-else-if="view === 'error-reports'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-bug-outline" color="error" /><span>错误</span><v-spacer /><v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-delete-sweep-outline" :loading="loading" @click="clearErrorReports">清空记录</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="errorReportHeaders" :items="errorReports" item-value="id" show-expand :items-per-page="errorReportsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无错误"><template #item.occurred_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).occurred_at) }}</span></template><template #item.student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).student_id) }}</span></template><template #item.title="{ item }"><span>{{ valueOrDash(rawItem(item).title) }}</span></template><template #item.message="{ item }"><span class="table-ellipsis" :title="valueOrDash(rawItem(item).message)">{{ valueOrDash(rawItem(item).message) }}</span></template><template #item.app_version="{ item }"><span>{{ valueOrDash(rawItem(item).app_version) }}</span></template><template #item.platform="{ item }"><span>{{ valueOrDash(rawItem(item).platform) }}</span></template><template #item.actions="{ item }"><v-btn size="small" variant="text" :color="rawItem(item).ignored ? 'success' : 'warning'" :prepend-icon="rawItem(item).ignored ? 'mdi-check-circle-outline' : 'mdi-bell-off-outline'" @click="setErrorReportStudentIgnored(rawItem(item))">{{ rawItem(item).ignored ? '允许' : '忽略' }}</v-btn></template><template #expanded-row="{ columns, item }"><tr><td :colspan="columns.length"><div class="pa-4"><div class="text-subtitle-2 font-weight-bold mb-2">{{ valueOrDash(rawItem(item).title) }}</div><pre class="json-preview error-report-detail">{{ [rawItem(item).message, rawItem(item).error, rawItem(item).stack_trace].filter(Boolean).join('\\n\\n') }}</pre><div class="text-caption text-medium-emphasis mt-2">设备：{{ valueOrDash(rawItem(item).device_id) }} · 接收时间：{{ valueOrDash(rawItem(item).received_at) }}</div></div></td></tr></template></v-data-table><div v-if="errorReportsTotal > errorReportsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="errorReportsPage" :length="Math.max(1, Math.ceil(errorReportsTotal / errorReportsPerPage))" density="comfortable" @update:model-value="loadErrorReports" /></div></v-card></section>\n              <section v-else-if="view === 'config'">`,
   );
 
+  const injectSchoolCalendarConfig = (template) => {
+    const marker = `              <section v-else-if="view === 'config'">`;
+    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>学校校历</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadSchoolCalendar">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveSchoolCalendar"><v-textarea v-model="schoolCalendarForm" label="校历 JSON" placeholder="例如：days 数组 JSON" variant="outlined" rows="16" class="mono" hide-details="auto" /><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="schoolCalendarConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(schoolCalendarConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存校历</v-btn></div></v-form></v-card-text></v-card>`;
+    return template.replace(marker, marker + card);
+  };
+
+  const injectCourseAdjustmentsConfig = (template) => {
+    const marker = `              <section v-else-if="view === 'config'">`;
+    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-sync-outline" color="primary" /><span>课程调整</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCourseAdjustments">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveCourseAdjustments"><v-textarea v-model="courseAdjustmentsForm" label="课程调整 JSON" placeholder="例如：{ &quot;20260916&quot;: &quot;20260917&quot; }" variant="outlined" rows="10" class="mono" hide-details="auto" /><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="courseAdjustmentsConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(courseAdjustmentsConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存课程调整</v-btn></div></v-form></v-card-text></v-card>`;
+    return template.replace(marker, marker + card);
+  };
+
   createApp({
-    components: { BankQuestionEditor },
     setup() {
       const { mdAndUp } = useDisplay();
       const logged = ref(!!localStorage.getItem('control_admin'));
@@ -203,14 +171,15 @@
       const cdkSearch = ref('');
       const releaseConfig = ref({ latestVersion: '', downloadUrl: '', updatedAt: '' });
       const releaseForm = ref({ latestVersion: '', downloadUrl: '' });
+      const schoolCalendarConfig = ref({ days: [], updatedAt: '' });
+      const schoolCalendarForm = ref('');
+      const courseAdjustmentsConfig = ref({ adjustments: {}, updatedAt: '' });
+      const courseAdjustmentsForm = ref('{}');
       const bankDialog = ref(false);
-      const bankPreviewDialog = ref(false);
       const bankEditing = ref(false);
-      const bankForm = ref(emptyBankForm());
-      const bankQuestionPage = ref(1);
+      const bankJSON = ref('');
       const bankNewOptions = [{ title: '是', value: true }, { title: '否', value: false }];
       const bankCDKOptions = [{ title: '需要', value: true }, { title: '不需要', value: false }];
-      const bankPreview = ref(null);
       const selectedUser = ref(null);
       const userDialog = ref(false);
       const loginForm = ref({ key: '' });
@@ -256,6 +225,8 @@
           { label: '显示名', value: valueOrDash(user.display_name) },
           { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
           { label: '伪名', value: valueOrDash(user.student_alias) },
+          { label: '专业', value: valueOrDash(user.major_name) },
+          { label: '班级', value: valueOrDash(user.class_name) },
           { label: '状态', value: statusLabel(user.status) },
           { label: '最近连接', value: formatDateTime(user.last_login_at) }
         ];
@@ -310,20 +281,12 @@
       const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
       const questionTypeOptions = ['单选题', '多选题', '判断题', '填空题'];
       const bankPageCount = computed(() => Math.max(1, Math.ceil(bankTotal.value / bankItemsPerPage.value)));
-      const bankQuestionPageCount = computed(() => Math.max(1, Math.ceil(bankForm.value.questions.length / BANK_EDITOR_PAGE_SIZE)));
-      const visibleBankQuestions = computed(() => {
-        const start = (bankQuestionPage.value - 1) * BANK_EDITOR_PAGE_SIZE;
-        return bankForm.value.questions.slice(start, start + BANK_EDITOR_PAGE_SIZE).map((question, offset) => ({ question, index: start + offset }));
-      });
-      const previewText = computed(() => JSON.stringify(bankPreview.value, null, 2));
 
       const notify = (text, color) => { snackbar.value = { show: true, text, color: color || 'success' }; };
       const closeBankEditor = () => {
         bankDialog.value = false;
-        bankPreviewDialog.value = false;
         bankEditing.value = false;
-        bankQuestionPage.value = 1;
-        bankForm.value = emptyBankForm();
+        bankJSON.value = '';
       };
       const setBankDialog = (visible) => { if (visible) bankDialog.value = true; else closeBankEditor(); };
       const clearAdminSession = () => {
@@ -380,6 +343,16 @@
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
         releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '' };
       };
+      const loadSchoolCalendar = async () => {
+        const out = await api('/api/v1/admin/school-calendar');
+        schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
+        schoolCalendarForm.value = JSON.stringify({ days: (out && out.days) || [] }, null, 2);
+      };
+      const loadCourseAdjustments = async () => {
+        const out = await api('/api/v1/admin/course-adjustments');
+        courseAdjustmentsConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
+        courseAdjustmentsForm.value = JSON.stringify((out && out.adjustments) || {}, null, 2);
+      };
       const loadErrorReports = async () => {
         const offset = (errorReportsPage.value - 1) * errorReportsPerPage.value;
         const out = await api('/api/v1/admin/error-reports?limit=' + errorReportsPerPage.value + '&offset=' + offset);
@@ -397,7 +370,7 @@
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100' + (riskFilter.value ? '&acknowledged=' + riskFilter.value : ''))).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
-          else if (view.value === 'config') await loadRelease();
+          else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar(), loadCourseAdjustments()]);
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
         });
       };
@@ -426,67 +399,34 @@
       };
       const openNewBank = () => {
         bankEditing.value = false;
-        bankQuestionPage.value = 1;
-        bankForm.value = { ...emptyBankForm(), questions: [emptyQuestion(1)] };
+        bankJSON.value = JSON.stringify(emptyBankTemplate(), null, 2);
         bankDialog.value = true;
       };
       const editBank = (row) => call(async () => {
         const out = await api('/api/v1/admin/question-banks/' + encodeURIComponent(rawItem(row).id));
         bankEditing.value = true;
-        bankQuestionPage.value = 1;
-        bankForm.value = {
-          id: out.questionBank.id,
-          orderId: Number(out.questionBank.orderId) || null,
-          new: !!out.questionBank.new,
-          name: out.questionBank.name,
-          status: out.status || 'active',
-          requiresCDK: !!out.questionBank.requiresCDK,
-          questions: (out.questionBank.questions || []).map(normalizeEditorQuestion)
-        };
+        bankJSON.value = JSON.stringify({
+          questionBank: {
+            id: out.questionBank.id,
+            orderId: out.questionBank.orderId,
+            new: !!out.questionBank.new,
+            name: out.questionBank.name,
+            status: out.status || 'active',
+            requiresCDK: !!out.questionBank.requiresCDK,
+            questions: out.questionBank.questions || []
+          }
+        }, null, 2);
         bankDialog.value = true;
       });
-      const addQuestion = () => {
-        const nums = bankForm.value.questions.map(q => Number(q.questionNumber) || 0);
-        const next = nums.length ? Math.max.apply(null, nums) + 1 : 1;
-        bankForm.value.questions.push(emptyQuestion(next));
-        bankQuestionPage.value = Math.ceil(bankForm.value.questions.length / BANK_EDITOR_PAGE_SIZE);
-      };
-      const removeQuestion = (index) => {
-        bankForm.value.questions.splice(index, 1);
-        bankQuestionPage.value = Math.min(bankQuestionPage.value, bankQuestionPageCount.value);
-      };
-      const addOption = (question) => {
-        const labels = question.options.map(option => option.label);
-        let label = 'A';
-        for (let i = 0; i < 26; i++) { const candidate = String.fromCharCode(65 + i); if (!labels.includes(candidate)) { label = candidate; break; } }
-        question.options.push({ label, text: '' });
-      };
-      const removeOption = (question, index) => { question.options.splice(index, 1); };
-      const normalizedBank = () => {
-        const form = bankForm.value;
-        return {
-          id: (form.id || '').trim(),
-          orderId: Number.isFinite(Number(form.orderId)) ? Math.trunc(Number(form.orderId)) : 0,
-          new: !!form.new,
-          name: (form.name || '').trim(),
-          status: form.status,
-          requiresCDK: !!form.requiresCDK,
-          questions: (form.questions || []).map((q, index) => ({
-          questionNumber: Number(q.questionNumber) || index + 1, type: q.type,
-          title: (q.title || '').trim(), questionText: (q.questionText || '').trim(),
-          options: q.type === '填空题' ? [] : (q.options || []).map(option => ({ label: (option.label || '').trim(), text: (option.text || '').trim() })),
-          correctAnswer: (q.correctAnswer || '').trim()
-          }))
-        };
-      };
       const saveBank = () => call(async () => {
-        const bank = normalizedBank();
-        const bankID = bank.id;
-        delete bank.id;
-        if (bank.orderId === 0) delete bank.orderId;
-        const payload = { questionBank: bank };
+        let parsed;
+        try { parsed = JSON.parse(bankJSON.value || ''); } catch (_) { throw new Error('题库 JSON 格式无效'); }
+        const bank = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.questionBank ? parsed.questionBank : parsed;
+        if (!bank || typeof bank !== 'object' || Array.isArray(bank)) throw new Error('题库 JSON 格式无效');
+        if (!bank.name || !String(bank.name).trim()) throw new Error('请填写题库名称');
+        const bankID = (bank.id || '').trim();
         if (bankEditing.value && !bankID) throw new Error('题库 ID 无效');
-        if (!payload.questionBank.name) throw new Error('请填写题库名称');
+        const payload = { questionBank: bank };
         const path = '/api/v1/admin/question-banks' + (bankEditing.value ? '/' + encodeURIComponent(bankID) : '');
         const editing = bankEditing.value;
         await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -501,6 +441,26 @@
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
         releaseForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl };
         notify('APP 发布配置已保存');
+      });
+      const saveSchoolCalendar = () => call(async () => {
+        let parsed;
+        try { parsed = JSON.parse(schoolCalendarForm.value || ''); } catch (_) { throw new Error('校历 JSON 格式无效'); }
+        const days = Array.isArray(parsed) ? parsed : parsed && parsed.days;
+        if (!Array.isArray(days) || !days.length) throw new Error('请至少配置一天校历');
+        const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days }) });
+        schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
+        schoolCalendarForm.value = JSON.stringify({ days: out.days || days }, null, 2);
+        notify('学校校历已保存');
+      });
+      const saveCourseAdjustments = () => call(async () => {
+        let parsed;
+        try { parsed = JSON.parse(courseAdjustmentsForm.value || '{}'); } catch (_) { throw new Error('课程调整 JSON 格式无效'); }
+        const adjustments = parsed && !Array.isArray(parsed) && parsed.adjustments && typeof parsed.adjustments === 'object' ? parsed.adjustments : parsed;
+        if (!adjustments || Array.isArray(adjustments) || typeof adjustments !== 'object') throw new Error('课程调整必须是 JSON 对象');
+        const out = await api('/api/v1/admin/course-adjustments', { method: 'PUT', body: JSON.stringify({ adjustments }) });
+        courseAdjustmentsConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
+        courseAdjustmentsForm.value = JSON.stringify(out.adjustments || adjustments, null, 2);
+        notify('课程调整配置已保存');
       });
       const openNewCDK = () => {
         call(async () => {
@@ -527,13 +487,18 @@
         await api('/api/v1/admin/library-cdks/' + encodeURIComponent(item.id), { method: 'PATCH', body: JSON.stringify({ status: next }) });
         notify(next === 'disabled' ? 'CDK 已禁用' : 'CDK 已启用'); await loadCDKs();
       });
-      const previewBankJSON = () => { const bank = normalizedBank(); if (!bankEditing.value) delete bank.id; if (bank.orderId === 0) delete bank.orderId; delete bank.status; bankPreview.value = { questionBank: bank }; bankPreviewDialog.value = true; };
-      const deleteBank = (row) => call(async () => {
+      const setBankStatus = (row) => call(async () => {
         const item = rawItem(row);
         const next = item.status === 'disabled' ? 'active' : 'disabled';
         if (!window.confirm((next === 'disabled' ? '确定停用' : '确定启用') + '题库“' + item.name + '”吗？')) return;
         await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: next }) });
         notify(next === 'disabled' ? '题库已停用' : '题库已启用'); await loadBanks();
+      });
+      const removeBank = (row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定删除题库“' + item.name + '”吗？该题库的题目与已绑定的 CDK 会一并删除，且不可恢复。')) return;
+        await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        notify('题库已删除'); await loadBanks();
       });
       const showUser = (user) => call(async () => {
         const row = rawItem(user); selectedUser.value = await api('/api/v1/admin/users/' + encodeURIComponent(row.id));
@@ -590,7 +555,7 @@
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', course_adjustments_update: '更新课程调整', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); };
       watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
@@ -599,16 +564,15 @@
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankPreviewDialog, bankEditing, bankForm, bankQuestionPage, bankQuestionPageCount, visibleBankQuestions, bankPreview, releaseConfig, releaseForm,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarForm, courseAdjustmentsConfig, courseAdjustmentsForm,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
         selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
         platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, previewText, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadErrorReports, saveRelease,
-        showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, addQuestion, removeQuestion, addOption,
-        removeOption, saveBank, previewBankJSON, deleteBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, loadCourseAdjustments, loadErrorReports, saveRelease, saveSchoolCalendar, saveCourseAdjustments,
+        showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
       };
     },
-    template: injectErrorReportsPage(`
+    template: injectErrorReportsPage(injectCourseAdjustmentsConfig(injectSchoolCalendarConfig(`
       <v-app>
         <v-main v-if="!logged" class="login-page">
           <v-container fluid class="login-shell pa-4">
@@ -657,7 +621,7 @@
               <section v-else-if="view === 'users'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-group-outline" color="primary" /><span>用户列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="userHeaders" :items="users" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.display_name="{ item }">{{ valueOrDash(rawItem(item).display_name) }}</template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.last_login_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_login_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="showUser(rawItem(item))">详情</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-account-check-outline' : 'mdi-account-cancel-outline'" @click="disableUser(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn></div></template></v-data-table></v-card></section>
               <section v-else-if="view === 'devices'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cellphone-link" color="primary" /><span>设备列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="deviceHeaders" :items="devices" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.device_serial="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_serial) }}</span></template><template #item.installation_id="{ item }"><span class="mono table-ellipsis" :title="valueOrDash(rawItem(item).installation_id)">{{ valueOrDash(rawItem(item).installation_id) }}</span></template><template #item.last_seen_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_seen_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="rawItem(item).revoked_at ? 'error' : 'success'" variant="tonal">{{ rawItem(item).revoked_at ? '已撤销' : '正常' }}</v-chip></template></v-data-table></v-card></section>
               <section v-else-if="view === 'risk'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-shield-alert-outline" color="warning" /><span>风控记录</span><v-spacer /><v-select v-model="riskFilter" :items="riskOptions" item-title="title" item-value="value" label="查看状态" variant="outlined" density="compact" hide-details style="max-width: 170px" @update:model-value="load" /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="riskHeaders" :items="risks" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.type="{ item }"><span>{{ riskTypeLabel(rawItem(item).type) }}</span></template><template #item.user_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).user_id) }}</span></template><template #item.device_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="riskStatusColor(rawItem(item))" variant="tonal">{{ rawItem(item).acknowledged_at ? '已查看' : '未查看' }}</v-chip></template><template #item.actions="{ item }"><v-btn v-if="!rawItem(item).acknowledged_at" size="small" variant="text" color="primary" prepend-icon="mdi-check" @click="acknowledge(rawItem(item))">标记</v-btn></template></v-data-table></v-card></section>
-              <section v-else-if="view === 'library'"><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 toolbar-wrap library-toolbar"><v-icon icon="mdi-book-open-page-variant" color="primary" /><span>文库题库</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="openNewBank">新建题库</v-btn><v-btn size="small" variant="tonal" color="secondary" prepend-icon="mdi-key-plus" @click="openNewCDK">生成 CDK</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="bankHeaders" :items="banks" item-value="id" :items-per-page="bankItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无题库"><template #item.orderId="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).orderId) }}</span></template><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.question_count="{ item }"><span class="font-weight-bold">{{ rawItem(item).question_count || 0 }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.new="{ item }"><v-chip size="small" :color="rawItem(item).new ? 'primary' : 'default'" variant="tonal">{{ rawItem(item).new ? '是' : '否' }}</v-chip></template><template #item.requiresCDK="{ item }"><v-chip size="small" :color="rawItem(item).requiresCDK ? 'secondary' : 'default'" variant="tonal">{{ rawItem(item).requiresCDK ? '需要' : '不需要' }}</v-chip></template><template #item.updated_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).updated_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-pencil-outline" @click="editBank(rawItem(item))">编辑</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-play-circle-outline' : 'mdi-stop-circle-outline'" @click="deleteBank(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn></div></template></v-data-table><div v-if="bankTotal > bankItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="bankPage" :length="bankPageCount" density="comfortable" @update:model-value="loadBanks" /></div></v-card><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 cdk-toolbar"><v-icon icon="mdi-key-chain" color="secondary" /><span>文库 CDK</span><v-spacer /><v-text-field v-model="cdkSearch" label="搜索 CDK、题库或学号" prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable class="cdk-search" @keyup.enter="searchCDKs" @click:clear="searchCDKs" /><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-magnify" :loading="loading" @click="searchCDKs">搜索</v-btn><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCDKs">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="cdkHeaders" :items="cdks" item-value="id" :items-per-page="cdkItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无 CDK"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.bound_student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).bound_student_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.used_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).used_at) }}</span></template><template #item.actions="{ item }"><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'warning'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-check-circle-outline' : 'mdi-cancel'" @click="setCDKStatus(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '禁用' }}</v-btn></template></v-data-table><div v-if="cdkTotal > cdkItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="cdkPage" :length="Math.max(1, Math.ceil(cdkTotal / cdkItemsPerPage))" density="comfortable" @update:model-value="loadCDKs" /></div></v-card></section>
+              <section v-else-if="view === 'library'"><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 toolbar-wrap library-toolbar"><v-icon icon="mdi-book-open-page-variant" color="primary" /><span>文库题库</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="openNewBank">新建题库</v-btn><v-btn size="small" variant="tonal" color="secondary" prepend-icon="mdi-key-plus" @click="openNewCDK">生成 CDK</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="bankHeaders" :items="banks" item-value="id" :items-per-page="bankItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无题库"><template #item.orderId="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).orderId) }}</span></template><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.question_count="{ item }"><span class="font-weight-bold">{{ rawItem(item).question_count || 0 }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.new="{ item }"><v-chip size="small" :color="rawItem(item).new ? 'primary' : 'default'" variant="tonal">{{ rawItem(item).new ? '是' : '否' }}</v-chip></template><template #item.requiresCDK="{ item }"><v-chip size="small" :color="rawItem(item).requiresCDK ? 'secondary' : 'default'" variant="tonal">{{ rawItem(item).requiresCDK ? '需要' : '不需要' }}</v-chip></template><template #item.updated_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).updated_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-pencil-outline" @click="editBank(rawItem(item))">编辑</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-play-circle-outline' : 'mdi-stop-circle-outline'" @click="setBankStatus(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn><v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="removeBank(rawItem(item))">删除</v-btn></div></template></v-data-table><div v-if="bankTotal > bankItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="bankPage" :length="bankPageCount" density="comfortable" @update:model-value="loadBanks" /></div></v-card><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 cdk-toolbar"><v-icon icon="mdi-key-chain" color="secondary" /><span>文库 CDK</span><v-spacer /><v-text-field v-model="cdkSearch" label="搜索 CDK、题库或学号" prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable class="cdk-search" @keyup.enter="searchCDKs" @click:clear="searchCDKs" /><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-magnify" :loading="loading" @click="searchCDKs">搜索</v-btn><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCDKs">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="cdkHeaders" :items="cdks" item-value="id" :items-per-page="cdkItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无 CDK"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.bound_student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).bound_student_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.used_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).used_at) }}</span></template><template #item.actions="{ item }"><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'warning'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-check-circle-outline' : 'mdi-cancel'" @click="setCDKStatus(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '禁用' }}</v-btn></template></v-data-table><div v-if="cdkTotal > cdkItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="cdkPage" :length="Math.max(1, Math.ceil(cdkTotal / cdkItemsPerPage))" density="comfortable" @update:model-value="loadCDKs" /></div></v-card></section>
               <section v-else-if="view === 'config'"><v-card variant="elevated" border class="config-card"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cog-outline" color="primary" /><span>配置</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-card-text><div class="text-subtitle-1 font-weight-bold mb-4">APP 发布配置</div><v-form @submit.prevent="saveRelease"><v-row dense align="center"><v-col cols="12" md="4"><v-text-field v-model="releaseForm.latestVersion" label="最新版版本号" placeholder="例如 2.0.4" variant="outlined" density="comfortable" hide-details="auto" /></v-col><v-col cols="12" md="8"><v-text-field v-model="releaseForm.downloadUrl" label="下载 URL" placeholder="https://..." type="url" variant="outlined" density="comfortable" hide-details="auto" /></v-col></v-row><div class="d-flex align-center flex-wrap ga-3 mt-5"><span v-if="releaseConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ releaseConfig.updatedAt }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存配置</v-btn></div></v-form></v-card-text></v-card></section>
               <section v-else-if="view === 'audit'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-history" color="primary" /><span>审计日志</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="auditHeaders" :items="audit" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.action="{ item }"><span>{{ actionLabel(rawItem(item).action) }}</span></template><template #item.actor_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).actor_id) }}</span></template><template #item.target="{ item }"><span>{{ valueOrDash(rawItem(item).target_type) }} {{ valueOrDash(rawItem(item).target_id) }}</span></template><template #item.detail="{ item }"><span class="table-ellipsis audit-detail" :title="valueOrDash(rawItem(item).detail)">{{ valueOrDash(rawItem(item).detail) }}</span></template></v-data-table></v-card></section>
             </v-container>
@@ -676,27 +640,9 @@
             <v-divider />
             <v-card-text>
               <v-form @submit.prevent="saveBank">
-                <v-row dense align="center" class="bank-meta-row">
-                  <v-col v-if="bankEditing" cols="12" sm="6" md="2"><v-text-field v-model="bankForm.id" label="题库 ID" readonly variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6" md="2"><v-text-field v-model.number="bankForm.orderId" label="顺序 ID" type="number" min="1" placeholder="自动分配" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6" md="2"><v-text-field v-model="bankForm.name" label="题库名称" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.new" :items="bankNewOptions" item-title="title" item-value="value" label="新题库" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.requiresCDK" :items="bankCDKOptions" item-title="title" item-value="value" label="需要 CDK 解锁" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6" md="2"><v-select v-model="bankForm.status" :items="bankStatusOptions" item-title="title" item-value="value" label="状态" variant="outlined" density="comfortable" hide-details /></v-col>
-                </v-row>
-                <v-divider class="my-4" />
-                <div class="d-flex align-center flex-wrap ga-2 mb-3">
-                  <div class="text-subtitle-1 font-weight-bold">题目（{{ bankForm.questions.length }}）</div><v-spacer />
-                  <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="addQuestion">添加题目</v-btn>
-                </div>
-                <v-alert v-if="!bankForm.questions.length" type="info" variant="tonal" density="compact" class="mb-3">请至少添加一道题目</v-alert>
-                <bank-question-editor v-for="entry in visibleBankQuestions" :key="entry.index" :question="entry.question" :question-index="entry.index" :question-type-options="questionTypeOptions" @remove="removeQuestion" @add-option="addOption" @remove-option="removeOption" />
-                <div v-if="bankQuestionPageCount > 1" class="d-flex justify-end py-2">
-                  <v-pagination v-model="bankQuestionPage" :length="bankQuestionPageCount" density="comfortable" />
-                </div>
+                <v-textarea v-model="bankJSON" label="题库 JSON" variant="outlined" rows="20" class="mono" hide-details="auto" />
                 <div class="d-flex flex-wrap justify-end ga-2 mt-4">
                   <v-btn variant="text" @click="closeBankEditor">取消</v-btn>
-                  <v-btn variant="tonal" color="secondary" prepend-icon="mdi-code-json" @click="previewBankJSON">预览 JSON</v-btn>
                   <v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存题库</v-btn>
                 </div>
               </v-form>
@@ -708,9 +654,8 @@
 
         <v-dialog v-model="cdkRevealDialog" max-width="720"><v-card v-if="createdCDKs.length"><v-card-title class="d-flex align-center"><v-icon icon="mdi-key-check" color="success" class="mr-2" /><span>通用 CDK 已创建（{{ createdCDKs.length }} 个）</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkRevealDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="warning" variant="tonal" density="compact" class="mb-4">CDK 只显示这一次，请立即复制并妥善保存。</v-alert><v-textarea :model-value="createdCDKs.map(item => item.code).join('\\n')" label="CDK 列表" readonly variant="outlined" rows="8" class="mono cdk-reveal" /></v-card-text><v-card-actions><v-spacer /><v-btn color="primary" prepend-icon="mdi-content-copy" @click="copyCDK">复制全部 CDK</v-btn><v-btn variant="text" @click="cdkRevealDialog=false">完成</v-btn></v-card-actions></v-card></v-dialog>
 
-        <v-dialog v-model="bankPreviewDialog" max-width="900" scrollable><v-card><v-card-title class="d-flex align-center"><span>JSON 预览</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="bankPreviewDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><pre class="json-preview">{{ previewText }}</pre></v-card-text></v-card></v-dialog>
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
       </v-app>
-    `)
+    `)))
   }).use(vuetify).mount('#app');
 })();

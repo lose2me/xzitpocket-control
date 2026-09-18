@@ -368,6 +368,33 @@ func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, no
 	return nil
 }
 
+// DeleteQuestionBank removes a bank together with its questions, options and
+// any CDKs targeting it. It returns sql.ErrNoRows when the bank is missing.
+func (s *Store) DeleteQuestionBank(ctx context.Context, id string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var exists int
+	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM question_banks WHERE id = ? LIMIT 1", id).Scan(&exists); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE bank_id = ?)", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM questions WHERE bank_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM library_cdks WHERE question_bank_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM question_banks WHERE id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func insertQuestions(ctx context.Context, tx *sql.Tx, bank QuestionBank) error {
 	for _, q := range bank.Questions {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO questions(id, bank_id, question_number, type, title, question_text, correct_answer, sort_order)

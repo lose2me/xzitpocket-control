@@ -60,16 +60,21 @@ func TestControlFlow(t *testing.T) {
 	challenge1 := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
 	student := "2023000001"
 	alias := controlcrypto.StudentAlias(student)
+	majorName := "计算机科学与技术"
+	className := "计科2301班"
 	asserted := time.Now().UTC().Format(time.RFC3339)
-	loginPayload := map[string]any{"challenge_id": challenge1["challenge_id"], "challenge": challenge1["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "asserted_at": asserted}
+	loginPayload := map[string]any{"challenge_id": challenge1["challenge_id"], "challenge": challenge1["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "major_name": majorName, "class_name": className, "asserted_at": asserted}
 	signedAt := time.Now().UTC().Format(time.RFC3339)
-	loginSignature := sign(t, d1.priv, lines("xzitpocket-control-login", challenge1["challenge_id"].(string), challenge1["challenge"].(string), d1.serial, student, alias, "测试用户", asserted))
+	loginSignature := sign(t, d1.priv, lines("xzitpocket-control-login", challenge1["challenge_id"].(string), challenge1["challenge"].(string), d1.serial, student, alias, "测试用户", majorName, className, asserted))
 	session1 := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginPayload, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": loginSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
 	access, refresh := session1["access_token"].(string), session1["refresh_token"].(string)
 	if access == "" || refresh == "" {
 		t.Fatalf("missing session: %#v", session1)
 	}
 	sessionUser := session1["user"].(map[string]any)
+	if sessionUser["major_name"] != majorName || sessionUser["class_name"] != className {
+		t.Fatalf("session user profile = %#v", sessionUser)
+	}
 	sessionDevice := session1["device"].(map[string]any)
 	oldConnection := time.Now().UTC().Add(-24 * time.Hour)
 	if _, err := store.DB.ExecContext(context.Background(), "UPDATE users SET last_login_at = ? WHERE id = ?", oldConnection.UnixMilli(), sessionUser["id"]); err != nil {
@@ -128,6 +133,11 @@ func TestControlFlow(t *testing.T) {
 	initialRelease := request(t, ts.URL+"/api/v1/app/release", http.MethodGet, nil, nil)
 	if initialRelease["latestVersion"] != "" || initialRelease["downloadUrl"] != "" {
 		t.Fatalf("unexpected initial app release config: %#v", initialRelease)
+	}
+	initialCalendar := request(t, ts.URL+"/api/v1/school-calendar", http.MethodGet, nil, nil)
+	initialCalendarDays, _ := initialCalendar["days"].([]any)
+	if len(initialCalendarDays) == 0 {
+		t.Fatalf("default school calendar is empty: %#v", initialCalendar)
 	}
 	adminHeaders := map[string]string{"Authorization": "Bearer " + adminAccess}
 	errorReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
@@ -195,10 +205,27 @@ func TestControlFlow(t *testing.T) {
 	if publicRelease["latestVersion"] != "2.0.4" || publicRelease["downloadUrl"] != "https://download.example.test/xzitpocket.apk" {
 		t.Fatalf("public app release config was not updated: %#v", publicRelease)
 	}
+	calendarInput := map[string]any{"days": []any{
+		map[string]any{"date": "2027.2.22", "weekday": 1, "holiday": false, "festival": false},
+		map[string]any{"date": "2027-02-23", "weekday": 2, "holiday": false, "festival": ""},
+	}}
+	updatedCalendar := requestWithHeaders(t, ts.URL+"/api/v1/admin/school-calendar", http.MethodPut, calendarInput, adminHeaders)
+	updatedCalendarDays, _ := updatedCalendar["days"].([]any)
+	if len(updatedCalendarDays) != 2 || updatedCalendarDays[0].(map[string]any)["date"] != "2027-02-22" {
+		t.Fatalf("unexpected updated school calendar: %#v", updatedCalendar)
+	}
+	publicCalendar := request(t, ts.URL+"/api/v1/school-calendar", http.MethodGet, nil, nil)
+	publicCalendarDays, _ := publicCalendar["days"].([]any)
+	if len(publicCalendarDays) != 2 {
+		t.Fatalf("public school calendar was not updated: %#v", publicCalendar)
+	}
 	auditRows := requestWithHeaders(t, ts.URL+"/api/v1/admin/audit?limit=100", http.MethodGet, nil, adminHeaders)
 	auditItems, _ := auditRows["items"].([]any)
 	if !containsAuditAction(auditItems, "app_release_update") {
 		t.Fatalf("app release update was not audited: %#v", auditRows)
+	}
+	if !containsAuditAction(auditItems, "school_calendar_update") {
+		t.Fatalf("school calendar update was not audited: %#v", auditRows)
 	}
 	metrics := requestWithHeaders(t, ts.URL+"/api/v1/admin/metrics/overview", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
 	if metrics["total_users"] == nil {
@@ -221,6 +248,10 @@ func TestControlFlow(t *testing.T) {
 	detail := requestWithHeaders(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string), http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
 	if _, leaked := detail["access_ciphertext"]; leaked {
 		t.Fatal("secret ciphertext leaked in user detail")
+	}
+	detailUser, _ := detail["user"].(map[string]any)
+	if detailUser["major_name"] != majorName || detailUser["class_name"] != className {
+		t.Fatalf("admin user detail profile = %#v", detailUser)
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "disabled"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("disable user status = %d, want %d", status, http.StatusOK)

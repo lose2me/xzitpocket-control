@@ -131,6 +131,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.errorReport(w, r)
 	case r.Method == http.MethodGet && path == "/app/release":
 		s.appRelease(w, r)
+	case r.Method == http.MethodGet && path == "/config/versions":
+		s.configVersions(w, r)
+	case r.Method == http.MethodGet && path == "/school-calendar":
+		s.schoolCalendar(w, r)
+	case r.Method == http.MethodGet && path == "/course-adjustments":
+		s.courseAdjustments(w, r)
 	case r.Method == http.MethodGet && path == "/question-banks":
 		s.questionBanks(w, r)
 	case r.Method == http.MethodGet && pathMatchesID(path, "question-banks"):
@@ -179,6 +185,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminAppRelease(w, r)
 	case r.Method == http.MethodPut && path == "/admin/app/release":
 		s.adminAppReleaseUpdate(w, r)
+	case r.Method == http.MethodGet && path == "/admin/school-calendar":
+		s.adminSchoolCalendar(w, r)
+	case r.Method == http.MethodPut && path == "/admin/school-calendar":
+		s.adminSchoolCalendarUpdate(w, r)
+	case r.Method == http.MethodGet && path == "/admin/course-adjustments":
+		s.adminCourseAdjustments(w, r)
+	case r.Method == http.MethodPut && path == "/admin/course-adjustments":
+		s.adminCourseAdjustmentsUpdate(w, r)
 	case r.Method == http.MethodGet && path == "/admin/question-banks":
 		s.adminQuestionBanks(w, r)
 	case r.Method == http.MethodPost && path == "/admin/question-banks":
@@ -187,6 +201,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminQuestionBankDetail(w, r, segment(path, 2))
 	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "question-banks"):
 		s.adminQuestionBankUpdate(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "question-banks"):
+		s.adminQuestionBankDelete(w, r, segment(path, 2))
 	case r.Method == http.MethodPatch && pathMatchesIDSuffix(path, "status", "admin", "question-banks"):
 		s.adminQuestionBankStatus(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/library-cdks":
