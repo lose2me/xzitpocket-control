@@ -220,17 +220,6 @@ CREATE TABLE IF NOT EXISTS school_calendar_config (
 INSERT OR IGNORE INTO school_calendar_config(id, days_json, updated_at)
 VALUES (1, '[]', 0);
 
--- Singleton course-adjustment configuration. The JSON object maps a target
--- calendar date (YYYYMMDD) to the original source date (YYYYMMDD).
-CREATE TABLE IF NOT EXISTS course_adjustments_config (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    adjustments_json TEXT NOT NULL DEFAULT '{}',
-    updated_at INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO course_adjustments_config(id, adjustments_json, updated_at)
-VALUES (1, '{}', 0);
-
 CREATE INDEX IF NOT EXISTS idx_events_time_type ON activity_events(occurred_at, type);
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON activity_events(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_error_reports_student_time ON error_reports(student_id_hash, occurred_at);

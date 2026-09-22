@@ -135,8 +135,6 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.configVersions(w, r)
 	case r.Method == http.MethodGet && path == "/school-calendar":
 		s.schoolCalendar(w, r)
-	case r.Method == http.MethodGet && path == "/course-adjustments":
-		s.courseAdjustments(w, r)
 	case r.Method == http.MethodGet && path == "/question-banks":
 		s.questionBanks(w, r)
 	case r.Method == http.MethodGet && pathMatchesID(path, "question-banks"):
@@ -189,10 +187,6 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminSchoolCalendar(w, r)
 	case r.Method == http.MethodPut && path == "/admin/school-calendar":
 		s.adminSchoolCalendarUpdate(w, r)
-	case r.Method == http.MethodGet && path == "/admin/course-adjustments":
-		s.adminCourseAdjustments(w, r)
-	case r.Method == http.MethodPut && path == "/admin/course-adjustments":
-		s.adminCourseAdjustmentsUpdate(w, r)
 	case r.Method == http.MethodGet && path == "/admin/question-banks":
 		s.adminQuestionBanks(w, r)
 	case r.Method == http.MethodPost && path == "/admin/question-banks":

@@ -131,12 +131,6 @@
     return template.replace(marker, marker + card);
   };
 
-  const injectCourseAdjustmentsConfig = (template) => {
-    const marker = `              <section v-else-if="view === 'config'">`;
-    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-sync-outline" color="primary" /><span>课程调整</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCourseAdjustments">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveCourseAdjustments"><v-textarea v-model="courseAdjustmentsForm" label="课程调整 JSON" placeholder="例如：{ &quot;20260916&quot;: &quot;20260917&quot; }" variant="outlined" rows="10" class="mono" hide-details="auto" /><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="courseAdjustmentsConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(courseAdjustmentsConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存课程调整</v-btn></div></v-form></v-card-text></v-card>`;
-    return template.replace(marker, marker + card);
-  };
-
   createApp({
     setup() {
       const { mdAndUp } = useDisplay();
@@ -173,8 +167,6 @@
       const releaseForm = ref({ latestVersion: '', downloadUrl: '' });
       const schoolCalendarConfig = ref({ days: [], updatedAt: '' });
       const schoolCalendarForm = ref('');
-      const courseAdjustmentsConfig = ref({ adjustments: {}, updatedAt: '' });
-      const courseAdjustmentsForm = ref('{}');
       const bankDialog = ref(false);
       const bankEditing = ref(false);
       const bankJSON = ref('');
@@ -348,11 +340,6 @@
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
         schoolCalendarForm.value = JSON.stringify({ days: (out && out.days) || [] }, null, 2);
       };
-      const loadCourseAdjustments = async () => {
-        const out = await api('/api/v1/admin/course-adjustments');
-        courseAdjustmentsConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        courseAdjustmentsForm.value = JSON.stringify((out && out.adjustments) || {}, null, 2);
-      };
       const loadErrorReports = async () => {
         const offset = (errorReportsPage.value - 1) * errorReportsPerPage.value;
         const out = await api('/api/v1/admin/error-reports?limit=' + errorReportsPerPage.value + '&offset=' + offset);
@@ -370,7 +357,7 @@
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100' + (riskFilter.value ? '&acknowledged=' + riskFilter.value : ''))).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
-          else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar(), loadCourseAdjustments()]);
+          else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar()]);
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
         });
       };
@@ -451,16 +438,6 @@
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
         schoolCalendarForm.value = JSON.stringify({ days: out.days || days }, null, 2);
         notify('学校校历已保存');
-      });
-      const saveCourseAdjustments = () => call(async () => {
-        let parsed;
-        try { parsed = JSON.parse(courseAdjustmentsForm.value || '{}'); } catch (_) { throw new Error('课程调整 JSON 格式无效'); }
-        const adjustments = parsed && !Array.isArray(parsed) && parsed.adjustments && typeof parsed.adjustments === 'object' ? parsed.adjustments : parsed;
-        if (!adjustments || Array.isArray(adjustments) || typeof adjustments !== 'object') throw new Error('课程调整必须是 JSON 对象');
-        const out = await api('/api/v1/admin/course-adjustments', { method: 'PUT', body: JSON.stringify({ adjustments }) });
-        courseAdjustmentsConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        courseAdjustmentsForm.value = JSON.stringify(out.adjustments || adjustments, null, 2);
-        notify('课程调整配置已保存');
       });
       const openNewCDK = () => {
         call(async () => {
@@ -555,7 +532,7 @@
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', course_adjustments_update: '更新课程调整', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); };
       watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
@@ -564,15 +541,15 @@
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarForm, courseAdjustmentsConfig, courseAdjustmentsForm,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarForm,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
         selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
         platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, loadCourseAdjustments, loadErrorReports, saveRelease, saveSchoolCalendar, saveCourseAdjustments,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, loadErrorReports, saveRelease, saveSchoolCalendar,
         showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
       };
     },
-    template: injectErrorReportsPage(injectCourseAdjustmentsConfig(injectSchoolCalendarConfig(`
+    template: injectErrorReportsPage(injectSchoolCalendarConfig(`
       <v-app>
         <v-main v-if="!logged" class="login-page">
           <v-container fluid class="login-shell pa-4">
@@ -656,6 +633,6 @@
 
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
       </v-app>
-    `)))
+    `))
   }).use(vuetify).mount('#app');
 })();

@@ -8,9 +8,8 @@ import (
 )
 
 type ConfigVersionsView struct {
-	AppRelease        string `json:"appRelease"`
-	SchoolCalendar    string `json:"schoolCalendar"`
-	CourseAdjustments string `json:"courseAdjustments"`
+	AppRelease     string `json:"appRelease"`
+	SchoolCalendar string `json:"schoolCalendar"`
 }
 
 func configVersion(value time.Time) string {
@@ -29,13 +28,8 @@ func (a *App) GetConfigVersions(ctx context.Context) (ConfigVersionsView, error)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ConfigVersionsView{}, err
 	}
-	adjustments, err := a.Store.GetCourseAdjustmentsConfig(ctx)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return ConfigVersionsView{}, err
-	}
 	return ConfigVersionsView{
-		AppRelease:        configVersion(release.UpdatedAt),
-		SchoolCalendar:    configVersion(calendar.UpdatedAt),
-		CourseAdjustments: configVersion(adjustments.UpdatedAt),
+		AppRelease:     configVersion(release.UpdatedAt),
+		SchoolCalendar: configVersion(calendar.UpdatedAt),
 	}, nil
 }
