@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     display_name TEXT NOT NULL DEFAULT '',
-    major_name TEXT NOT NULL DEFAULT '',
+    college_name TEXT NOT NULL DEFAULT '',
     class_name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL

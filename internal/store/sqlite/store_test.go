@@ -49,12 +49,12 @@ func TestMigrateAddsUserProfileColumns(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var displayName, majorName, className string
-	if err := store.DB.QueryRowContext(ctx, "SELECT display_name, major_name, class_name FROM users WHERE id = 'usr_old'").Scan(&displayName, &majorName, &className); err != nil {
+	var displayName, collegeName, className string
+	if err := store.DB.QueryRowContext(ctx, "SELECT display_name, college_name, class_name FROM users WHERE id = 'usr_old'").Scan(&displayName, &collegeName, &className); err != nil {
 		t.Fatal(err)
 	}
-	if displayName != "旧用户" || majorName != "" || className != "" {
-		t.Fatalf("migrated user = (%q, %q, %q)", displayName, majorName, className)
+	if displayName != "旧用户" || collegeName != "" || className != "" {
+		t.Fatalf("migrated user = (%q, %q, %q)", displayName, collegeName, className)
 	}
 }
 

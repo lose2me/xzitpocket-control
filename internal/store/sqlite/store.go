@@ -62,7 +62,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		column     string
 		definition string
 	}{
-		{column: "major_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{column: "college_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{column: "class_name", definition: "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(ctx, "users", migration.column, migration.definition); err != nil {
@@ -121,7 +121,7 @@ type User struct {
 	ID          string    `json:"id"`
 	Status      string    `json:"status"`
 	DisplayName string    `json:"display_name"`
-	MajorName   string    `json:"major_name"`
+	CollegeName string    `json:"college_name"`
 	ClassName   string    `json:"class_name"`
 	StudentID   string    `json:"-"`
 	Alias       string    `json:"student_alias,omitempty"`

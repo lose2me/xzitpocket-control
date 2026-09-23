@@ -217,7 +217,7 @@
           { label: '显示名', value: valueOrDash(user.display_name) },
           { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
           { label: '伪名', value: valueOrDash(user.student_alias) },
-          { label: '专业', value: valueOrDash(user.major_name) },
+          { label: '学院', value: valueOrDash(user.college_name) },
           { label: '班级', value: valueOrDash(user.class_name) },
           { label: '状态', value: statusLabel(user.status) },
           { label: '最近连接', value: formatDateTime(user.last_login_at) }
