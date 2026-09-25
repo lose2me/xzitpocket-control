@@ -232,16 +232,20 @@ type EventInput struct {
 }
 
 type RiskEvent struct {
-	ID             string     `json:"id"`
-	Type           string     `json:"type"`
-	UserID         string     `json:"user_id,omitempty"`
-	DeviceID       string     `json:"device_id,omitempty"`
-	ObservedCount  int        `json:"observed_count"`
-	WindowStart    time.Time  `json:"window_start"`
-	WindowEnd      time.Time  `json:"window_end"`
-	Detail         string     `json:"detail"`
-	CreatedAt      time.Time  `json:"created_at"`
-	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
+	ID               string     `json:"id"`
+	Type             string     `json:"type"`
+	UserID           string     `json:"user_id,omitempty"`
+	DisplayName      string     `json:"display_name,omitempty"`
+	ClassName        string     `json:"class_name,omitempty"`
+	DeviceID         string     `json:"device_id,omitempty"`
+	DeviceAppVersion string     `json:"app_version,omitempty"`
+	DeviceRevokedAt  *time.Time `json:"device_revoked_at,omitempty"`
+	ObservedCount    int        `json:"observed_count"`
+	WindowStart      time.Time  `json:"window_start"`
+	WindowEnd        time.Time  `json:"window_end"`
+	Detail           string     `json:"detail"`
+	CreatedAt        time.Time  `json:"created_at"`
+	AcknowledgedAt   *time.Time `json:"acknowledged_at,omitempty"`
 }
 
 func millis(t time.Time) int64 {

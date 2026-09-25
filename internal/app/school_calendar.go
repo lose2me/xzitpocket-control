@@ -17,12 +17,14 @@ import (
 )
 
 var schoolCalendarDatePattern = regexp.MustCompile(`^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$`)
+var schoolCalendarAdjustmentPattern = regexp.MustCompile(`^\d{8}$`)
 
 type SchoolCalendarDay struct {
-	Date     string `json:"date"`
-	Weekday  int    `json:"weekday"`
-	Holiday  bool   `json:"holiday"`
-	Festival any    `json:"festival,omitempty"`
+	Date       string `json:"date"`
+	Weekday    int    `json:"weekday"`
+	Holiday    bool   `json:"holiday"`
+	Festival   any    `json:"festival,omitempty"`
+	Adjustment string `json:"adjustment,omitempty"`
 }
 
 type SchoolCalendarInput struct {
@@ -74,6 +76,15 @@ func validateSchoolCalendarInput(in SchoolCalendarInput) (string, []SchoolCalend
 		festival, _ := day.Festival.(string)
 		if len(festival) > 64 || strings.ContainsAny(festival, "\r\n\x00") {
 			return "", nil, Err("invalid_school_calendar", "校历节日名称无效", http.StatusBadRequest)
+		}
+		day.Adjustment = strings.TrimSpace(day.Adjustment)
+		if day.Adjustment != "" && day.Adjustment != "/" {
+			if !schoolCalendarAdjustmentPattern.MatchString(day.Adjustment) {
+				return "", nil, Err("invalid_school_calendar", "课程调整日期格式无效", http.StatusBadRequest)
+			}
+			if _, err := time.Parse("20060102", day.Adjustment); err != nil {
+				return "", nil, Err("invalid_school_calendar", "课程调整日期无效", http.StatusBadRequest)
+			}
 		}
 	}
 	sort.Slice(in.Days, func(i, j int) bool { return in.Days[i].Date < in.Days[j].Date })

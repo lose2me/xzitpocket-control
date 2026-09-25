@@ -144,6 +144,46 @@ func (a *App) AcknowledgeRisk(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (a *App) ClearRisk(ctx context.Context, actor string) (int64, error) {
+	count, err := a.Store.ClearRiskEvents(ctx)
+	if err != nil {
+		return 0, err
+	}
+	_ = a.Store.AddAudit(ctx, actor, "risk_clear", "risk_events", "all", controlcrypto.JSON(map[string]any{"deleted": count}), time.Now().UTC())
+	return count, nil
+}
+
+func (a *App) SetDeviceStatus(ctx context.Context, id, status, actor string) error {
+	status = strings.TrimSpace(status)
+	if status != "active" && status != "revoked" {
+		return Err("invalid_device_status", "设备状态无效", http.StatusBadRequest)
+	}
+	if _, err := a.Store.GetDeviceByID(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	revoked := status == "revoked"
+	if err := a.Store.SetDeviceRevoked(ctx, id, revoked, now); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if revoked {
+		if err := a.Store.RevokeDeviceSessions(ctx, id, now); err != nil {
+			return err
+		}
+	}
+	action := "device_restore"
+	if revoked {
+		action = "device_revoke"
+	}
+	_ = a.Store.AddAudit(ctx, actor, action, "device", id, "{}", now)
+	return nil
+}
 func (a *App) ListAudit(ctx context.Context, limit, offset int) ([]sqlite.AuditLog, error) {
 	return a.Store.ListAudit(ctx, clampLimit(limit), max0(offset))
 }

@@ -124,7 +124,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 总览提供用户、设备、事件趋势，以及文库 CDK 今日、本周和累计成功兑换数。
 
-风控只观察并列出两类异常：短时间登录尝试过多、账号绑定设备过多。达到阈值创建 `risk_events`，后台可标记已查看；不封禁、不解绑、不撤销会话，也不阻塞任何服务。重要写操作记录 `audit_logs`。
+风控只观察并列出两类异常：短时间登录尝试过多、账号绑定设备过多。达到阈值创建 `risk_events`，后台可清空记录，并可对关联设备执行封禁或恢复；封禁设备会撤销其现有会话。重要写操作记录 `audit_logs`。
 
 ## 6. 管理 API
 
@@ -136,7 +136,8 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | GET | `/admin/users`、`/admin/users/{id}` |
 | PATCH | `/admin/users/{id}/status` |
 | GET | `/admin/devices`、`/admin/risk-events`、`/admin/audit` |
-| PATCH | `/admin/risk-events/{id}` |
+| PATCH | `/admin/devices/{id}/status`、`/admin/risk-events/{id}` |
+| DELETE | `/admin/risk-events` |
 | GET/POST | `/admin/question-banks` |
 | GET/PUT/DELETE | `/admin/question-banks/{id}` |
 | GET/POST | `/admin/library-cdks` |

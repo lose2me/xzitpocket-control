@@ -167,8 +167,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminUserStatus(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/devices":
 		s.adminDevices(w, r)
+	case r.Method == http.MethodPatch && pathMatchesIDSuffix(path, "status", "admin", "devices"):
+		s.adminDeviceStatus(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/risk-events":
 		s.adminRisk(w, r)
+	case r.Method == http.MethodDelete && path == "/admin/risk-events":
+		s.adminRiskClear(w, r)
 	case r.Method == http.MethodPatch && pathMatchesID(path, "admin", "risk-events"):
 		s.adminRiskAcknowledge(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/audit":
@@ -684,6 +688,24 @@ func (s *Server) adminDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
+func (s *Server) adminDeviceStatus(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	var in struct {
+		Status string `json:"status"`
+	}
+	if err := decodeJSON(r, &in, 16<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	if err := s.App.SetDeviceStatus(r.Context(), id, in.Status, p.Admin.ID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": true, "status": in.Status})
+}
 func (s *Server) adminRisk(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r); !ok {
 		return
@@ -700,6 +722,18 @@ func (s *Server) adminRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+func (s *Server) adminRiskClear(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	count, err := s.App.ClearRisk(r.Context(), p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": count})
 }
 func (s *Server) adminRiskAcknowledge(w http.ResponseWriter, r *http.Request, id string) {
 	p, ok := s.authAdmin(w, r)

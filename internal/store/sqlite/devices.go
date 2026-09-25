@@ -48,6 +48,27 @@ func (s *Store) UpdateDeviceClientInfo(ctx context.Context, id, platform, appVer
 	return err
 }
 
+func (s *Store) SetDeviceRevoked(ctx context.Context, id string, revoked bool, now time.Time) error {
+	var result sql.Result
+	var err error
+	if revoked {
+		result, err = s.DB.ExecContext(ctx, "UPDATE devices SET revoked_at = ? WHERE id = ?", millis(now), id)
+	} else {
+		result, err = s.DB.ExecContext(ctx, "UPDATE devices SET revoked_at = NULL WHERE id = ?", id)
+	}
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) ListDevices(ctx context.Context, limit, offset int) ([]Device, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		"SELECT id, device_serial, installation_id, device_token_hash, public_key, platform, app_version, created_at, last_seen_at, revoked_at FROM devices ORDER BY last_seen_at DESC LIMIT ? OFFSET ?",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -129,6 +130,10 @@ type SeriesPoint struct {
 type MetricsBreakdown struct {
 	Platforms           map[string]int `json:"platforms"`
 	Versions            map[string]int `json:"versions"`
+	Colleges            map[string]int `json:"colleges"`
+	Classes             map[string]int `json:"classes"`
+	EventTypes          map[string]int `json:"event_types"`
+	EventHours          map[string]int `json:"event_hours"`
 	LibraryEntries      int            `json:"library_entries"`
 	LibraryUsers        int            `json:"library_users"`
 	AnonymousEvents     int            `json:"anonymous_events"`
@@ -140,7 +145,10 @@ type MetricsBreakdown struct {
 }
 
 func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBreakdown, error) {
-	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}}
+	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}, Colleges: map[string]int{}, Classes: map[string]int{}, EventTypes: map[string]int{}, EventHours: map[string]int{}}
+	for hour := 0; hour < 24; hour++ {
+		result.EventHours[fmt.Sprintf("%02d:00", hour)] = 0
+	}
 	start := controlDayStart(now)
 	deviceRows, err := s.DB.QueryContext(ctx, `SELECT platform, app_version, COUNT(*)
 		FROM devices WHERE revoked_at IS NULL GROUP BY platform, app_version`)
@@ -164,18 +172,45 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 	if err := deviceRows.Err(); err != nil {
 		return result, err
 	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT user_id, type, properties_json FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?", millis(start), millis(now))
+	profileRows, err := s.DB.QueryContext(ctx, "SELECT college_name, class_name, COUNT(*) FROM users WHERE status = 'active' GROUP BY college_name, class_name")
+	if err != nil {
+		return result, err
+	}
+	defer profileRows.Close()
+	for profileRows.Next() {
+		var college, className string
+		var count int
+		if err := profileRows.Scan(&college, &className, &count); err != nil {
+			return result, err
+		}
+		if college == "" {
+			college = "未知"
+		}
+		if className == "" {
+			className = "未知"
+		}
+		result.Colleges[college] += count
+		result.Classes[className] += count
+	}
+	if err := profileRows.Err(); err != nil {
+		return result, err
+	}
+	rows, err := s.DB.QueryContext(ctx, "SELECT occurred_at, user_id, type, properties_json FROM activity_events WHERE occurred_at >= ? AND occurred_at <= ?", millis(start), millis(now))
 	if err != nil {
 		return result, err
 	}
 	defer rows.Close()
 	libraryUsers := map[string]bool{}
 	for rows.Next() {
+		var occurred int64
 		var userID sql.NullString
 		var eventType, raw string
-		if err := rows.Scan(&userID, &eventType, &raw); err != nil {
+		if err := rows.Scan(&occurred, &userID, &eventType, &raw); err != nil {
 			return result, err
 		}
+		result.EventTypes[eventType]++
+		local := fromMillis(occurred).In(controlLocation)
+		result.EventHours[fmt.Sprintf("%02d:00", local.Hour())]++
 		var props map[string]any
 		if json.Unmarshal([]byte(raw), &props) != nil {
 			continue

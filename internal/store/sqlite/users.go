@@ -94,12 +94,13 @@ func (s *Store) TouchUserConnection(ctx context.Context, id string, now time.Tim
 
 type UserListItem struct {
 	User
-	DeviceCount int `json:"device_count"`
+	DeviceCount int    `json:"device_count"`
+	AppVersion  string `json:"app_version"`
 }
 
 func (s *Store) ListUsers(ctx context.Context, limit, offset int, status string) ([]UserListItem, error) {
 	args := []any{limit, offset}
-	query := "SELECT u.id, u.status, u.display_name, u.college_name, u.class_name, u.created_at, u.last_login_at, COUNT(DISTINCT CASE WHEN ud.unbound_at IS NULL THEN ud.device_id END) FROM users u LEFT JOIN user_devices ud ON ud.user_id = u.id"
+	query := "SELECT u.id, u.status, u.display_name, u.college_name, u.class_name, u.created_at, u.last_login_at, COUNT(DISTINCT CASE WHEN ud.unbound_at IS NULL THEN ud.device_id END), COALESCE((SELECT d.app_version FROM user_devices ud2 JOIN devices d ON d.id = ud2.device_id WHERE ud2.user_id = u.id AND ud2.unbound_at IS NULL AND d.revoked_at IS NULL ORDER BY d.last_seen_at DESC LIMIT 1), '') FROM users u LEFT JOIN user_devices ud ON ud.user_id = u.id"
 	if strings.TrimSpace(status) != "" {
 		query += " WHERE u.status = ?"
 		args = []any{status, limit, offset}
@@ -114,7 +115,7 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int, status string)
 	for rows.Next() {
 		var u UserListItem
 		var created, lastLogin int64
-		if err := rows.Scan(&u.ID, &u.Status, &u.DisplayName, &u.CollegeName, &u.ClassName, &created, &lastLogin, &u.DeviceCount); err != nil {
+		if err := rows.Scan(&u.ID, &u.Status, &u.DisplayName, &u.CollegeName, &u.ClassName, &created, &lastLogin, &u.DeviceCount, &u.AppVersion); err != nil {
 			return nil, err
 		}
 		u.CreatedAt = fromMillis(created)

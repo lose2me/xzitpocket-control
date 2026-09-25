@@ -127,7 +127,7 @@
 
   const injectSchoolCalendarConfig = (template) => {
     const marker = `              <section v-else-if="view === 'config'">`;
-    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>学校校历</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadSchoolCalendar">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveSchoolCalendar"><v-textarea v-model="schoolCalendarForm" label="校历 JSON" placeholder="例如：days 数组 JSON" variant="outlined" rows="16" class="mono" hide-details="auto" /><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="schoolCalendarConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(schoolCalendarConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存校历</v-btn></div></v-form></v-card-text></v-card>`;
+    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>学校校历</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadSchoolCalendar">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveSchoolCalendar"><div class="d-flex align-center flex-wrap ga-2"><v-text-field v-model="schoolCalendarRange" label="学期日期范围" placeholder="20260831-20270110" variant="outlined" density="comfortable" hide-details="auto" class="school-calendar-range" /><v-btn type="button" color="secondary" prepend-icon="mdi-calendar-refresh" @click="rebuildSchoolCalendar">按范围重建</v-btn><v-btn type="button" variant="tonal" color="primary" prepend-icon="mdi-calendar-plus" @click="openNewSchoolCalendarDay">添加例外日期</v-btn></div><v-data-table :key="schoolCalendarTableKey" :headers="schoolCalendarHeaders" :items="schoolCalendarExceptions" item-value="date" hide-default-footer density="comfortable" class="school-calendar-table mt-3" no-data-text="暂无例外日期"><template #item.date="{ item }"><span class="mono">{{ rawItem(item).date }}</span></template><template #item.festival="{ item }"><span>{{ valueOrDash(rawItem(item).festival) }}</span></template><template #item.adjustment="{ item }"><v-chip v-if="rawItem(item).adjustment" size="small" color="info" variant="tonal">{{ rawItem(item).adjustment === '/' ? '清空当天' : '调至 ' + rawItem(item).adjustment }}</v-chip><span v-else>-</span></template><template #item.actions="{ item }"><v-btn icon="mdi-pencil-outline" size="small" variant="text" color="primary" aria-label="编辑日期" @click="openSchoolCalendarDay(rawItem(item))" /><v-btn icon="mdi-delete-outline" size="small" variant="text" color="error" aria-label="删除例外日期" @click="deleteSchoolCalendarException(rawItem(item))" /></template></v-data-table><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="schoolCalendarConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(schoolCalendarConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存校历</v-btn></div></v-form><v-dialog v-model="schoolCalendarDayDialog" max-width="460"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>{{ schoolCalendarEditingDateLabel }}</span></v-card-title><v-card-text><v-checkbox v-model="schoolCalendarEditingHoliday" label="放假" color="primary" hide-details class="mb-2" /><v-text-field v-model="schoolCalendarEditingDate" label="日期（YYYYMMDD）" placeholder="20260925" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingFestival" label="节日名称" placeholder="可选" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingAdjustment" label="课程调整" placeholder="YYYYMMDD 或 /" variant="outlined" density="comfortable" hint="填写原始课程日期；/ 表示清空当天" persistent-hint /></v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="schoolCalendarDayDialog = false">取消</v-btn><v-btn color="primary" @click="saveSchoolCalendarDay">应用</v-btn></v-card-actions></v-card></v-dialog></v-card-text></v-card>`;
     return template.replace(marker, marker + card);
   };
 
@@ -166,7 +166,15 @@
       const releaseConfig = ref({ latestVersion: '', downloadUrl: '', updatedAt: '' });
       const releaseForm = ref({ latestVersion: '', downloadUrl: '' });
       const schoolCalendarConfig = ref({ days: [], updatedAt: '' });
-      const schoolCalendarForm = ref('');
+      const schoolCalendarDays = ref([]);
+      const schoolCalendarRange = ref('');
+      const schoolCalendarDayDialog = ref(false);
+      const schoolCalendarTableKey = ref(0);
+      const schoolCalendarEditingDate = ref('');
+      const schoolCalendarEditingAdjustment = ref('');
+      const schoolCalendarEditingHoliday = ref(false);
+      const schoolCalendarEditingFestival = ref('');
+      const schoolCalendarEditingNew = ref(false);
       const bankDialog = ref(false);
       const bankEditing = ref(false);
       const bankJSON = ref('');
@@ -176,15 +184,19 @@
       const userDialog = ref(false);
       const loginForm = ref({ key: '' });
       const userStatus = ref('');
-      const riskFilter = ref('');
       const snackbar = ref({ show: false, text: '', color: 'success' });
       const chartEl = ref(null);
+      const collegeChartEl = ref(null);
+      const platformChartEl = ref(null);
+      const eventChartEl = ref(null);
       let chart = null;
+      let collegeChart = null;
+      let platformChart = null;
+      let eventChart = null;
 
       const nav = [
         { key: 'overview', label: '总览', icon: 'mdi-chart-line' },
         { key: 'users', label: '用户', icon: 'mdi-account-group-outline' },
-        { key: 'devices', label: '设备', icon: 'mdi-cellphone-link' },
         { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
         { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
@@ -204,6 +216,14 @@
       ]);
       const platformRows = computed(() => Object.entries(breakdown.value.platforms || {}).map(([label, value]) => ({ label, value })));
       const versionRows = computed(() => Object.entries(breakdown.value.versions || {}).map(([label, value]) => ({ label, value })));
+      const distributionRows = (value) => Object.entries(value || {})
+        .map(([label, value]) => ({ label, value: Number(value) || 0 }))
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+      const collegeRows = computed(() => distributionRows(breakdown.value.colleges));
+      const classRows = computed(() => distributionRows(breakdown.value.classes));
+      const eventRows = computed(() => Object.entries(breakdown.value.event_hours || {})
+        .map(([label, value]) => ({ label, value: Number(value) || 0 }))
+        .sort((a, b) => a.label.localeCompare(b.label)));
       const cdkActivationRows = computed(() => [
         { label: '今日激活数', value: breakdown.value.cdk_activations_today || 0 },
         { label: '本周激活数', value: breakdown.value.cdk_activations_week || 0 },
@@ -213,7 +233,6 @@
         if (!selectedUser.value) return [];
         const user = selectedUser.value.user || {};
         return [
-          { label: 'ID', value: valueOrDash(user.id) },
           { label: '显示名', value: valueOrDash(user.display_name) },
           { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
           { label: '伪名', value: valueOrDash(user.student_alias) },
@@ -224,9 +243,10 @@
         ];
       });
       const userHeaders = [
-        { title: 'ID', key: 'id', sortable: false, width: '18%' }, { title: '显示名', key: 'display_name', width: '20%' },
-        { title: '状态', key: 'status', width: '14%' }, { title: '设备数', key: 'device_count', align: 'center', width: '12%' },
-        { title: '最近连接', key: 'last_login_at', width: '18%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '18%' }
+        { title: '学院', key: 'college_name', width: '19%' }, { title: '班级', key: 'class_name', width: '18%' },
+        { title: '显示名', key: 'display_name', width: '17%' }, { title: '版本号', key: 'app_version', width: '11%' }, { title: '状态', key: 'status', width: '11%' },
+        { title: '设备数', key: 'device_count', align: 'center', width: '10%' }, { title: '最近连接', key: 'last_login_at', width: '15%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
       ];
       const deviceHeaders = [
         { title: '设备码', key: 'device_serial', sortable: false, width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
@@ -234,10 +254,10 @@
         { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
       ];
       const riskHeaders = [
-        { title: '类型', key: 'type', width: '18%' }, { title: '用户', key: 'user_id', sortable: false, width: '16%' },
-        { title: '设备', key: 'device_id', sortable: false, width: '16%' }, { title: '次数', key: 'observed_count', align: 'center', width: '12%' },
-        { title: '时间', key: 'created_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '12%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+        { title: '类型', key: 'type', width: '16%' }, { title: '班级', key: 'class_name', sortable: false, width: '18%' },
+        { title: '显示名', key: 'display_name', sortable: false, width: '16%' }, { title: '版本号', key: 'app_version', sortable: false, width: '12%' },
+        { title: '次数', key: 'observed_count', align: 'center', width: '10%' }, { title: '时间', key: 'created_at', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '10%' }
       ];
       const auditHeaders = [
         { title: '时间', key: 'created_at', width: '18%' }, { title: '动作', key: 'action', width: '18%' },
@@ -273,6 +293,18 @@
       const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
       const questionTypeOptions = ['单选题', '多选题', '判断题', '填空题'];
       const bankPageCount = computed(() => Math.max(1, Math.ceil(bankTotal.value / bankItemsPerPage.value)));
+      const schoolCalendarEditingDateLabel = computed(() =>
+        schoolCalendarEditingDate.value || '添加例外日期',
+      );
+      const schoolCalendarHeaders = [
+        { title: '日期', key: 'date', width: '22%' },
+        { title: '节日', key: 'festival', width: '31%' },
+        { title: '课程调整', key: 'adjustment', width: '31%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '16%' },
+      ];
+      const schoolCalendarExceptions = computed(() => schoolCalendarDays.value.filter(day =>
+        day.festival || day.adjustment || (day.holiday && day.weekday < 6),
+      ));
 
       const notify = (text, color) => { snackbar.value = { show: true, text, color: color || 'success' }; };
       const closeBankEditor = () => {
@@ -338,7 +370,52 @@
       const loadSchoolCalendar = async () => {
         const out = await api('/api/v1/admin/school-calendar');
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        schoolCalendarForm.value = JSON.stringify({ days: (out && out.days) || [] }, null, 2);
+        schoolCalendarDays.value = (out && out.days || []).map(day => Object.assign({}, day, { festival: day.festival || '', adjustment: day.adjustment || '' }));
+        schoolCalendarRange.value = schoolCalendarDays.value.length
+          ? schoolCalendarDays.value[0].date.replaceAll('-', '') + '-' + schoolCalendarDays.value[schoolCalendarDays.value.length - 1].date.replaceAll('-', '')
+          : '';
+      };
+      const calendarWeekday = (date) => date.getUTCDay() === 0 ? 7 : date.getUTCDay();
+      const normalizeCompactDate = (value) => {
+        if (!/^\d{8}$/.test(value)) return '';
+        const date = new Date(value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8) + 'T00:00:00Z');
+        if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10).replaceAll('-', '') !== value) return '';
+        return value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8);
+      };
+      const rebuildSchoolCalendar = () => {
+        try {
+          const match = /^(\d{8})-(\d{8})$/.exec((schoolCalendarRange.value || '').trim());
+          if (!match) throw new Error('请输入 YYYYMMDD-YYYYMMDD 格式的日期范围');
+          const parseDate = (value) => {
+            const date = new Date(value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8) + 'T00:00:00Z');
+            if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10).replaceAll('-', '') !== value) throw new Error('日期范围无效');
+            return date;
+          };
+          const start = parseDate(match[1]);
+          const end = parseDate(match[2]);
+          if (start > end) {
+            throw new Error('开始日期不能晚于结束日期');
+          }
+          const previous = new Map(schoolCalendarDays.value.map(day => [day.date, day]));
+          const days = [];
+          for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+            const date = cursor.toISOString().slice(0, 10);
+            const weekday = calendarWeekday(cursor);
+            const saved = previous.get(date);
+            days.push({
+              date,
+              weekday,
+              holiday: saved ? !!saved.holiday : weekday >= 6,
+              festival: saved ? (saved.festival || '') : '',
+              adjustment: saved ? (saved.adjustment || '') : '',
+            });
+            if (days.length > 1000) throw new Error('校历范围不能超过 1000 天');
+          }
+          schoolCalendarDays.value = days;
+          schoolCalendarTableKey.value++;
+        } catch (e) {
+          error.value = e && e.message ? e.message : '校历范围无效';
+        }
       };
       const loadErrorReports = async () => {
         const offset = (errorReportsPage.value - 1) * errorReportsPerPage.value;
@@ -353,8 +430,7 @@
         await call(async () => {
           if (view.value === 'overview') await loadOverview();
           else if (view.value === 'users') users.value = (await api('/api/v1/admin/users?limit=100')).items || [];
-          else if (view.value === 'devices') devices.value = (await api('/api/v1/admin/devices?limit=100')).items || [];
-          else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100' + (riskFilter.value ? '&acknowledged=' + riskFilter.value : ''))).items || [];
+          else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar()]);
@@ -363,26 +439,59 @@
       };
       const switchView = (name) => { view.value = name; if (!mdAndUp.value) drawer.value = false; load(); };
       const drawChart = () => {
-        if (!chartEl.value || !window.echarts || view.value !== 'overview') return;
+        if (!window.echarts || view.value !== 'overview') return;
         if (chart) {
           let dom = null; try { dom = chart.getDom(); } catch (_) {}
           if (dom !== chartEl.value) { chart.dispose(); chart = null; }
         }
-        if (!chart) chart = window.echarts.init(chartEl.value);
-        chart.clear();
-        chart.setOption({
-          animationDuration: 350, tooltip: { trigger: 'axis' },
-          legend: { data: ['总用户', 'DAU', 'WAU', '今日事件'], top: 0, textStyle: { color: '#5e6d76' } },
-          grid: { left: 42, right: 18, top: 34, bottom: 30 },
-          xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
-          yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
-          series: [
-            { name: '总用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.total_users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
-            { name: 'DAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.dau), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
-            { name: 'WAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.wau), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } },
-            { name: '今日事件', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.today_events), itemStyle: { color: '#b7791f' }, lineStyle: { width: 3 } }
-          ]
-        });
+        if (chartEl.value) {
+          if (!chart) chart = window.echarts.init(chartEl.value);
+          chart.clear();
+          chart.setOption({
+            animationDuration: 350, tooltip: { trigger: 'axis' },
+            legend: { data: ['总用户', 'WAU', '今日事件'], top: 0, textStyle: { color: '#5e6d76' } },
+            grid: { left: 42, right: 18, top: 34, bottom: 30 },
+            xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
+            yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
+            series: [
+              { name: '总用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.total_users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
+              { name: 'WAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.wau), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } },
+              { name: '今日事件', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.today_events), itemStyle: { color: '#b7791f' }, lineStyle: { width: 3 } }
+            ]
+          });
+        }
+        if (collegeChart) collegeChart.dispose();
+        if (collegeChartEl.value && collegeRows.value.length) {
+          collegeChart = window.echarts.init(collegeChartEl.value);
+          collegeChart.setOption({
+            animationDuration: 350,
+            tooltip: { trigger: 'item' },
+            legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' } },
+            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: collegeRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}: {c}' } }]
+          });
+        }
+        if (platformChart) platformChart.dispose();
+        if (platformChartEl.value && platformRows.value.length) {
+          platformChart = window.echarts.init(platformChartEl.value);
+          platformChart.setOption({
+            animationDuration: 350,
+            tooltip: { trigger: 'item' },
+            legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' } },
+            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: platformRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}: {c}' } }]
+          });
+        }
+        if (eventChart) eventChart.dispose();
+        if (eventChartEl.value && eventRows.value.length) {
+          eventChart = window.echarts.init(eventChartEl.value);
+          eventChart.setOption({
+            animationDuration: 350,
+            tooltip: { trigger: 'axis' },
+            grid: { left: 42, right: 18, top: 18, bottom: 42 },
+            xAxis: { type: 'category', data: eventRows.value.map(row => row.label), axisLabel: { color: '#697984', rotate: 24 }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
+            yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
+            series: [{ name: '事件数', type: 'bar', barMaxWidth: 36, data: eventRows.value.map(row => row.value), itemStyle: { color: '#287ca8', borderRadius: [4, 4, 0, 0] } }]
+          });
+        }
       };
       const openNewBank = () => {
         bankEditing.value = false;
@@ -430,15 +539,71 @@
         notify('APP 发布配置已保存');
       });
       const saveSchoolCalendar = () => call(async () => {
-        let parsed;
-        try { parsed = JSON.parse(schoolCalendarForm.value || ''); } catch (_) { throw new Error('校历 JSON 格式无效'); }
-        const days = Array.isArray(parsed) ? parsed : parsed && parsed.days;
-        if (!Array.isArray(days) || !days.length) throw new Error('请至少配置一天校历');
-        const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days }) });
+        if (!schoolCalendarDays.value.length) throw new Error('请至少配置一天校历');
+        const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days: schoolCalendarDays.value }) });
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        schoolCalendarForm.value = JSON.stringify({ days: out.days || days }, null, 2);
+        schoolCalendarDays.value = (out.days || schoolCalendarDays.value).map(day => Object.assign({}, day, { festival: day.festival || '', adjustment: day.adjustment || '' }));
         notify('学校校历已保存');
       });
+      const openNewSchoolCalendarDay = () => {
+        schoolCalendarEditingNew.value = true;
+        schoolCalendarEditingDate.value = '';
+        schoolCalendarEditingAdjustment.value = '';
+        schoolCalendarEditingHoliday.value = false;
+        schoolCalendarEditingFestival.value = '';
+        schoolCalendarDayDialog.value = true;
+      };
+      const openSchoolCalendarDay = (day) => {
+        schoolCalendarEditingNew.value = false;
+        schoolCalendarEditingDate.value = day.date.replaceAll('-', '');
+        schoolCalendarEditingAdjustment.value = day.adjustment || '';
+        schoolCalendarEditingHoliday.value = !!day.holiday;
+        schoolCalendarEditingFestival.value = day.festival || '';
+        schoolCalendarDayDialog.value = true;
+      };
+      const deleteSchoolCalendarException = (day) => {
+        const item = rawItem(day);
+        const target = schoolCalendarDays.value.find(entry => entry.date === item.date);
+        if (!target) return;
+        target.holiday = target.weekday >= 6;
+        target.festival = '';
+        target.adjustment = '';
+        schoolCalendarTableKey.value++;
+      };
+      const saveSchoolCalendarDay = () => {
+        const compactDate = (schoolCalendarEditingDate.value || '').trim();
+        const date = normalizeCompactDate(compactDate);
+        if (!date) {
+          error.value = '日期必须是有效的 YYYYMMDD 格式';
+          return;
+        }
+        const day = schoolCalendarDays.value.find(item => item.date === date);
+        if (!day && !schoolCalendarEditingNew.value) return;
+        const value = (schoolCalendarEditingAdjustment.value || '').trim();
+        if (value !== '' && value !== '/' && !/^\d{8}$/.test(value)) {
+          error.value = '调整参数必须是 YYYYMMDD 或 /';
+          return;
+        }
+        if (!day) {
+          const parsed = new Date(date + 'T00:00:00Z');
+          const first = schoolCalendarDays.value[0];
+          const last = schoolCalendarDays.value[schoolCalendarDays.value.length - 1];
+          if (Number.isNaN(parsed.getTime()) || !first || !last || date < first.date || date > last.date) {
+            error.value = '例外日期必须位于当前校历范围内';
+            return;
+          }
+          const weekday = calendarWeekday(parsed);
+          schoolCalendarDays.value.push({ date, weekday, holiday: false, festival: '', adjustment: '' });
+          schoolCalendarDays.value.sort((a, b) => a.date.localeCompare(b.date));
+        }
+        const target = schoolCalendarDays.value.find(item => item.date === date);
+        target.holiday = !!schoolCalendarEditingHoliday.value;
+        target.festival = (schoolCalendarEditingFestival.value || '').trim();
+        target.adjustment = value;
+        schoolCalendarDayDialog.value = false;
+        schoolCalendarEditingNew.value = false;
+        schoolCalendarTableKey.value++;
+      };
       const openNewCDK = () => {
         call(async () => {
           cdkForm.value = { count: 1 };
@@ -495,6 +660,20 @@
         await api('/api/v1/admin/users/' + encodeURIComponent(row.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: next }) });
         notify(next === 'disabled' ? '用户已停用' : '用户已启用'); await load();
       });
+      const setRiskDeviceStatus = (risk) => call(async () => {
+        const item = rawItem(risk);
+        if (!item.device_id) return;
+        const revoked = !!item.device_revoked_at;
+        const next = revoked ? 'active' : 'revoked';
+        if (!window.confirm(revoked ? '确定恢复这个设备吗？' : '确定封禁这个设备吗？')) return;
+        await api('/api/v1/admin/devices/' + encodeURIComponent(item.device_id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: next }) });
+        notify(revoked ? '设备已恢复' : '设备已封禁'); await load();
+      });
+      const clearRiskEvents = () => call(async () => {
+        if (!window.confirm('确定清空全部风控记录吗？此操作不可恢复。')) return;
+        const out = await api('/api/v1/admin/risk-events', { method: 'DELETE' });
+        notify('已清空 ' + (out.deleted || 0) + ' 条风控记录'); await load();
+      });
       const acknowledge = (risk) => call(async () => {
         const row = rawItem(risk);
         await api('/api/v1/admin/risk-events/' + encodeURIComponent(row.id), { method: 'PATCH', body: '{}' });
@@ -532,21 +711,22 @@
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录' }[action] || valueOrDash(action));
+      const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
-      const handleResize = () => { if (chart) chart.resize(); };
+      const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); };
       watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
       onMounted(() => { if (logged.value) load(); window.addEventListener('resize', handleResize); });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); if (chart) chart.dispose(); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarForm,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingHoliday, schoolCalendarEditingFestival,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
-        selectedUser, userDialog, loginForm, userStatus, riskFilter, snackbar, chartEl, nav, title, statCards,
-        platformRows, versionRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, loadErrorReports, saveRelease, saveSchoolCalendar,
-        showUser, closeUser, setStatus, disableUser, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, actionLabel, riskStatusColor
+        selectedUser, userDialog, loginForm, userStatus, snackbar, chartEl, platformChartEl, collegeChartEl, eventChartEl, nav, title, statCards,
+        platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, rebuildSchoolCalendar, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay,
+        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
       };
     },
     template: injectErrorReportsPage(injectSchoolCalendarConfig(`
@@ -592,12 +772,13 @@
               <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4" closable @click:close="error=''">{{ error }}</v-alert>
               <section v-if="view === 'overview'">
                 <v-row dense class="mb-4"><v-col v-for="stat in statCards" :key="stat.label" cols="12" sm="6" md="4" lg="2"><v-card variant="elevated" border class="stat-card h-100"><v-card-text class="d-flex align-center ga-3"><v-avatar :color="stat.color" variant="tonal" size="42"><v-icon :icon="stat.icon" /></v-avatar><div class="min-w-0"><div class="text-caption text-medium-emphasis">{{ stat.label }}</div><div class="text-h5 font-weight-bold mt-1">{{ stat.value }}</div></div></v-card-text></v-card></v-col></v-row>
-                <v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-timeline-variant" color="primary" /><span>近 30 天趋势</span><v-spacer /><v-chip size="small" variant="tonal" color="primary">{{ series.length }} 天</v-chip></v-card-title><v-divider /><v-card-text><div ref="chartEl" class="chart" aria-label="近 30 天总用户、DAU、WAU 和今日事件趋势图" /></v-card-text></v-card>
-                <v-row dense><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-monitor-dashboard" color="secondary" /><span>平台分布</span></v-card-title><v-divider /><v-list v-if="platformRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in platformRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="secondary" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-tag-multiple-outline" color="info" /><span>版本分布</span></v-card-title><v-divider /><v-list v-if="versionRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in versionRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="info" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-key-chain" color="warning" /><span>文库CDK</span></v-card-title><v-divider /><v-list density="compact" lines="one" class="py-2"><v-list-item v-for="row in cdkActivationRows" :key="row.label" :title="row.label"><template #append><span class="font-weight-bold">{{ row.value }}</span></template></v-list-item></v-list></v-card></v-col></v-row>
+                <v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-timeline-variant" color="primary" /><span>趋势</span><v-spacer /><v-chip size="small" variant="tonal" color="primary">{{ series.length }} 天</v-chip></v-card-title><v-divider /><v-card-text><div ref="chartEl" class="chart" aria-label="总用户、WAU 和今日事件趋势图" /></v-card-text></v-card>
+                <v-row dense><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-donut" color="secondary" /><span>平台分布</span></v-card-title><v-divider /><v-card-text><div v-if="platformRows.length" ref="platformChartEl" class="distribution-chart" aria-label="平台分布饼图" /><div v-else class="empty-state">暂无数据</div></v-card-text></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-tag-multiple-outline" color="info" /><span>版本分布</span></v-card-title><v-divider /><v-list v-if="versionRows.length" density="compact" lines="one" class="py-2"><v-list-item v-for="row in versionRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="info" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" md="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-key-chain" color="warning" /><span>文库CDK</span></v-card-title><v-divider /><v-list density="compact" lines="one" class="py-2"><v-list-item v-for="row in cdkActivationRows" :key="row.label" :title="row.label"><template #append><span class="font-weight-bold">{{ row.value }}</span></template></v-list-item></v-list></v-card></v-col></v-row>
+              <v-row dense class="mt-1"><v-col cols="12" lg="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-donut" color="primary" /><span>学院分布</span></v-card-title><v-divider /><v-card-text><div v-if="collegeRows.length" ref="collegeChartEl" class="distribution-chart" aria-label="学院分布饼图" /><div v-else class="empty-state">暂无数据</div></v-card-text></v-card></v-col><v-col cols="12" lg="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-school-outline" color="secondary" /><span>班级分布</span></v-card-title><v-divider /><v-list v-if="classRows.length" density="compact" lines="one" class="py-2 distribution-list"><v-list-item v-for="row in classRows" :key="row.label" :title="row.label"><template #append><v-chip size="small" color="secondary" variant="tonal">{{ row.value }}</v-chip></template></v-list-item></v-list><div v-else class="empty-state">暂无数据</div></v-card></v-col><v-col cols="12" lg="4"><v-card variant="elevated" border class="h-100"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-chart-bar" color="info" /><span>事件时段分布</span></v-card-title><v-divider /><v-card-text><div v-if="eventRows.length" ref="eventChartEl" class="distribution-chart" aria-label="一天内事件触发时段柱状图" /><div v-else class="empty-state">暂无数据</div></v-card-text></v-card></v-col></v-row>
               </section>
-              <section v-else-if="view === 'users'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-group-outline" color="primary" /><span>用户列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="userHeaders" :items="users" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.display_name="{ item }">{{ valueOrDash(rawItem(item).display_name) }}</template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.last_login_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_login_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="showUser(rawItem(item))">详情</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-account-check-outline' : 'mdi-account-cancel-outline'" @click="disableUser(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn></div></template></v-data-table></v-card></section>
+              <section v-else-if="view === 'users'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-account-group-outline" color="primary" /><span>用户列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="userHeaders" :items="users" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.display_name="{ item }">{{ valueOrDash(rawItem(item).display_name) }}</template><template #item.college_name="{ item }">{{ valueOrDash(rawItem(item).college_name) }}</template><template #item.class_name="{ item }">{{ valueOrDash(rawItem(item).class_name) }}</template><template #item.app_version="{ item }">{{ valueOrDash(rawItem(item).app_version) }}</template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.last_login_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_login_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="showUser(rawItem(item))">详情</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-account-check-outline' : 'mdi-account-cancel-outline'" @click="disableUser(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn></div></template></v-data-table></v-card></section>
               <section v-else-if="view === 'devices'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cellphone-link" color="primary" /><span>设备列表</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="deviceHeaders" :items="devices" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.device_serial="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_serial) }}</span></template><template #item.installation_id="{ item }"><span class="mono table-ellipsis" :title="valueOrDash(rawItem(item).installation_id)">{{ valueOrDash(rawItem(item).installation_id) }}</span></template><template #item.last_seen_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).last_seen_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="rawItem(item).revoked_at ? 'error' : 'success'" variant="tonal">{{ rawItem(item).revoked_at ? '已撤销' : '正常' }}</v-chip></template></v-data-table></v-card></section>
-              <section v-else-if="view === 'risk'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-shield-alert-outline" color="warning" /><span>风控记录</span><v-spacer /><v-select v-model="riskFilter" :items="riskOptions" item-title="title" item-value="value" label="查看状态" variant="outlined" density="compact" hide-details style="max-width: 170px" @update:model-value="load" /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="riskHeaders" :items="risks" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.type="{ item }"><span>{{ riskTypeLabel(rawItem(item).type) }}</span></template><template #item.user_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).user_id) }}</span></template><template #item.device_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).device_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="riskStatusColor(rawItem(item))" variant="tonal">{{ rawItem(item).acknowledged_at ? '已查看' : '未查看' }}</v-chip></template><template #item.actions="{ item }"><v-btn v-if="!rawItem(item).acknowledged_at" size="small" variant="text" color="primary" prepend-icon="mdi-check" @click="acknowledge(rawItem(item))">标记</v-btn></template></v-data-table></v-card></section>
+              <section v-else-if="view === 'risk'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-shield-alert-outline" color="warning" /><span>风控记录</span><v-spacer /><v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-delete-sweep-outline" :loading="loading" @click="clearRiskEvents">清空记录</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="riskHeaders" :items="risks" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.type="{ item }"><span>{{ riskTypeLabel(rawItem(item).type) }}</span></template><template #item.class_name="{ item }"><span>{{ valueOrDash(rawItem(item).class_name) }}</span></template><template #item.display_name="{ item }"><span>{{ valueOrDash(rawItem(item).display_name) }}</span></template><template #item.app_version="{ item }"><span>{{ valueOrDash(rawItem(item).app_version) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.actions="{ item }"><v-btn v-if="rawItem(item).device_id" size="small" variant="text" :color="rawItem(item).device_revoked_at ? 'success' : 'error'" :prepend-icon="rawItem(item).device_revoked_at ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline'" @click="setRiskDeviceStatus(rawItem(item))">{{ rawItem(item).device_revoked_at ? '恢复设备' : '封禁设备' }}</v-btn></template></v-data-table></v-card></section>
               <section v-else-if="view === 'library'"><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 toolbar-wrap library-toolbar"><v-icon icon="mdi-book-open-page-variant" color="primary" /><span>文库题库</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="openNewBank">新建题库</v-btn><v-btn size="small" variant="tonal" color="secondary" prepend-icon="mdi-key-plus" @click="openNewCDK">生成 CDK</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="bankHeaders" :items="banks" item-value="id" :items-per-page="bankItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无题库"><template #item.orderId="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).orderId) }}</span></template><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.question_count="{ item }"><span class="font-weight-bold">{{ rawItem(item).question_count || 0 }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.new="{ item }"><v-chip size="small" :color="rawItem(item).new ? 'primary' : 'default'" variant="tonal">{{ rawItem(item).new ? '是' : '否' }}</v-chip></template><template #item.requiresCDK="{ item }"><v-chip size="small" :color="rawItem(item).requiresCDK ? 'secondary' : 'default'" variant="tonal">{{ rawItem(item).requiresCDK ? '需要' : '不需要' }}</v-chip></template><template #item.updated_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).updated_at) }}</span></template><template #item.actions="{ item }"><div class="table-actions"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-pencil-outline" @click="editBank(rawItem(item))">编辑</v-btn><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'error'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-play-circle-outline' : 'mdi-stop-circle-outline'" @click="setBankStatus(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '停用' }}</v-btn><v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="removeBank(rawItem(item))">删除</v-btn></div></template></v-data-table><div v-if="bankTotal > bankItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="bankPage" :length="bankPageCount" density="comfortable" @update:model-value="loadBanks" /></div></v-card><v-card variant="elevated" border class="mb-4"><v-card-title class="d-flex align-center ga-2 cdk-toolbar"><v-icon icon="mdi-key-chain" color="secondary" /><span>文库 CDK</span><v-spacer /><v-text-field v-model="cdkSearch" label="搜索 CDK、题库或学号" prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable class="cdk-search" @keyup.enter="searchCDKs" @click:clear="searchCDKs" /><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-magnify" :loading="loading" @click="searchCDKs">搜索</v-btn><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadCDKs">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="cdkHeaders" :items="cdks" item-value="id" :items-per-page="cdkItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover hide-default-footer class="admin-table" no-data-text="暂无 CDK"><template #item.id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).id) }}</span></template><template #item.status="{ item }"><v-chip size="small" :color="statusColor(rawItem(item).status)" variant="tonal">{{ statusLabel(rawItem(item).status) }}</v-chip></template><template #item.bound_student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).bound_student_id) }}</span></template><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.used_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).used_at) }}</span></template><template #item.actions="{ item }"><v-btn size="small" variant="text" :color="rawItem(item).status === 'disabled' ? 'success' : 'warning'" :prepend-icon="rawItem(item).status === 'disabled' ? 'mdi-check-circle-outline' : 'mdi-cancel'" @click="setCDKStatus(rawItem(item))">{{ rawItem(item).status === 'disabled' ? '启用' : '禁用' }}</v-btn></template></v-data-table><div v-if="cdkTotal > cdkItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="cdkPage" :length="Math.max(1, Math.ceil(cdkTotal / cdkItemsPerPage))" density="comfortable" @update:model-value="loadCDKs" /></div></v-card></section>
               <section v-else-if="view === 'config'"><v-card variant="elevated" border class="config-card"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-cog-outline" color="primary" /><span>配置</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-card-text><div class="text-subtitle-1 font-weight-bold mb-4">APP 发布配置</div><v-form @submit.prevent="saveRelease"><v-row dense align="center"><v-col cols="12" md="4"><v-text-field v-model="releaseForm.latestVersion" label="最新版版本号" placeholder="例如 2.0.4" variant="outlined" density="comfortable" hide-details="auto" /></v-col><v-col cols="12" md="8"><v-text-field v-model="releaseForm.downloadUrl" label="下载 URL" placeholder="https://..." type="url" variant="outlined" density="comfortable" hide-details="auto" /></v-col></v-row><div class="d-flex align-center flex-wrap ga-3 mt-5"><span v-if="releaseConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ releaseConfig.updatedAt }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存配置</v-btn></div></v-form></v-card-text></v-card></section>
               <section v-else-if="view === 'audit'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-history" color="primary" /><span>审计日志</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="auditHeaders" :items="audit" item-value="id" :items-per-page="25" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无数据"><template #item.created_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).created_at) }}</span></template><template #item.action="{ item }"><span>{{ actionLabel(rawItem(item).action) }}</span></template><template #item.actor_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).actor_id) }}</span></template><template #item.target="{ item }"><span>{{ valueOrDash(rawItem(item).target_type) }} {{ valueOrDash(rawItem(item).target_id) }}</span></template><template #item.detail="{ item }"><span class="table-ellipsis audit-detail" :title="valueOrDash(rawItem(item).detail)">{{ valueOrDash(rawItem(item).detail) }}</span></template></v-data-table></v-card></section>
