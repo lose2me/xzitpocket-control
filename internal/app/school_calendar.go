@@ -16,15 +16,13 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-var schoolCalendarDatePattern = regexp.MustCompile(`^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$`)
+var schoolCalendarDatePattern = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
 var schoolCalendarAdjustmentPattern = regexp.MustCompile(`^\d{8}$`)
 
 type SchoolCalendarDay struct {
 	Date       string `json:"date"`
-	Weekday    int    `json:"weekday"`
-	Holiday    bool   `json:"holiday"`
-	Festival   any    `json:"festival,omitempty"`
-	Adjustment string `json:"adjustment,omitempty"`
+	Name       string `json:"name"`
+	Adjustment string `json:"adjustment"`
 }
 
 type SchoolCalendarInput struct {
@@ -33,7 +31,7 @@ type SchoolCalendarInput struct {
 
 type SchoolCalendarView struct {
 	Days      []SchoolCalendarDay `json:"days"`
-	UpdatedAt string              `json:"updatedAt,omitempty"`
+	UpdatedAt string              `json:"updatedAt"`
 }
 
 func validateSchoolCalendarInput(in SchoolCalendarInput) (string, []SchoolCalendarDay, error) {
@@ -44,38 +42,18 @@ func validateSchoolCalendarInput(in SchoolCalendarInput) (string, []SchoolCalend
 	for i := range in.Days {
 		day := &in.Days[i]
 		day.Date = strings.TrimSpace(day.Date)
-		parsed, normalizedDate, err := parseSchoolCalendarDate(day.Date)
+		_, normalizedDate, err := parseSchoolCalendarDate(day.Date)
 		if err != nil {
 			return "", nil, Err("invalid_school_calendar", "校历日期格式无效", http.StatusBadRequest)
 		}
 		day.Date = normalizedDate
-		if day.Weekday < 1 || day.Weekday > 7 {
-			return "", nil, Err("invalid_school_calendar", "校历星期格式无效", http.StatusBadRequest)
-		}
-		weekday := (int(parsed.Weekday())+6)%7 + 1
-		if day.Weekday != weekday {
-			return "", nil, Err("invalid_school_calendar", "校历星期与日期不一致", http.StatusBadRequest)
-		}
 		if seen[day.Date] {
 			return "", nil, Err("invalid_school_calendar", "校历日期不能重复", http.StatusBadRequest)
 		}
 		seen[day.Date] = true
-		switch festival := day.Festival.(type) {
-		case nil:
-			day.Festival = ""
-		case bool:
-			if festival {
-				return "", nil, Err("invalid_school_calendar", "校历节日名称无效", http.StatusBadRequest)
-			}
-			day.Festival = ""
-		case string:
-			day.Festival = strings.TrimSpace(festival)
-		default:
-			return "", nil, Err("invalid_school_calendar", "校历节日名称无效", http.StatusBadRequest)
-		}
-		festival, _ := day.Festival.(string)
-		if len(festival) > 64 || strings.ContainsAny(festival, "\r\n\x00") {
-			return "", nil, Err("invalid_school_calendar", "校历节日名称无效", http.StatusBadRequest)
+		day.Name = strings.TrimSpace(day.Name)
+		if len(day.Name) > 64 || strings.ContainsAny(day.Name, "\r\n\x00") {
+			return "", nil, Err("invalid_school_calendar", "校历名称无效", http.StatusBadRequest)
 		}
 		day.Adjustment = strings.TrimSpace(day.Adjustment)
 		if day.Adjustment != "" && day.Adjustment != "/" {
@@ -141,24 +119,13 @@ func defaultSchoolCalendarDays() []SchoolCalendarDay {
 		"2026-10-01": "国庆",
 		"2027-01-01": "元旦",
 	}
-	extraHolidays := map[string]bool{
-		"2026-09-25": true,
-		"2026-10-01": true,
-		"2026-10-02": true,
-		"2026-10-05": true,
-		"2026-10-06": true,
-		"2026-10-07": true,
-		"2027-01-01": true,
-	}
 	days := make([]SchoolCalendarDay, 0, int(end.Sub(start)/(24*time.Hour))+1)
 	for date := start; !date.After(end); date = date.AddDate(0, 0, 1) {
 		key := date.Format("2006-01-02")
-		weekday := (int(date.Weekday())+6)%7 + 1
 		days = append(days, SchoolCalendarDay{
-			Date:     key,
-			Weekday:  weekday,
-			Holiday:  weekday >= 6 || extraHolidays[key],
-			Festival: festivals[key],
+			Date:       key,
+			Name:       festivals[key],
+			Adjustment: "",
 		})
 	}
 	return days

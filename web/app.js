@@ -127,7 +127,7 @@
 
   const injectSchoolCalendarConfig = (template) => {
     const marker = `              <section v-else-if="view === 'config'">`;
-    const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>学校校历</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadSchoolCalendar">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveSchoolCalendar"><div class="d-flex align-center flex-wrap ga-2"><v-text-field v-model="schoolCalendarRange" label="学期日期范围" placeholder="20260831-20270110" variant="outlined" density="comfortable" hide-details="auto" class="school-calendar-range" /><v-btn type="button" color="secondary" prepend-icon="mdi-calendar-refresh" @click="openSchoolCalendarRebuild">按范围重建</v-btn><v-btn type="button" variant="tonal" color="primary" prepend-icon="mdi-calendar-plus" @click="openNewSchoolCalendarDay">添加例外日期</v-btn></div><v-data-table :key="schoolCalendarTableKey" :headers="schoolCalendarHeaders" :items="schoolCalendarExceptions" item-value="date" :items-per-page="-1" hide-default-footer density="comfortable" class="school-calendar-table mt-3" no-data-text="暂无例外日期"><template #item.date="{ item }"><span class="mono">{{ rawItem(item).date }}</span></template><template #item.festival="{ item }"><span>{{ valueOrDash(rawItem(item).festival) }}</span></template><template #item.adjustment="{ item }"><v-chip v-if="rawItem(item).adjustment" size="small" color="info" variant="tonal">{{ rawItem(item).adjustment === '/' ? '清空当天' : '按 ' + rawItem(item).adjustment + ' 课表' }}</v-chip><span v-else>-</span></template><template #item.actions="{ item }"><v-btn icon="mdi-pencil-outline" size="small" variant="text" color="primary" aria-label="编辑日期" @click="openSchoolCalendarDay(rawItem(item))" /><v-btn icon="mdi-delete-outline" size="small" variant="text" color="error" aria-label="删除例外日期" @click="deleteSchoolCalendarException(rawItem(item))" /></template></v-data-table><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="schoolCalendarConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(schoolCalendarConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存校历</v-btn></div></v-form><v-dialog v-model="schoolCalendarDayDialog" max-width="460"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>{{ schoolCalendarEditingDateLabel }}</span></v-card-title><v-card-text><v-checkbox v-model="schoolCalendarEditingHoliday" label="放假" color="primary" hide-details class="mb-2" /><v-text-field v-model="schoolCalendarEditingDate" label="日期（YYYYMMDD）" placeholder="20260925" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingFestival" label="节日名称" placeholder="可选" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingAdjustment" label="课程调整" placeholder="YYYYMMDD 或 /" variant="outlined" density="comfortable" hint="填写原始课程日期；/ 表示清空当天" persistent-hint /></v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="schoolCalendarDayDialog = false">取消</v-btn><v-btn color="primary" @click="saveSchoolCalendarDay">应用</v-btn></v-card-actions></v-card></v-dialog><v-dialog v-model="schoolCalendarRebuildDialog" max-width="460"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-alert-outline" color="warning" /><span>按范围重建校历</span></v-card-title><v-card-text>将按 <span class="mono">{{ schoolCalendarRange || '(未填写)' }}</span> 重新生成全部日期，并<strong>清空所有例外日期（放假标记、节日名称、课程调整）</strong>；确认后立即保存，无法撤销。</v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="schoolCalendarRebuildDialog = false">取消</v-btn><v-btn color="warning" @click="confirmSchoolCalendarRebuild">确认重建并保存</v-btn></v-card-actions></v-card></v-dialog></v-card-text></v-card>`;
+      const card = `<v-card variant="elevated" border class="config-card mb-4"><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>学校校历</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadSchoolCalendar">刷新</v-btn></v-card-title><v-divider /><v-card-text><v-form @submit.prevent="saveSchoolCalendar"><div class="d-flex align-center flex-wrap ga-2"><v-text-field v-model="schoolCalendarRange" label="学期日期范围" placeholder="20260831-20270110" variant="outlined" density="comfortable" hide-details="auto" class="school-calendar-range" /><v-btn type="button" color="secondary" prepend-icon="mdi-calendar-refresh" @click="openSchoolCalendarRebuild">按范围重建</v-btn><v-btn type="button" variant="tonal" color="primary" prepend-icon="mdi-calendar-plus" @click="openNewSchoolCalendarDay">添加例外日期</v-btn></div><v-data-table :key="schoolCalendarTableKey" :headers="schoolCalendarHeaders" :items="schoolCalendarExceptions" item-value="date" :items-per-page="-1" hide-default-footer density="comfortable" class="school-calendar-table mt-3" no-data-text="暂无例外日期"><template #item.date="{ item }"><span class="mono">{{ rawItem(item).date }}</span></template><template #item.name="{ item }"><span>{{ valueOrDash(rawItem(item).name) }}</span></template><template #item.adjustment="{ item }"><v-chip v-if="rawItem(item).adjustment" size="small" color="info" variant="tonal">{{ rawItem(item).adjustment === '/' ? '清空当天' : '按 ' + rawItem(item).adjustment + ' 课表' }}</v-chip><span v-else>-</span></template><template #item.actions="{ item }"><v-btn icon="mdi-pencil-outline" size="small" variant="text" color="primary" aria-label="编辑日期" @click="openSchoolCalendarDay(rawItem(item))" /><v-btn icon="mdi-delete-outline" size="small" variant="text" color="error" aria-label="删除例外日期" @click="deleteSchoolCalendarException(rawItem(item))" /></template></v-data-table><div class="d-flex align-center flex-wrap ga-3 mt-4"><span v-if="schoolCalendarConfig.updatedAt" class="text-body-2 text-medium-emphasis">最近更新：{{ formatDateTime(schoolCalendarConfig.updatedAt) }}</span><v-spacer /><v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline" :loading="loading">保存校历</v-btn></div></v-form><v-dialog v-model="schoolCalendarDayDialog" max-width="460"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-calendar-edit-outline" color="primary" /><span>{{ schoolCalendarEditingDateLabel }}</span></v-card-title><v-card-text><v-text-field v-model="schoolCalendarEditingDate" label="日期（YYYYMMDD）" placeholder="20260925" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingName" label="校历名称" placeholder="可选" variant="outlined" density="comfortable" class="mb-2" /><v-text-field v-model="schoolCalendarEditingAdjustment" label="课程调整" placeholder="YYYYMMDD 或 /" variant="outlined" density="comfortable" hint="YYYYMMDD 覆盖当天；/ 表示清空当天" persistent-hint /></v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="schoolCalendarDayDialog = false">取消</v-btn><v-btn color="primary" @click="saveSchoolCalendarDay">应用</v-btn></v-card-actions></v-card></v-dialog><v-dialog v-model="schoolCalendarRebuildDialog" max-width="460"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-alert-outline" color="warning" /><span>按范围重建校历</span></v-card-title><v-card-text>将按 <span class="mono">{{ schoolCalendarRange || '(未填写)' }}</span> 重新生成全部日期，并清空校历名称和课程调整；确认后立即保存，无法撤销。</v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="schoolCalendarRebuildDialog = false">取消</v-btn><v-btn color="warning" @click="confirmSchoolCalendarRebuild">确认重建并保存</v-btn></v-card-actions></v-card></v-dialog></v-card-text></v-card>`;
     return template.replace(marker, marker + card);
   };
 
@@ -173,8 +173,7 @@
       const schoolCalendarTableKey = ref(0);
       const schoolCalendarEditingDate = ref('');
       const schoolCalendarEditingAdjustment = ref('');
-      const schoolCalendarEditingHoliday = ref(false);
-      const schoolCalendarEditingFestival = ref('');
+      const schoolCalendarEditingName = ref('');
       const schoolCalendarEditingNew = ref(false);
       const bankDialog = ref(false);
       const bankEditing = ref(false);
@@ -299,13 +298,11 @@
       );
       const schoolCalendarHeaders = [
         { title: '日期', key: 'date', width: '22%' },
-        { title: '节日', key: 'festival', width: '31%' },
+        { title: '名称', key: 'name', width: '31%' },
         { title: '课程调整', key: 'adjustment', width: '31%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '16%' },
       ];
-      const schoolCalendarExceptions = computed(() => schoolCalendarDays.value.filter(day =>
-        day.festival || day.adjustment || (day.holiday && day.weekday < 6),
-      ));
+      const schoolCalendarExceptions = computed(() => schoolCalendarDays.value.filter(day => day.name || day.adjustment));
 
       const notify = (text, color) => { snackbar.value = { show: true, text, color: color || 'success' }; };
       const closeBankEditor = () => {
@@ -371,12 +368,11 @@
       const loadSchoolCalendar = async () => {
         const out = await api('/api/v1/admin/school-calendar');
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        schoolCalendarDays.value = (out && out.days || []).map(day => Object.assign({}, day, { festival: day.festival || '', adjustment: day.adjustment || '' }));
+        schoolCalendarDays.value = (out && out.days || []).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
         schoolCalendarRange.value = schoolCalendarDays.value.length
           ? schoolCalendarDays.value[0].date.replaceAll('-', '') + '-' + schoolCalendarDays.value[schoolCalendarDays.value.length - 1].date.replaceAll('-', '')
           : '';
       };
-      const calendarWeekday = (date) => date.getUTCDay() === 0 ? 7 : date.getUTCDay();
       const normalizeCompactDate = (value) => {
         if (!/^\d{8}$/.test(value)) return '';
         const date = new Date(value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8) + 'T00:00:00Z');
@@ -400,8 +396,7 @@
           const days = [];
           for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
             const date = cursor.toISOString().slice(0, 10);
-            const weekday = calendarWeekday(cursor);
-            days.push({ date, weekday, holiday: weekday >= 6, festival: '', adjustment: '' });
+            days.push({ date, name: '', adjustment: '' });
             if (days.length > 1000) throw new Error('校历范围不能超过 1000 天');
           }
           schoolCalendarDays.value = days;
@@ -537,7 +532,7 @@
         if (!schoolCalendarDays.value.length) throw new Error('请至少配置一天校历');
         const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days: schoolCalendarDays.value }) });
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        schoolCalendarDays.value = (out.days || schoolCalendarDays.value).map(day => Object.assign({}, day, { festival: day.festival || '', adjustment: day.adjustment || '' }));
+        schoolCalendarDays.value = (out.days || schoolCalendarDays.value).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
         notify('学校校历已保存');
       });
       const openSchoolCalendarRebuild = () => {
@@ -552,24 +547,21 @@
         schoolCalendarEditingNew.value = true;
         schoolCalendarEditingDate.value = '';
         schoolCalendarEditingAdjustment.value = '';
-        schoolCalendarEditingHoliday.value = false;
-        schoolCalendarEditingFestival.value = '';
+        schoolCalendarEditingName.value = '';
         schoolCalendarDayDialog.value = true;
       };
       const openSchoolCalendarDay = (day) => {
         schoolCalendarEditingNew.value = false;
         schoolCalendarEditingDate.value = day.date.replaceAll('-', '');
         schoolCalendarEditingAdjustment.value = day.adjustment || '';
-        schoolCalendarEditingHoliday.value = !!day.holiday;
-        schoolCalendarEditingFestival.value = day.festival || '';
+        schoolCalendarEditingName.value = day.name || '';
         schoolCalendarDayDialog.value = true;
       };
       const deleteSchoolCalendarException = (day) => {
         const item = rawItem(day);
         const target = schoolCalendarDays.value.find(entry => entry.date === item.date);
         if (!target) return;
-        target.holiday = target.weekday >= 6;
-        target.festival = '';
+        target.name = '';
         target.adjustment = '';
         schoolCalendarTableKey.value++;
       };
@@ -595,13 +587,11 @@
             error.value = '例外日期必须位于当前校历范围内';
             return;
           }
-          const weekday = calendarWeekday(parsed);
-          schoolCalendarDays.value.push({ date, weekday, holiday: false, festival: '', adjustment: '' });
+          schoolCalendarDays.value.push({ date, name: '', adjustment: '' });
           schoolCalendarDays.value.sort((a, b) => a.date.localeCompare(b.date));
         }
         const target = schoolCalendarDays.value.find(item => item.date === date);
-        target.holiday = !!schoolCalendarEditingHoliday.value;
-        target.festival = (schoolCalendarEditingFestival.value || '').trim();
+        target.name = (schoolCalendarEditingName.value || '').trim();
         target.adjustment = value;
         schoolCalendarDayDialog.value = false;
         schoolCalendarEditingNew.value = false;
@@ -724,7 +714,7 @@
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingHoliday, schoolCalendarEditingFestival,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch,
         selectedUser, userDialog, loginForm, userStatus, snackbar, chartEl, platformChartEl, collegeChartEl, eventChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,

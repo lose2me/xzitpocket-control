@@ -206,8 +206,8 @@ func TestControlFlow(t *testing.T) {
 		t.Fatalf("public app release config was not updated: %#v", publicRelease)
 	}
 	calendarInput := map[string]any{"days": []any{
-		map[string]any{"date": "2027.2.22", "weekday": 1, "holiday": false, "festival": false, "adjustment": "20270223"},
-		map[string]any{"date": "2027-02-23", "weekday": 2, "holiday": false, "festival": "", "adjustment": "/"},
+		map[string]any{"date": "2027-02-22", "name": "校庆", "adjustment": "20270223"},
+		map[string]any{"date": "2027-02-23", "name": "", "adjustment": "/"},
 	}}
 	updatedCalendar := requestWithHeaders(t, ts.URL+"/api/v1/admin/school-calendar", http.MethodPut, calendarInput, adminHeaders)
 	updatedCalendarDays, _ := updatedCalendar["days"].([]any)
@@ -216,6 +216,9 @@ func TestControlFlow(t *testing.T) {
 	}
 	if updatedCalendarDays[0].(map[string]any)["adjustment"] != "20270223" || updatedCalendarDays[1].(map[string]any)["adjustment"] != "/" {
 		t.Fatalf("school calendar adjustments were not persisted: %#v", updatedCalendar)
+	}
+	if len(updatedCalendarDays[0].(map[string]any)) != 3 || updatedCalendarDays[0].(map[string]any)["name"] != "校庆" || updatedCalendar["updatedAt"] == "" {
+		t.Fatalf("school calendar response does not use the compact schema: %#v", updatedCalendar)
 	}
 	publicCalendar := request(t, ts.URL+"/api/v1/school-calendar", http.MethodGet, nil, nil)
 	publicCalendarDays, _ := publicCalendar["days"].([]any)
