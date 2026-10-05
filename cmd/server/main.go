@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +19,56 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 	adminweb "xzitpocket-control/web"
 )
+
+func staticAssets(cfg config.Config, logger *slog.Logger) fs.FS {
+	if cfg.WebDir != "" {
+		return os.DirFS(cfg.WebDir)
+	}
+	staticFS, err := fs.Sub(adminweb.Files, ".")
+	if err != nil {
+		logger.Error("load web assets", "error", err)
+		os.Exit(1)
+	}
+	return staticFS
+}
+
+// spaHandler serves the console as a single-page app: paths that do not match a
+// shipped asset (for example /users) fall back to index.html so a browser
+// reload keeps the current page instead of 404ing. Assets keep their own 404 so
+// a broken script reference stays visible.
+func spaHandler(staticFS fs.FS) http.Handler {
+	files := http.FileServer(http.FS(staticFS))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !isAppRoute(staticFS, r.URL.Path) {
+			files.ServeHTTP(w, r)
+			return
+		}
+		// Serve the bytes directly: handing /index.html to http.FileServer would
+		// redirect the client to "./" instead of answering the route.
+		data, err := fs.ReadFile(staticFS, "index.html")
+		if err != nil {
+			files.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(data)
+		}
+	})
+}
+
+func isAppRoute(staticFS fs.FS, urlPath string) bool {
+	if strings.HasPrefix(urlPath, "/api") {
+		return false
+	}
+	name := path.Clean(strings.TrimPrefix(urlPath, "/"))
+	if name == "" || name == "." || path.Ext(name) != "" {
+		return false
+	}
+	_, err := fs.Stat(staticFS, name)
+	return err != nil
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -43,18 +95,8 @@ func main() {
 		logger.Error("initialize application", "error", err)
 		os.Exit(1)
 	}
-	var staticFS fs.FS
-	if cfg.WebDir != "" {
-		staticFS = os.DirFS(cfg.WebDir)
-	} else {
-		var err error
-		staticFS, err = fs.Sub(adminweb.Files, ".")
-		if err != nil {
-			logger.Error("load web assets", "error", err)
-			os.Exit(1)
-		}
-	}
-	static := http.FileServer(http.FS(staticFS))
+	staticFS := staticAssets(cfg, logger)
+	static := spaHandler(staticFS)
 	handler := httpapi.New(application, static, logger)
 	server := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())

@@ -59,14 +59,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 	for _, migration := range []struct {
+		table      string
 		column     string
 		definition string
 	}{
-		{column: "college_name", definition: "TEXT NOT NULL DEFAULT ''"},
-		{column: "class_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "users", column: "college_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "users", column: "class_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "share_codes", column: "code_ciphertext", definition: "TEXT NOT NULL DEFAULT ''"},
 	} {
-		if err := s.ensureColumn(ctx, "users", migration.column, migration.definition); err != nil {
-			return fmt.Errorf("migrate users.%s: %w", migration.column, err)
+		if err := s.ensureColumn(ctx, migration.table, migration.column, migration.definition); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", migration.table, migration.column, err)
 		}
 	}
 	return nil

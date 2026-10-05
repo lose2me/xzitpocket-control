@@ -120,6 +120,37 @@
     }
   });
 
+  // Pretty-print shared configuration JSON. Unlike JSON.stringify, arrays of
+  // plain values stay on one line, and the weeks/sessions course fields are
+  // always kept to a single line whatever shape they carry.
+  const shareInlineKeys = ['weeks', 'sessions'];
+  const formatShareJSON = (value) => {
+    const isInlineArray = (item) => item.every((entry) => entry === null || typeof entry !== 'object');
+    const render = (node, depth) => {
+      const pad = '  '.repeat(depth);
+      const padInner = '  '.repeat(depth + 1);
+      if (Array.isArray(node)) {
+        if (!node.length) return '[]';
+        if (isInlineArray(node)) return '[' + node.map((entry) => JSON.stringify(entry)).join(', ') + ']';
+        return '[\n' + node.map((entry) => padInner + render(entry, depth + 1)).join(',\n') + '\n' + pad + ']';
+      }
+      if (node && typeof node === 'object') {
+        const keys = Object.keys(node);
+        if (!keys.length) return '{}';
+        const body = keys.map((key) => {
+          const value = node[key];
+          const inline = shareInlineKeys.includes(key)
+            ? (Array.isArray(value) && isInlineArray(value) ? '[' + value.map((entry) => JSON.stringify(entry)).join(', ') + ']' : JSON.stringify(value))
+            : render(value, depth + 1);
+          return padInner + JSON.stringify(key) + ': ' + inline;
+        });
+        return '{\n' + body.join(',\n') + '\n' + pad + '}';
+      }
+      return JSON.stringify(node);
+    };
+    return render(value, 0);
+  };
+
   const injectErrorReportsPage = (template) => template.replace(
     `              <section v-else-if="view === 'config'">`,
     `              <section v-else-if="view === 'error-reports'"><v-card variant="elevated" border><v-card-title class="d-flex align-center flex-wrap ga-2"><v-icon icon="mdi-bug-outline" color="error" /><span>错误</span><v-spacer /><v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-delete-sweep-outline" :loading="loading" @click="clearErrorReports">清空记录</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="errorReportHeaders" :items="errorReports" item-value="id" show-expand :items-per-page="errorReportsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover class="admin-table" no-data-text="暂无错误"><template #item.occurred_at="{ item }"><span class="text-medium-emphasis">{{ valueOrDash(rawItem(item).occurred_at) }}</span></template><template #item.student_id="{ item }"><span class="mono">{{ valueOrDash(rawItem(item).student_id) }}</span></template><template #item.title="{ item }"><span>{{ valueOrDash(rawItem(item).title) }}</span></template><template #item.message="{ item }"><span class="table-ellipsis" :title="valueOrDash(rawItem(item).message)">{{ valueOrDash(rawItem(item).message) }}</span></template><template #item.app_version="{ item }"><span>{{ valueOrDash(rawItem(item).app_version) }}</span></template><template #item.platform="{ item }"><span>{{ valueOrDash(rawItem(item).platform) }}</span></template><template #item.actions="{ item }"><v-btn size="small" variant="text" :color="rawItem(item).ignored ? 'success' : 'warning'" :prepend-icon="rawItem(item).ignored ? 'mdi-check-circle-outline' : 'mdi-bell-off-outline'" @click="setErrorReportStudentIgnored(rawItem(item))">{{ rawItem(item).ignored ? '允许' : '忽略' }}</v-btn></template><template #expanded-row="{ columns, item }"><tr><td :colspan="columns.length"><div class="pa-4"><div class="text-subtitle-2 font-weight-bold mb-2">{{ valueOrDash(rawItem(item).title) }}</div><pre class="json-preview error-report-detail">{{ [rawItem(item).message, rawItem(item).error, rawItem(item).stack_trace].filter(Boolean).join('\\n\\n') }}</pre><div class="text-caption text-medium-emphasis mt-2">设备：{{ valueOrDash(rawItem(item).device_id) }} · 接收时间：{{ valueOrDash(rawItem(item).received_at) }}</div></div></td></tr></template></v-data-table><div v-if="errorReportsTotal > errorReportsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="errorReportsPage" :length="Math.max(1, Math.ceil(errorReportsTotal / errorReportsPerPage))" density="comfortable" @update:model-value="loadErrorReports" /></div></v-card></section>\n              <section v-else-if="view === 'config'">`,
@@ -131,12 +162,23 @@
     return template.replace(marker, marker + card);
   };
 
+  const injectShareCodesPage = (template) => {
+    const marker = `              <section v-else-if="view === 'config'">`;
+    const page = `              <section v-else-if="view === 'share-codes'"><v-card variant="elevated" border><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-share-variant-outline" color="primary" /><span>分享码</span><v-spacer /><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-plus" @click="openShareCodeDialog">生成分享码</v-btn><v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="loadShareCodes">刷新</v-btn></v-card-title><v-divider /><v-data-table :headers="shareCodeHeaders" :items="shareCodes" item-value="id" :items-per-page="shareCodeItemsPerPage" items-per-page-text="每页条数：" page-text="{0}-{1} 共 {2}" :loading="loading" density="comfortable" hover no-data-text="暂无分享码"><template #item.code="{item}"><span class="mono">{{ valueOrDash(rawItem(item).code) }}</span></template><template #item.created_at="{item}"><span class="text-medium-emphasis">{{ formatDateTime(rawItem(item).created_at) }}</span></template><template #item.expires_at="{item}"><span class="text-medium-emphasis">{{ formatDateTime(rawItem(item).expires_at) }}</span></template><template #item.student_id="{item}"><span class="mono">{{ valueOrDash(rawItem(item).student_id) }}</span></template><template #item.actions="{item}"><v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="openShareCodeDetail(rawItem(item))">查看</v-btn><v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="deleteShareCode(rawItem(item))">删除</v-btn></template></v-data-table><div v-if="shareCodesTotal > shareCodeItemsPerPage" class="d-flex justify-end pa-3"><v-pagination v-model="shareCodePage" :length="Math.max(1, Math.ceil(shareCodesTotal / shareCodeItemsPerPage))" density="comfortable" @update:model-value="loadShareCodes" /></div></v-card><v-dialog v-model="shareCodeDetailDialog" max-width="1100" scrollable><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-share-variant-outline" color="primary" /><span>分享码详情</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="shareCodeDetailDialog = false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-row dense class="mb-3"><v-col cols="6" md="3"><div class="text-caption text-medium-emphasis">分享码</div><div class="mono">{{ valueOrDash(shareCodeDetail.code) }}</div></v-col><v-col cols="6" md="3"><div class="text-caption text-medium-emphasis">学号</div><div class="mono">{{ valueOrDash(shareCodeDetail.student_id) }}</div></v-col><v-col cols="6" md="3"><div class="text-caption text-medium-emphasis">创建时间</div><div>{{ formatDateTime(shareCodeDetail.created_at) }}</div></v-col><v-col cols="6" md="3"><div class="text-caption text-medium-emphasis">过期时间</div><div>{{ formatDateTime(shareCodeDetail.expires_at) }}</div></v-col></v-row><v-textarea :model-value="shareCodeDetailJSON" label="分享内容" variant="outlined" rows="20" class="mono" readonly hide-details="auto" /></v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="shareCodeDetailDialog = false">关闭</v-btn></v-card-actions></v-card></v-dialog></section>\n`;
+    return template.replace(marker, page + marker);
+  };
+
   createApp({
     setup() {
       const { mdAndUp } = useDisplay();
       const logged = ref(!!localStorage.getItem('control_admin'));
       const drawer = ref(false);
-      const view = ref('overview');
+      const VIEW_ROUTES = ['overview', 'users', 'devices', 'risk', 'error-reports', 'library', 'share-codes', 'config', 'audit'];
+      const viewForPath = (pathname) => {
+        const name = String(pathname || '').replace(/^\/+|\/+$/g, '');
+        return VIEW_ROUTES.includes(name) ? name : 'overview';
+      };
+      const view = ref(viewForPath(window.location.pathname));
       const loading = ref(false);
       const error = ref('');
       const overview = ref({});
@@ -163,6 +205,22 @@
       const cdkForm = ref({ count: 1 });
       const createdCDKs = ref([]);
       const cdkSearch = ref('');
+      const shareCodes = ref([]);
+      const shareCodesTotal = ref(0);
+      const shareCodePage = ref(1);
+      const shareCodeItemsPerPage = ref(25);
+      const shareCodeDialog = ref(false);
+      const shareCodeJSON = ref('{}');
+      const createdShareCode = ref(null);
+      const shareCodeDetail = ref({});
+      const shareCodeDetailDialog = ref(false);
+      const shareCodeHeaders = [
+        { title: '分享码', key: 'code' },
+        { title: '创建时间', key: 'created_at' },
+        { title: '过期时间', key: 'expires_at' },
+        { title: '学号', key: 'student_id' },
+        { title: '操作', key: 'actions', sortable: false },
+      ];
       const userSearch = ref('');
       const userPage = ref(1);
       const userItemsPerPage = ref(25);
@@ -205,6 +263,7 @@
         { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
         { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
+        { key: 'share-codes', label: '分享码', icon: 'mdi-share-variant-outline' },
         { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
         { key: 'audit', label: '审计', icon: 'mdi-history' }
       ];
@@ -420,6 +479,34 @@
       };
       const searchCDKs = () => call(async () => { cdkPage.value = 1; await loadCDKs(); });
       const loadLibrary = async () => { await Promise.all([loadBanks(), loadCDKs()]); };
+      const loadShareCodes = async () => {
+        const offset = (shareCodePage.value - 1) * shareCodeItemsPerPage.value;
+        const out = await api('/api/v1/admin/share-codes?limit=' + shareCodeItemsPerPage.value + '&offset=' + offset);
+        shareCodes.value = out.items || [];
+        shareCodesTotal.value = out.total || 0;
+      };
+      const shareCodeDetailJSON = computed(() => formatShareJSON(shareCodeDetail.value.data || {}));
+      const openShareCodeDetail = (row) => call(async () => {
+        const out = await api('/api/v1/admin/share-codes/' + encodeURIComponent(rawItem(row).id));
+        shareCodeDetail.value = Object.assign({}, out.shareCode || {}, { data: out.data || {} });
+        shareCodeDetailDialog.value = true;
+      });
+      const openShareCodeDialog = () => { shareCodeJSON.value = '{}'; createdShareCode.value = null; shareCodeDialog.value = true; };
+      const createShareCode = () => call(async () => {
+        let data;
+        try { data = JSON.parse(shareCodeJSON.value || '{}'); } catch (_) { throw new Error('分享数据 JSON 格式无效'); }
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('分享数据必须是 JSON 对象');
+        createdShareCode.value = await api('/api/v1/admin/share-codes', { method: 'POST', body: JSON.stringify({ data }) });
+        notify('分享码已生成');
+        await loadShareCodes();
+      });
+      const deleteShareCode = (row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定删除这个分享码吗？')) return;
+        await api('/api/v1/admin/share-codes/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        notify('分享码已删除');
+        await loadShareCodes();
+      });
       const loadUsers = async () => {
         const search = userSearch.value.trim();
         const sort = userSortBy.value[0] || { key: 'last_login_at', order: 'desc' };
@@ -445,11 +532,18 @@
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
+          else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar()]);
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
         });
       };
-      const switchView = (name) => { view.value = name; if (!mdAndUp.value) drawer.value = false; load(); };
+      const switchView = (name) => {
+        view.value = name;
+        if (window.location.pathname !== '/' + name) window.history.pushState({ view: name }, '', '/' + name);
+        if (!mdAndUp.value) drawer.value = false;
+        load();
+      };
+      const handlePopState = () => { view.value = viewForPath(window.location.pathname); load(); };
       const drawChart = () => {
         if (!window.echarts || view.value !== 'overview') return;
         if (chart) {
@@ -731,20 +825,26 @@
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); };
       watch(view, async (name) => { if (name === 'overview') { await nextTick(); drawChart(); } });
-      onMounted(() => { if (logged.value) load(); window.addEventListener('resize', handleResize); });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); });
+      onMounted(() => {
+        if (window.location.pathname !== '/' + view.value) window.history.replaceState({ view: view.value }, '', '/' + view.value);
+        if (logged.value) load();
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('popstate', handlePopState);
+      });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
-        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
+        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
+        shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, chartEl, platformChartEl, collegeChartEl, eventChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, sortUsers,
-        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, sortUsers,
+        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
       };
     },
-    template: injectErrorReportsPage(injectSchoolCalendarConfig(`
+    template: injectErrorReportsPage(injectSchoolCalendarConfig(injectShareCodesPage(`
       <v-app>
         <v-main v-if="!logged" class="login-page">
           <v-container fluid class="login-shell pa-4">
@@ -827,8 +927,9 @@
 
         <v-dialog v-model="cdkRevealDialog" max-width="720"><v-card v-if="createdCDKs.length"><v-card-title class="d-flex align-center"><v-icon icon="mdi-key-check" color="success" class="mr-2" /><span>通用 CDK 已创建（{{ createdCDKs.length }} 个）</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="cdkRevealDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="warning" variant="tonal" density="compact" class="mb-4">CDK 只显示这一次，请立即复制并妥善保存。</v-alert><v-textarea :model-value="createdCDKs.map(item => item.code).join('\\n')" label="CDK 列表" readonly variant="outlined" rows="8" class="mono cdk-reveal" /></v-card-text><v-card-actions><v-spacer /><v-btn color="primary" prepend-icon="mdi-content-copy" @click="copyCDK">复制全部 CDK</v-btn><v-btn variant="text" @click="cdkRevealDialog=false">完成</v-btn></v-card-actions></v-card></v-dialog>
 
+        <v-dialog v-model="shareCodeDialog" max-width="760"><v-card><v-card-title class="d-flex align-center ga-2"><v-icon icon="mdi-share-variant-outline" color="primary" /><span>生成分享码</span><v-spacer /><v-btn icon variant="text" aria-label="关闭" @click="shareCodeDialog=false"><v-icon icon="mdi-close" /></v-btn></v-card-title><v-divider /><v-card-text><v-alert type="info" variant="tonal" density="compact" class="mb-3">分享码有效期 7 天，数据将加密存储。</v-alert><v-textarea v-model="shareCodeJSON" label="分享数据 JSON" variant="outlined" rows="12" class="mono" /><div v-if="createdShareCode" class="mt-4"><v-alert type="success" variant="tonal">分享码：<span class="mono font-weight-bold">{{ createdShareCode.code }}</span>，过期时间：{{ formatDateTime(createdShareCode.expires_at) }}</v-alert></div></v-card-text><v-card-actions><v-spacer /><v-btn variant="text" @click="shareCodeDialog=false">取消</v-btn><v-btn color="primary" prepend-icon="mdi-share-variant-outline" :loading="loading" @click="createShareCode">生成</v-btn></v-card-actions></v-card></v-dialog>
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="bottom end" timeout="3500">{{ snackbar.text }}<template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template></v-snackbar>
       </v-app>
-    `))
+    `)))
   }).use(vuetify).mount('#app');
 })();

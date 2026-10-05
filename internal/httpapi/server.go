@@ -129,6 +129,18 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.errorReport(w, r)
+	case r.Method == http.MethodPost && path == "/share-codes":
+		if !s.allow(r, "share-code-create", 30, time.Hour) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.createShareCode(w, r)
+	case r.Method == http.MethodGet && pathMatchesID(path, "share-codes"):
+		if !s.allow(r, "share-code-read", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.readShareCode(w, r, segment(path, 1))
 	case r.Method == http.MethodGet && path == "/app/release":
 		s.appRelease(w, r)
 	case r.Method == http.MethodGet && path == "/config/versions":
@@ -209,6 +221,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminLibraryCDKCreate(w, r)
 	case r.Method == http.MethodPatch && pathMatchesID(path, "admin", "library-cdks"):
 		s.adminLibraryCDKStatus(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/share-codes":
+		s.adminShareCodes(w, r)
+	case r.Method == http.MethodPost && path == "/admin/share-codes":
+		s.adminCreateShareCode(w, r)
+	case r.Method == http.MethodGet && pathMatchesID(path, "admin", "share-codes"):
+		s.adminShareCodeDetail(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "share-codes"):
+		s.adminDeleteShareCode(w, r, segment(path, 2))
 	default:
 		writeError(w, r, app.Err("not_found", "接口不存在", http.StatusNotFound))
 	}

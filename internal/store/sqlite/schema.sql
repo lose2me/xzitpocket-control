@@ -220,6 +220,17 @@ CREATE TABLE IF NOT EXISTS school_calendar_config (
 INSERT OR IGNORE INTO school_calendar_config(id, days_json, updated_at)
 VALUES (1, '[]', 0);
 
+-- Short-lived encrypted configuration payloads shared between app installs.
+CREATE TABLE IF NOT EXISTS share_codes (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    code_ciphertext TEXT NOT NULL DEFAULT '',
+    payload_ciphertext TEXT NOT NULL,
+    created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_time_type ON activity_events(occurred_at, type);
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON activity_events(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_error_reports_student_time ON error_reports(student_id_hash, occurred_at);
@@ -232,3 +243,4 @@ CREATE INDEX IF NOT EXISTS idx_questions_bank_order ON questions(bank_id, questi
 CREATE INDEX IF NOT EXISTS idx_question_options_question_order ON question_options(question_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bank_status ON library_cdks(question_bank_id, status);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bound_student ON library_cdks(bound_student_id_hash, question_bank_id, status);
+CREATE INDEX IF NOT EXISTS idx_share_codes_expires ON share_codes(expires_at);
