@@ -208,7 +208,8 @@ body {
   text-overflow: ellipsis;
 }
 
-.cdk-search {
+.cdk-search,
+.user-search {
   width: min(260px, 30vw);
   min-width: 160px;
 }
@@ -302,7 +303,8 @@ body {
     height: 64px !important;
   }
 
-  .cdk-search {
+  .cdk-search,
+  .user-search {
     width: 100%;
     min-width: 0;
   }

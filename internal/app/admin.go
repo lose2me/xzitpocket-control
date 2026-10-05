@@ -52,17 +52,39 @@ func (a *App) RevokeAdmin(ctx context.Context, p AdminPrincipal) error {
 	return nil
 }
 
-func (a *App) ListUsers(ctx context.Context, limit, offset int, status string) ([]sqlite.UserListItem, int, error) {
+func (a *App) ListUsers(ctx context.Context, limit, offset int, status, search, sort, order string) ([]sqlite.UserListItem, int, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
 	}
-	users, err := a.Store.ListUsers(ctx, limit, offset, status)
+	sort, order, err := normalizeUserListSort(sort, order)
 	if err != nil {
 		return nil, 0, err
 	}
-	count, err := a.Store.CountUsers(ctx, status)
+	users, err := a.Store.ListUsers(ctx, limit, offset, status, search, sort, order)
+	if err != nil {
+		return nil, 0, err
+	}
+	count, err := a.Store.CountUsers(ctx, status, search)
 	return users, count, err
+}
+
+func normalizeUserListSort(sort, order string) (string, string, error) {
+	sort = strings.TrimSpace(sort)
+	if sort == "" {
+		sort = "last_login_at"
+	}
+	if !sqlite.ValidUserListSort(sort) {
+		return "", "", Err("invalid_user_sort", "排序字段无效", http.StatusBadRequest)
+	}
+	order = strings.ToLower(strings.TrimSpace(order))
+	if order == "" {
+		order = "desc"
+	}
+	if order != "asc" && order != "desc" {
+		return "", "", Err("invalid_user_sort", "排序方向无效", http.StatusBadRequest)
+	}
+	return sort, order, nil
 }
 
 type UserDetail struct {

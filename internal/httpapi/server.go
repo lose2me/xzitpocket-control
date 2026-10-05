@@ -637,7 +637,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, offset := queryPage(r)
-	items, total, err := s.App.ListUsers(r.Context(), limit, offset, r.URL.Query().Get("status"))
+	items, total, err := s.App.ListUsers(r.Context(), limit, offset, r.URL.Query().Get("status"), r.URL.Query().Get("q"), r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	if err != nil {
 		writeError(w, r, err)
 		return
