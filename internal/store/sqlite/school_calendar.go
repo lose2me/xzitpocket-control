@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -27,19 +26,15 @@ func (s *Store) GetSchoolCalendarConfig(ctx context.Context) (SchoolCalendarConf
 	return config, nil
 }
 
-func (s *Store) UpdateSchoolCalendarConfig(ctx context.Context, config SchoolCalendarConfig) error {
-	result, err := s.DB.ExecContext(ctx,
-		"UPDATE school_calendar_config SET days_json = ?, updated_at = ? WHERE id = 1",
-		config.DaysJSON, millis(config.UpdatedAt))
+func (s *Store) UpdateSchoolCalendarConfig(ctx context.Context, config SchoolCalendarConfig) (SchoolCalendarConfig, error) {
+	var updatedAt int64
+	err := s.DB.QueryRowContext(ctx,
+		`UPDATE school_calendar_config SET days_json = ?, updated_at = MAX(updated_at + 1, ?)
+		WHERE id = 1 RETURNING updated_at`,
+		config.DaysJSON, millis(config.UpdatedAt)).Scan(&updatedAt)
 	if err != nil {
-		return err
+		return SchoolCalendarConfig{}, err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	config.UpdatedAt = fromMillis(updatedAt)
+	return config, nil
 }

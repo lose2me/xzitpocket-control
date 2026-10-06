@@ -36,4 +36,8 @@ func TestGetSchoolCalendarReinitializesCorruptConfig(t *testing.T) {
 	if _, err := decodeStoredSchoolCalendar(stored); err != nil {
 		t.Fatalf("stored calendar remains invalid: %v", err)
 	}
+	versions, err := (&App{Store: store}).GetConfigVersions(ctx)
+	if err != nil || versions.SchoolCalendar != calendar.UpdatedAt {
+		t.Fatalf("reset calendar version = %q, response = %q: %v", versions.SchoolCalendar, calendar.UpdatedAt, err)
+	}
 }

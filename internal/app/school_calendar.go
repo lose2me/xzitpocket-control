@@ -97,9 +97,7 @@ func parseSchoolCalendarDate(value string) (time.Time, string, error) {
 
 func schoolCalendarView(config sqlite.SchoolCalendarConfig, days []SchoolCalendarDay) SchoolCalendarView {
 	out := SchoolCalendarView{Days: days}
-	if !config.UpdatedAt.IsZero() {
-		out.UpdatedAt = config.UpdatedAt.Format(time.RFC3339)
-	}
+	out.UpdatedAt = configVersion(config.UpdatedAt)
 	return out
 }
 
@@ -161,13 +159,14 @@ func (a *App) resetSchoolCalendar(ctx context.Context) (SchoolCalendarView, erro
 		return SchoolCalendarView{}, err
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}); err != nil {
+	config, err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SchoolCalendarView{}, ErrNotFound
 		}
 		return SchoolCalendarView{}, err
 	}
-	return schoolCalendarView(sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}, days), nil
+	return schoolCalendarView(config, days), nil
 }
 
 func (a *App) UpdateSchoolCalendar(ctx context.Context, in SchoolCalendarInput, actor string) (SchoolCalendarView, error) {
@@ -176,7 +175,8 @@ func (a *App) UpdateSchoolCalendar(ctx context.Context, in SchoolCalendarInput, 
 		return SchoolCalendarView{}, err
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}); err != nil {
+	config, err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SchoolCalendarView{}, ErrNotFound
 		}
@@ -184,5 +184,5 @@ func (a *App) UpdateSchoolCalendar(ctx context.Context, in SchoolCalendarInput, 
 	}
 	_ = a.Store.AddAudit(ctx, actor, "school_calendar_update", "school_calendar", "current",
 		controlcrypto.JSON(map[string]any{"days": len(days)}), now)
-	return schoolCalendarView(sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}, days), nil
+	return schoolCalendarView(config, days), nil
 }

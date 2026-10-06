@@ -229,6 +229,8 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 // CreateQuestionBankAuto allocates a monotonic QB identifier and inserts the
 // complete aggregate in one transaction. Identifiers are never reused.
 func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (QuestionBank, error) {
+	bank.CreatedAt = fromMillis(millis(bank.CreatedAt))
+	bank.UpdatedAt = fromMillis(millis(bank.UpdatedAt))
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return QuestionBank{}, err
@@ -294,7 +296,7 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	}
 	if sameQuestionBankContent(existing, bank) {
 		bank.UpdatedAt = existing.UpdatedAt
-	} else if !bank.UpdatedAt.After(existing.UpdatedAt) {
+	} else if millis(bank.UpdatedAt) <= millis(existing.UpdatedAt) {
 		bank.UpdatedAt = existing.UpdatedAt.Add(time.Millisecond)
 	}
 	if bank.OrderID <= 0 {
@@ -419,7 +421,7 @@ func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, no
 	if status != "active" && status != "draft" && status != "disabled" {
 		return errors.New("invalid question bank status")
 	}
-	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET updated_at = CASE WHEN status <> ? THEN ? ELSE updated_at END, status = ? WHERE id = ?", status, millis(now), status, id)
+	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET updated_at = CASE WHEN status <> ? THEN MAX(updated_at + 1, ?) ELSE updated_at END, status = ? WHERE id = ?", status, millis(now), status, id)
 	if err != nil {
 		return err
 	}

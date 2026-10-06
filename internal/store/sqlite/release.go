@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -28,19 +27,15 @@ func (s *Store) GetAppReleaseConfig(ctx context.Context) (AppReleaseConfig, erro
 	return config, nil
 }
 
-func (s *Store) UpdateAppReleaseConfig(ctx context.Context, config AppReleaseConfig) error {
-	result, err := s.DB.ExecContext(ctx,
-		"UPDATE app_release_config SET latest_version = ?, download_url = ?, updated_at = ? WHERE id = 1",
-		config.LatestVersion, config.DownloadURL, millis(config.UpdatedAt))
+func (s *Store) UpdateAppReleaseConfig(ctx context.Context, config AppReleaseConfig) (AppReleaseConfig, error) {
+	var updatedAt int64
+	err := s.DB.QueryRowContext(ctx,
+		`UPDATE app_release_config SET latest_version = ?, download_url = ?, updated_at = MAX(updated_at + 1, ?)
+		WHERE id = 1 RETURNING updated_at`,
+		config.LatestVersion, config.DownloadURL, millis(config.UpdatedAt)).Scan(&updatedAt)
 	if err != nil {
-		return err
+		return AppReleaseConfig{}, err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	config.UpdatedAt = fromMillis(updatedAt)
+	return config, nil
 }

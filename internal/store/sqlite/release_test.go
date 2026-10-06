@@ -26,7 +26,7 @@ func TestAppReleaseConfigRoundTrip(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	want := AppReleaseConfig{LatestVersion: "2.0.4", DownloadURL: "https://download.example.test/app.apk", UpdatedAt: now}
-	if err := store.UpdateAppReleaseConfig(ctx, want); err != nil {
+	if _, err := store.UpdateAppReleaseConfig(ctx, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetAppReleaseConfig(ctx)

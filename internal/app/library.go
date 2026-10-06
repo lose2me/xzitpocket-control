@@ -284,7 +284,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status s
 	}
 	result := make([]QuestionBankSummaryView, 0, len(items))
 	for _, item := range items {
-		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: item.UpdatedAt.Format(time.RFC3339)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }
@@ -297,7 +297,7 @@ func (a *App) GetAdminQuestionBank(ctx context.Context, id string) (AdminQuestio
 	if err != nil {
 		return AdminQuestionBankView{}, err
 	}
-	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: bank.UpdatedAt.Format(time.RFC3339)}, nil
+	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(bank.UpdatedAt)}, nil
 }
 
 func (a *App) CreateQuestionBank(ctx context.Context, in QuestionBankInput, actor string) (AdminQuestionBankView, error) {
@@ -321,7 +321,7 @@ func (a *App) CreateQuestionBank(ctx context.Context, in QuestionBankInput, acto
 		return AdminQuestionBankView{}, err
 	}
 	_ = a.Store.AddAudit(ctx, actor, "question_bank_create", "question_bank", bank.ID, "{}", now)
-	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: now.Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339)}, nil
+	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(bank.UpdatedAt)}, nil
 }
 
 func (a *App) UpdateQuestionBank(ctx context.Context, id string, in QuestionBankInput, actor string) (AdminQuestionBankView, error) {
@@ -361,7 +361,7 @@ func (a *App) UpdateQuestionBank(ctx context.Context, id string, in QuestionBank
 	}
 	bank.UpdatedAt = updated.UpdatedAt
 	_ = a.Store.AddAudit(ctx, actor, "question_bank_update", "question_bank", bank.ID, "{}", now)
-	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: bank.UpdatedAt.Format(time.RFC3339)}, nil
+	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(bank.UpdatedAt)}, nil
 }
 
 func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor string) error {

@@ -50,9 +50,7 @@ func validateAppReleaseInput(in AppReleaseInput) (sqlite.AppReleaseConfig, error
 
 func appReleaseView(config sqlite.AppReleaseConfig) AppReleaseView {
 	view := AppReleaseView{LatestVersion: config.LatestVersion, DownloadURL: config.DownloadURL}
-	if !config.UpdatedAt.IsZero() {
-		view.UpdatedAt = config.UpdatedAt.Format(time.RFC3339)
-	}
+	view.UpdatedAt = configVersion(config.UpdatedAt)
 	return view
 }
 
@@ -74,7 +72,8 @@ func (a *App) UpdateAppReleaseConfig(ctx context.Context, in AppReleaseInput, ac
 	}
 	now := time.Now().UTC()
 	config.UpdatedAt = now
-	if err := a.Store.UpdateAppReleaseConfig(ctx, config); err != nil {
+	config, err = a.Store.UpdateAppReleaseConfig(ctx, config)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AppReleaseView{}, ErrNotFound
 		}

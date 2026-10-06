@@ -13,9 +13,6 @@ func (s *Server) questionBanks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !admin && !libraryUserAvailable(w, r, p) {
-		return
-	}
 	limit, offset := queryPage(r)
 	var items []app.QuestionBankSummaryView
 	var total int
@@ -42,9 +39,6 @@ func (s *Server) questionBank(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	if !admin && !libraryUserAvailable(w, r, p) {
-		return
-	}
 	var out app.QuestionBankResponse
 	var err error
 	if admin {
@@ -62,34 +56,26 @@ func (s *Server) questionBank(w http.ResponseWriter, r *http.Request, id string)
 // Published question content is available to a signed-in user. Administrators
 // can preview protected banks with their existing admin session.
 func (s *Server) questionReader(w http.ResponseWriter, r *http.Request) (app.SessionPrincipal, bool, bool) {
+	var sessionErr error = app.ErrUnauthorized
 	if token := sessionToken(r); token != "" {
-		if principal, err := s.App.AuthenticateSession(r.Context(), token); err == nil {
+		principal, err := s.App.AuthenticateLibrarySession(r.Context(), token)
+		if err == nil {
 			return principal, false, true
 		}
+		sessionErr = err
 	}
 	if token := adminToken(r); token != "" {
 		if _, err := s.App.AuthenticateAdmin(r.Context(), token); err == nil {
 			return app.SessionPrincipal{}, true, true
 		}
 	}
-	writeError(w, r, app.ErrUnauthorized)
+	writeError(w, r, sessionErr)
 	return app.SessionPrincipal{}, false, false
-}
-
-func libraryUserAvailable(w http.ResponseWriter, r *http.Request, p app.SessionPrincipal) bool {
-	if p.User.Status == "active" {
-		return true
-	}
-	writeError(w, r, app.Err("user_unavailable", "您的账户被暂时禁用", http.StatusForbidden))
-	return false
 }
 
 func (s *Server) redeemLibraryCDK(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authSession(w, r)
 	if !ok {
-		return
-	}
-	if !libraryUserAvailable(w, r, p) {
 		return
 	}
 	var in struct {

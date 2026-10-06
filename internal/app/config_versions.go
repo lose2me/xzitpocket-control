@@ -16,7 +16,7 @@ func configVersion(value time.Time) string {
 	if value.IsZero() {
 		return ""
 	}
-	return value.Format(time.RFC3339)
+	return value.Format(time.RFC3339Nano)
 }
 
 func (a *App) GetConfigVersions(ctx context.Context) (ConfigVersionsView, error) {

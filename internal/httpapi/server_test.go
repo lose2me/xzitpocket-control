@@ -271,8 +271,8 @@ func TestControlFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []map[string]any{{"event_id": "disabled-user-event", "type": "foreground", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{}}}, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
 		t.Fatalf("disabled user telemetry status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/question-banks", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
-		t.Fatalf("disabled user question-bank status = %d, want %d", status, http.StatusUnauthorized)
+	for _, path := range []string{"/api/v1/question-banks", "/api/v1/question-banks/QB-001"} {
+		requestFailure(t, ts.URL+path, map[string]string{"Authorization": "Bearer " + access}, http.StatusForbidden, "user_unavailable")
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("enable user status = %d, want %d", status, http.StatusOK)
@@ -280,6 +280,7 @@ func TestControlFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusOK {
 		t.Fatalf("active user login-eligibility status = %d, want %d", status, http.StatusOK)
 	}
+	requestFailure(t, ts.URL+"/api/v1/question-banks", map[string]string{"Authorization": "Bearer " + access}, http.StatusUnauthorized, "access_token_expired")
 	challengeAfterEnable := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
 	assertedAfterEnable := time.Now().UTC().Format(time.RFC3339)
 	loginAfterEnable := map[string]any{"challenge_id": challengeAfterEnable["challenge_id"], "challenge": challengeAfterEnable["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "asserted_at": assertedAfterEnable}

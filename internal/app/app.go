@@ -117,6 +117,17 @@ func (a *App) AuthenticateDevice(ctx context.Context, token string) (DevicePrinc
 }
 
 func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPrincipal, error) {
+	return a.authenticateSession(ctx, token, false)
+}
+
+// AuthenticateLibrarySession preserves the library's account-status error even
+// when disabling the account has revoked its sessions. No rejected session is
+// accepted or touched; expired tokens and revoked devices remain unauthorized.
+func (a *App) AuthenticateLibrarySession(ctx context.Context, token string) (SessionPrincipal, error) {
+	return a.authenticateSession(ctx, token, true)
+}
+
+func (a *App) authenticateSession(ctx context.Context, token string, library bool) (SessionPrincipal, error) {
 	if strings.TrimSpace(token) == "" {
 		return SessionPrincipal{}, ErrUnauthorized
 	}
@@ -128,14 +139,14 @@ func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPri
 		return SessionPrincipal{}, err
 	}
 	now := time.Now().UTC()
-	if session.RevokedAt != nil || !session.ExpiresAt.After(now) {
+	if !session.ExpiresAt.After(now) || (!library && session.RevokedAt != nil) {
 		return SessionPrincipal{}, Err("access_token_expired", "访问令牌已过期", http.StatusUnauthorized)
 	}
 	user, err := a.Store.GetUser(ctx, session.UserID)
 	if err != nil {
 		return SessionPrincipal{}, err
 	}
-	if user.Status != "active" {
+	if !library && user.Status != "active" {
 		return SessionPrincipal{}, Err("account_disabled", "账号已被停用，无法使用当前会话", http.StatusForbidden)
 	}
 	device, err := a.Store.GetDeviceByID(ctx, session.DeviceID)
@@ -144,6 +155,12 @@ func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPri
 	}
 	if device.RevokedAt != nil {
 		return SessionPrincipal{}, Err("device_revoked", "设备已撤销", http.StatusUnauthorized)
+	}
+	if library && user.Status != "active" {
+		return SessionPrincipal{}, Err("user_unavailable", "您的账户被暂时禁用", http.StatusForbidden)
+	}
+	if session.RevokedAt != nil {
+		return SessionPrincipal{}, Err("access_token_expired", "访问令牌已过期", http.StatusUnauthorized)
 	}
 	if err := a.Store.TouchSession(ctx, session.ID, now); err != nil {
 		a.Logger.Warn("touch session failed", "session_id", session.ID, "error", err)
