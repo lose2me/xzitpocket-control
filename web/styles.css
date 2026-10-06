@@ -189,7 +189,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 2px;
 }
 
