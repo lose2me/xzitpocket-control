@@ -129,12 +129,16 @@ type SeriesPoint struct {
 }
 
 type MetricsBreakdown struct {
-	Platforms           map[string]int `json:"platforms"`
-	Versions            map[string]int `json:"versions"`
-	Colleges            map[string]int `json:"colleges"`
-	Classes             map[string]int `json:"classes"`
-	EventTypes          map[string]int `json:"event_types"`
-	EventHours          map[string]int `json:"event_hours"`
+	Platforms  map[string]int `json:"platforms"`
+	Versions   map[string]int `json:"versions"`
+	Colleges   map[string]int `json:"colleges"`
+	Classes    map[string]int `json:"classes"`
+	EventTypes map[string]int `json:"event_types"`
+	EventHours map[string]int `json:"event_hours"`
+
+	// FeatureUsage counts user-triggered feature usage only: each service keyed
+	// by its screen, plus share codes. Login-lifecycle events are excluded.
+	FeatureUsage        map[string]int `json:"feature_usage"`
 	LibraryEntries      int            `json:"library_entries"`
 	LibraryUsers        int            `json:"library_users"`
 	AnonymousEvents     int            `json:"anonymous_events"`
@@ -146,7 +150,7 @@ type MetricsBreakdown struct {
 }
 
 func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBreakdown, error) {
-	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}, Colleges: map[string]int{}, Classes: map[string]int{}, EventTypes: map[string]int{}, EventHours: map[string]int{}}
+	result := MetricsBreakdown{Platforms: map[string]int{}, Versions: map[string]int{}, Colleges: map[string]int{}, Classes: map[string]int{}, EventTypes: map[string]int{}, EventHours: map[string]int{}, FeatureUsage: map[string]int{}}
 	for hour := 0; hour < 24; hour++ {
 		result.EventHours[fmt.Sprintf("%02d:00", hour)] = 0
 	}
@@ -224,6 +228,20 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 			if userID.Valid && userID.String != "" {
 				libraryUsers[userID.String] = true
 			}
+		}
+		switch eventType {
+		case "service_open", "library_open":
+			screen, _ := props["screen"].(string)
+			if screen == "" {
+				if eventType == "library_open" {
+					screen = "learning_center"
+				} else {
+					screen = "service_open"
+				}
+			}
+			result.FeatureUsage[screen]++
+		case "share_code":
+			result.FeatureUsage["share_code"]++
 		}
 	}
 	if err := rows.Err(); err != nil {

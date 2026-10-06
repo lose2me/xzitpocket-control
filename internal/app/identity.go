@@ -136,6 +136,32 @@ type SessionOutput struct {
 	RefreshExpiresAt string     `json:"refresh_expires_at"`
 }
 
+// CheckLoginEligibility rejects a login for a user that control has disabled.
+// Device revocation is enforced earlier by AuthenticateDevice. Callers must
+// treat any other failure as "not blocked", so a control outage never stops
+// logins.
+func (a *App) CheckLoginEligibility(ctx context.Context, studentID string) error {
+	studentID = strings.TrimSpace(studentID)
+	if err := controlcrypto.ValidateStudentID(studentID); err != nil {
+		return Err("invalid_student_id", "学号格式无效", http.StatusBadRequest)
+	}
+	identity, err := a.Store.GetIdentityByHash(ctx, identityProvider, controlcrypto.HMACHex(a.Cfg.IDPepper, studentID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	user, err := a.Store.GetUser(ctx, identity.UserID)
+	if err != nil {
+		return err
+	}
+	if user.Status != "active" {
+		return Err("account_disabled", "账号已被停用，无法登录", http.StatusForbidden)
+	}
+	return nil
+}
+
 func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in AssertionInput, signature, installationID, signedAt string, sourceHashes ...string) (SessionOutput, error) {
 	sourceHash := ""
 	if len(sourceHashes) > 0 {
@@ -225,6 +251,10 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	user, err := a.Store.GetUser(ctx, identity.UserID)
 	if err != nil {
 		return SessionOutput{}, err
+	}
+	if user.Status != "active" {
+		a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "account_disabled", sourceHash)
+		return SessionOutput{}, Err("account_disabled", "账号已被停用，无法登录", http.StatusForbidden)
 	}
 	now := time.Now().UTC()
 	if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, in.CollegeName, in.ClassName, now); err != nil {

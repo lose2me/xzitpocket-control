@@ -101,6 +101,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.registerDevice(w, r)
+	case r.Method == http.MethodPost && path == "/auth/login-eligibility":
+		if !s.allow(r, "login-eligibility", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.loginEligibility(w, r)
 	case r.Method == http.MethodPost && path == "/auth/challenges":
 		if !s.allow(r, "challenge", 120, time.Minute) {
 			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
@@ -459,6 +465,24 @@ func (s *Server) createChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+func (s *Server) loginEligibility(w http.ResponseWriter, r *http.Request) {
+	// AuthenticateDevice rejects a revoked device before the body is read.
+	if _, ok := s.authDevice(w, r); !ok {
+		return
+	}
+	var in struct {
+		StudentID string `json:"student_id"`
+	}
+	if err := decodeJSON(r, &in, 16<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	if err := s.App.CheckLoginEligibility(r.Context(), in.StudentID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"allowed": true})
 }
 func (s *Server) assertLogin(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authDevice(w, r)

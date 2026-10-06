@@ -262,6 +262,9 @@ func TestControlFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "disabled"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("disable user status = %d, want %d", status, http.StatusOK)
 	}
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusForbidden {
+		t.Fatalf("disabled user login-eligibility status = %d, want %d", status, http.StatusForbidden)
+	}
 	if status := requestStatus(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusOK {
 		t.Fatalf("disabled user /me status = %d, want %d", status, http.StatusOK)
 	}
@@ -273,6 +276,9 @@ func TestControlFlow(t *testing.T) {
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("enable user status = %d, want %d", status, http.StatusOK)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusOK {
+		t.Fatalf("active user login-eligibility status = %d, want %d", status, http.StatusOK)
 	}
 
 	for _, path := range []string{
@@ -316,6 +322,17 @@ func TestControlFlow(t *testing.T) {
 		}
 	}
 
+	// A revoked device cannot start a new login. Device revocation is enforced
+	// by the device authentication that precedes the eligibility check.
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/devices/"+sessionDevice["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "revoked"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
+		t.Fatalf("revoke device status = %d, want %d", status, http.StatusOK)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusUnauthorized {
+		t.Fatalf("revoked device login-eligibility status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/devices/"+sessionDevice["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
+		t.Fatalf("restore device status = %d, want %d", status, http.StatusOK)
+	}
 }
 
 func newTestDevice(t *testing.T, installation string) *testDevice {
