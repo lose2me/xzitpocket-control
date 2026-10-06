@@ -220,7 +220,16 @@ func (a *App) SetUserStatus(ctx context.Context, id, status, actor string) error
 		return err
 	}
 	if err := a.Store.SetUserStatus(ctx, id, status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
-	return a.Store.AddAudit(ctx, actor, "user_status_change", "user", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
+	now := time.Now().UTC()
+	if status == "disabled" {
+		if err := a.Store.RevokeUserSessions(ctx, id, now); err != nil {
+			return err
+		}
+	}
+	return a.Store.AddAudit(ctx, actor, "user_status_change", "user", id, controlcrypto.JSON(map[string]string{"status": status}), now)
 }

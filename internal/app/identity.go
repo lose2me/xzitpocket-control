@@ -366,6 +366,20 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	if err != nil {
 		return SessionOutput{}, err
 	}
+	if device.RevokedAt != nil {
+		return SessionOutput{}, Err("device_revoked", "设备已撤销", http.StatusUnauthorized)
+	}
+	user, err := a.Store.GetUser(ctx, session.UserID)
+	if err != nil {
+		return SessionOutput{}, err
+	}
+	if user.Status != "active" {
+		return SessionOutput{}, Err("account_disabled", "账号已被停用，无法登录", http.StatusForbidden)
+	}
+	identity, identityErr := a.Store.GetIdentityByUser(ctx, user.ID, identityProvider)
+	if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
+		return SessionOutput{}, identityErr
+	}
 	if installationID == "" || installationID != device.Installation {
 		return SessionOutput{}, Err("installation_mismatch", "安装标识不匹配", http.StatusUnauthorized)
 	}
@@ -395,13 +409,16 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	accessExpiry, refreshExpiry := now.Add(15*time.Minute), session.RefreshExpires
 	rotated, err := a.Store.RotateSession(ctx, session.ID, hash, controlcrypto.HashToken(a.Cfg.TokenPepper, access), controlcrypto.HashToken(a.Cfg.TokenPepper, nextRefresh), accessExpiry, refreshExpiry, now)
 	if err != nil {
-		return SessionOutput{}, Err("refresh_replayed", "刷新令牌已失效", http.StatusUnauthorized)
+		if errors.Is(err, sql.ErrNoRows) {
+			return SessionOutput{}, Err("refresh_replayed", "刷新令牌已失效", http.StatusUnauthorized)
+		}
+		return SessionOutput{}, err
 	}
 	if err := a.Store.TouchDevice(ctx, device.ID, now); err != nil {
 		a.Logger.Warn("touch device after session refresh failed", "device_id", device.ID, "error", err)
 	}
 	device.LastSeenAt = now
-	user, err := a.Store.GetUser(ctx, rotated.UserID)
+	user, err = a.Store.GetUser(ctx, rotated.UserID)
 	if err != nil {
 		return SessionOutput{}, err
 	}
@@ -409,7 +426,6 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 		a.Logger.Warn("touch user after session refresh failed", "user_id", user.ID, "error", err)
 	}
 	user.LastLoginAt = now
-	identity, _ := a.Store.GetIdentityByUser(ctx, user.ID, identityProvider)
 	return SessionOutput{User: toUserView(user, identity.StudentAlias), Device: toDeviceView(device), AccessToken: access, RefreshToken: nextRefresh, ExpiresAt: accessExpiry.Format(time.RFC3339), RefreshExpiresAt: refreshExpiry.Format(time.RFC3339)}, nil
 }
 

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,7 +58,7 @@ func (a *App) InsertErrorReport(ctx context.Context, p SessionPrincipal, in Erro
 		return false, Err("invalid_error_report", "错误日志内容过长", http.StatusBadRequest)
 	}
 	identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, Err("student_identity_missing", "当前用户没有学号身份", http.StatusForbidden)
 	}
 	if err != nil {
@@ -100,7 +101,7 @@ func (a *App) SetErrorReportStudentIgnored(ctx context.Context, reportID int64, 
 		return Err("invalid_error_report", "错误报告标识无效", http.StatusBadRequest)
 	}
 	if err := a.Store.SetErrorReportStudentIgnoredByReportID(ctx, reportID, ignored, time.Now().UTC()); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err

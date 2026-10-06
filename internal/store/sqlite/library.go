@@ -137,7 +137,16 @@ func (s *Store) ListInactiveQuestionBanks(ctx context.Context) ([]QuestionBankSt
 }
 
 func (s *Store) GetQuestionBank(ctx context.Context, id string) (QuestionBank, error) {
-	row := s.DB.QueryRowContext(ctx,
+	return getQuestionBank(ctx, s.DB, id)
+}
+
+type questionBankQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string) (QuestionBank, error) {
+	row := queryer.QueryRowContext(ctx,
 		"SELECT id, order_id, is_new, name, status, requires_cdk, created_at, updated_at FROM question_banks WHERE id = ?", id)
 	var bank QuestionBank
 	var orderID, isNew, requiresCDK int
@@ -150,7 +159,7 @@ func (s *Store) GetQuestionBank(ctx context.Context, id string) (QuestionBank, e
 	bank.RequiresCDK = requiresCDK != 0
 	bank.CreatedAt, bank.UpdatedAt = fromMillis(created), fromMillis(updated)
 	bank.Questions = make([]Question, 0)
-	rows, err := s.DB.QueryContext(ctx, `SELECT q.id, q.bank_id, q.question_number, q.type, q.title, q.question_text,
+	rows, err := queryer.QueryContext(ctx, `SELECT q.id, q.bank_id, q.question_number, q.type, q.title, q.question_text,
 		q.correct_answer, q.sort_order, o.id, o.question_id, o.label, o.text, o.sort_order
 		FROM questions q LEFT JOIN question_options o ON o.question_id = q.id
 		WHERE q.bank_id = ? ORDER BY q.question_number, q.sort_order, q.id, o.sort_order, o.id`, id)
@@ -279,6 +288,15 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	existing, err := getQuestionBank(ctx, tx, bank.ID)
+	if err != nil {
+		return err
+	}
+	if sameQuestionBankContent(existing, bank) {
+		bank.UpdatedAt = existing.UpdatedAt
+	} else if !bank.UpdatedAt.After(existing.UpdatedAt) {
+		bank.UpdatedAt = existing.UpdatedAt.Add(time.Millisecond)
+	}
 	if bank.OrderID <= 0 {
 		if err := tx.QueryRowContext(ctx, "SELECT order_id FROM question_banks WHERE id = ?", bank.ID).Scan(&bank.OrderID); err != nil {
 			return err
@@ -308,7 +326,28 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	if err := insertQuestions(ctx, tx, bank); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sameQuestionBankContent(a, b QuestionBank) bool {
+	if a.OrderID != b.OrderID || a.IsNew != b.IsNew || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || len(a.Questions) != len(b.Questions) {
+		return false
+	}
+	for i := range a.Questions {
+		left, right := a.Questions[i], b.Questions[i]
+		if left.QuestionNumber != right.QuestionNumber || left.Type != right.Type || left.Title != right.Title || left.QuestionText != right.QuestionText || left.CorrectAnswer != right.CorrectAnswer || left.SortOrder != right.SortOrder || len(left.Options) != len(right.Options) {
+			return false
+		}
+		for j := range left.Options {
+			if left.Options[j].Label != right.Options[j].Label || left.Options[j].Text != right.Options[j].Text || left.Options[j].SortOrder != right.Options[j].SortOrder {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ErrQuestionBankOrderTaken is returned when an administrator attempts to
@@ -380,7 +419,7 @@ func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, no
 	if status != "active" && status != "draft" && status != "disabled" {
 		return errors.New("invalid question bank status")
 	}
-	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET status = ?, updated_at = ? WHERE id = ?", status, millis(now), id)
+	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET updated_at = CASE WHEN status <> ? THEN ? ELSE updated_at END, status = ? WHERE id = ?", status, millis(now), status, id)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func (s *Store) FindOrCreateIdentity(ctx context.Context, user User, identity Id
 			return Identity{}, err
 		}
 		return existing, nil
-	} else if scanErr != sql.ErrNoRows {
+	} else if !errors.Is(scanErr, sql.ErrNoRows) {
 		return Identity{}, scanErr
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO users(id, status, display_name, college_name, class_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)", user.ID, user.Status, user.DisplayName, user.CollegeName, user.ClassName, millis(user.CreatedAt), millis(user.LastLoginAt)); err != nil {
@@ -199,8 +200,18 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) error {
 	if status != "active" && status != "disabled" {
 		return fmt.Errorf("invalid user status")
 	}
-	_, err := s.DB.ExecContext(ctx, "UPDATE users SET status = ? WHERE id = ?", status, id)
-	return err
+	result, err := s.DB.ExecContext(ctx, "UPDATE users SET status = ? WHERE id = ?", status, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 type rowScannerUser interface {

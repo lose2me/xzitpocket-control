@@ -237,11 +237,13 @@ func validateCorrectAnswer(questionType string, options []sqlite.QuestionOption,
 
 func questionBankView(bank sqlite.QuestionBank) QuestionBankView {
 	view := QuestionBankView{ID: bank.ID, OrderID: bank.OrderID, New: bank.IsNew, Name: bank.Name, RequiresCDK: bank.RequiresCDK, Questions: make([]QuestionView, 0, len(bank.Questions))}
-	sort.SliceStable(bank.Questions, func(i, j int) bool { return bank.Questions[i].QuestionNumber < bank.Questions[j].QuestionNumber })
-	for _, question := range bank.Questions {
+	questions := append([]sqlite.Question(nil), bank.Questions...)
+	sort.SliceStable(questions, func(i, j int) bool { return questions[i].QuestionNumber < questions[j].QuestionNumber })
+	for _, question := range questions {
 		item := QuestionView{QuestionNumber: question.QuestionNumber, Type: question.Type, Title: question.Title, QuestionText: question.QuestionText, CorrectAnswer: question.CorrectAnswer, Options: make([]OptionView, 0, len(question.Options))}
-		sort.SliceStable(question.Options, func(i, j int) bool { return question.Options[i].SortOrder < question.Options[j].SortOrder })
-		for _, option := range question.Options {
+		options := append([]sqlite.QuestionOption(nil), question.Options...)
+		sort.SliceStable(options, func(i, j int) bool { return options[i].SortOrder < options[j].SortOrder })
+		for _, option := range options {
 			item.Options = append(item.Options, OptionView{Label: option.Label, Text: option.Text})
 		}
 		view.Questions = append(view.Questions, item)
@@ -353,8 +355,13 @@ func (a *App) UpdateQuestionBank(ctx context.Context, id string, in QuestionBank
 		}
 		return AdminQuestionBankView{}, err
 	}
+	updated, err := a.Store.GetQuestionBank(ctx, id)
+	if err != nil {
+		return AdminQuestionBankView{}, err
+	}
+	bank.UpdatedAt = updated.UpdatedAt
 	_ = a.Store.AddAudit(ctx, actor, "question_bank_update", "question_bank", bank.ID, "{}", now)
-	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339)}, nil
+	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: bank.UpdatedAt.Format(time.RFC3339)}, nil
 }
 
 func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor string) error {

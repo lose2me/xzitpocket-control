@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -65,8 +66,18 @@ func (s *Store) GetShareCodeByID(ctx context.Context, id string) (ShareCode, err
 }
 
 func (s *Store) DeleteShareCode(ctx context.Context, id string) error {
-	_, err := s.DB.ExecContext(ctx, "DELETE FROM share_codes WHERE id = ?", id)
-	return err
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM share_codes WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 type shareCodeScanner interface {

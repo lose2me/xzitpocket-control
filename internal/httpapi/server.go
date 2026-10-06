@@ -30,6 +30,8 @@ type Server struct {
 
 const apiPrefix = "/api/v1"
 
+const maxRateEntries = 10000
+
 type rateWindow struct {
 	started time.Time
 	count   int
@@ -252,23 +254,38 @@ func (s *Server) allow(r *http.Request, bucket string, limit int, window time.Du
 	if s.rates == nil {
 		s.rates = make(map[string]rateWindow)
 	}
-	entry := s.rates[key]
-	if entry.started.IsZero() || now.Sub(entry.started) >= window {
-		s.rates[key] = rateWindow{started: now, count: 1}
+	if entry, ok := s.rates[key]; ok {
+		if entry.started.IsZero() || now.Sub(entry.started) >= window {
+			s.rates[key] = rateWindow{started: now, count: 1}
+			return true
+		}
+		if entry.count >= limit {
+			return false
+		}
+		entry.count++
+		s.rates[key] = entry
 		return true
 	}
-	if entry.count >= limit {
-		return false
-	}
-	entry.count++
-	s.rates[key] = entry
-	if len(s.rates) > 10000 {
+	if len(s.rates) >= maxRateEntries {
+		// Keep the per-source limiter bounded even when every source is still
+		// in its active window. Remove expired entries first, then evict the
+		// oldest window before inserting the new source.
+		var oldestKey string
+		var oldest time.Time
 		for k, v := range s.rates {
 			if now.Sub(v.started) >= window {
 				delete(s.rates, k)
+				continue
+			}
+			if oldest.IsZero() || v.started.Before(oldest) {
+				oldestKey, oldest = k, v.started
 			}
 		}
+		if len(s.rates) >= maxRateEntries && oldestKey != "" {
+			delete(s.rates, oldestKey)
+		}
 	}
+	s.rates[key] = rateWindow{started: now, count: 1}
 	return true
 }
 

@@ -129,7 +129,7 @@ func ParseP256PublicKey(encoded string) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("invalid public_key: %w", err)
 	}
 	pub, ok := key.(*ecdsa.PublicKey)
-	if !ok || pub.Curve.Params().Name != "P-256" {
+	if !ok || pub.Curve == nil || pub.Curve.Params() == nil || pub.Curve.Params().Name != "P-256" {
 		return nil, errors.New("public_key must be an ECDSA P-256 key")
 	}
 	return pub, nil

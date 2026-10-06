@@ -141,18 +141,33 @@ func (a *App) GetSchoolCalendar(ctx context.Context) (SchoolCalendarView, error)
 	}
 	days, err := decodeStoredSchoolCalendar(config.DaysJSON)
 	if err != nil {
-		return SchoolCalendarView{}, Err("invalid_school_calendar", "校历配置损坏", http.StatusInternalServerError)
+		return a.resetSchoolCalendar(ctx)
 	}
 	if len(days) == 0 {
-		days = defaultSchoolCalendarDays()
+		return a.resetSchoolCalendar(ctx)
 	} else {
 		_, normalized, validationErr := validateSchoolCalendarInput(SchoolCalendarInput{Days: days})
 		if validationErr != nil {
-			return SchoolCalendarView{}, Err("invalid_school_calendar", "校历配置损坏", http.StatusInternalServerError)
+			return a.resetSchoolCalendar(ctx)
 		}
 		days = normalized
 	}
 	return schoolCalendarView(config, days), nil
+}
+
+func (a *App) resetSchoolCalendar(ctx context.Context) (SchoolCalendarView, error) {
+	encoded, days, err := validateSchoolCalendarInput(SchoolCalendarInput{Days: defaultSchoolCalendarDays()})
+	if err != nil {
+		return SchoolCalendarView{}, err
+	}
+	now := time.Now().UTC()
+	if err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SchoolCalendarView{}, ErrNotFound
+		}
+		return SchoolCalendarView{}, err
+	}
+	return schoolCalendarView(sqlite.SchoolCalendarConfig{DaysJSON: encoded, UpdatedAt: now}, days), nil
 }
 
 func (a *App) UpdateSchoolCalendar(ctx context.Context, in SchoolCalendarInput, actor string) (SchoolCalendarView, error) {

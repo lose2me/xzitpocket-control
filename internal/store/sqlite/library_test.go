@@ -81,6 +81,22 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 	if err := store.CreateQuestionBank(ctx, bank); err != nil {
 		t.Fatal(err)
 	}
+	original, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchanged := original
+	unchanged.UpdatedAt = now.Add(10 * time.Minute)
+	if err := store.UpdateQuestionBank(ctx, unchanged); err != nil {
+		t.Fatal(err)
+	}
+	unchangedRead, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchangedRead.UpdatedAt.Equal(original.UpdatedAt) {
+		t.Fatalf("unchanged content changed updated_at: before=%s after=%s", original.UpdatedAt, unchangedRead.UpdatedAt)
+	}
 	bank.Name = "已更新"
 	bank.UpdatedAt = now.Add(time.Minute)
 	bank.Questions = []Question{{ID: "q-2", QuestionNumber: 2, Type: "填空题", Title: "新题", QuestionText: "填空", CorrectAnswer: "答案", SortOrder: 0}}
@@ -94,8 +110,19 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 	if got.Name != "已更新" || len(got.Questions) != 1 || got.Questions[0].ID != "q-2" || len(got.Questions[0].Options) != 0 {
 		t.Fatalf("unexpected replacement: %#v", got)
 	}
+	if !got.UpdatedAt.After(original.UpdatedAt) {
+		t.Fatalf("changed content did not advance updated_at: before=%s after=%s", original.UpdatedAt, got.UpdatedAt)
+	}
+	contentUpdatedAt := got.UpdatedAt
 	if err := store.SetQuestionBankStatus(ctx, bank.ID, "disabled", now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
+	}
+	got, err = store.GetQuestionBank(ctx, bank.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.UpdatedAt.After(contentUpdatedAt) {
+		t.Fatalf("status change did not advance updated_at: before=%s after=%s", contentUpdatedAt, got.UpdatedAt)
 	}
 	items, total, err := func() ([]QuestionBankSummary, int, error) {
 		items, err := store.ListQuestionBanks(ctx, 50, 0, "")

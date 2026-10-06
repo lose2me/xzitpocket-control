@@ -104,6 +104,13 @@ func (s *Store) RevokeUserDeviceSessions(ctx context.Context, userID, deviceID s
 	return err
 }
 
+func (s *Store) RevokeUserSessions(ctx context.Context, userID string, now time.Time) error {
+	_, err := s.DB.ExecContext(ctx,
+		"UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+		millis(now), userID)
+	return err
+}
+
 func (s *Store) RevokeDeviceSessions(ctx context.Context, deviceID string, now time.Time) error {
 	_, err := s.DB.ExecContext(ctx,
 		"UPDATE sessions SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL",

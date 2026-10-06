@@ -27,7 +27,7 @@ func TestMigrateCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
-func TestMigrateAddsUserProfileColumns(t *testing.T) {
+func TestMigrateRebuildsIncompatibleSchema(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,12 +49,44 @@ func TestMigrateAddsUserProfileColumns(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var displayName, collegeName, className string
-	if err := store.DB.QueryRowContext(ctx, "SELECT display_name, college_name, class_name FROM users WHERE id = 'usr_old'").Scan(&displayName, &collegeName, &className); err != nil {
+	var count int
+	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = 'usr_old'").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if displayName != "旧用户" || collegeName != "" || className != "" {
-		t.Fatalf("migrated user = (%q, %q, %q)", displayName, collegeName, className)
+	if count != 0 {
+		t.Fatal("incompatible database data was retained")
+	}
+	var collegeName string
+	if err := store.DB.QueryRowContext(ctx, "SELECT college_name FROM users WHERE id = 'missing'").Scan(&collegeName); err == nil {
+		t.Fatal("missing row unexpectedly returned")
+	}
+}
+
+func TestMigrateRebuildsSchemaWithUnexpectedTable(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, "CREATE TABLE legacy_cache (id TEXT PRIMARY KEY, payload TEXT NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, "INSERT INTO legacy_cache(id, payload) VALUES ('legacy', 'old')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'legacy_cache'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("unexpected legacy table was retained")
 	}
 }
 

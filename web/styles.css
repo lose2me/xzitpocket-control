@@ -76,6 +76,13 @@ body {
   background: #ffffff !important;
 }
 
+.topbar .v-toolbar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .v-tooltip .v-overlay__content {
   background: #152a34 !important;
   color: #ffffff !important;
@@ -162,6 +169,17 @@ body {
 .detail-item .text-body-2 {
   color: #24343b !important;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.v-dialog .v-card-text {
+  min-width: 0;
+}
+
+.v-dialog .v-card-text .mono,
+.v-dialog .v-card-text .text-break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .loading-bar {

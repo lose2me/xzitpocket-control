@@ -135,6 +135,9 @@ func (a *App) AuthenticateSession(ctx context.Context, token string) (SessionPri
 	if err != nil {
 		return SessionPrincipal{}, err
 	}
+	if user.Status != "active" {
+		return SessionPrincipal{}, Err("account_disabled", "账号已被停用，无法使用当前会话", http.StatusForbidden)
+	}
 	device, err := a.Store.GetDeviceByID(ctx, session.DeviceID)
 	if err != nil {
 		return SessionPrincipal{}, err

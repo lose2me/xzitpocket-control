@@ -255,6 +255,9 @@ func (a *App) DeleteShareCode(ctx context.Context, id string, actor string) erro
 		return Err("invalid_share_code", "分享码标识无效", http.StatusBadRequest)
 	}
 	if err := a.Store.DeleteShareCode(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
 	return a.Store.AddAudit(ctx, actor, "share_code_delete", "share_code", id, "{}", time.Now().UTC())
