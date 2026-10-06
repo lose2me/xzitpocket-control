@@ -66,6 +66,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		{table: "users", column: "college_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "users", column: "class_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "share_codes", column: "code_ciphertext", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "share_codes", column: "payload_hash", definition: "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(ctx, migration.table, migration.column, migration.definition); err != nil {
 			return fmt.Errorf("migrate %s.%s: %w", migration.table, migration.column, err)

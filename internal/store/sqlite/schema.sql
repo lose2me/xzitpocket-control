@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS share_codes (
     code_hash TEXT NOT NULL UNIQUE,
     code_ciphertext TEXT NOT NULL DEFAULT '',
     payload_ciphertext TEXT NOT NULL,
+    payload_hash TEXT NOT NULL DEFAULT '',
     created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL

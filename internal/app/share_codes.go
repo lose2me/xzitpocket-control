@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,10 +16,11 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-const shareCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const shareCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789"
 
 type ShareCodeCreateInput struct {
-	Data map[string]any `json:"data"`
+	Suffix string         `json:"suffix"`
+	Data   map[string]any `json:"data"`
 }
 
 type ShareCodeView struct {
@@ -41,7 +44,7 @@ func canonicalShareCode(value string) string {
 
 func validShareCode(value string) bool {
 	value = canonicalShareCode(value)
-	if len(value) != 6 {
+	if len(value) != 6 || (value[5] != '1' && value[5] != '2') {
 		return false
 	}
 	for _, char := range value {
@@ -52,20 +55,24 @@ func validShareCode(value string) bool {
 	return true
 }
 
-func newShareCode() (string, error) {
-	raw := make([]byte, 6)
+func newShareCode(suffix byte) (string, error) {
+	raw := make([]byte, 5)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
 	var code strings.Builder
-	code.Grow(len(raw))
+	code.Grow(6)
 	for _, value := range raw {
 		code.WriteByte(shareCodeAlphabet[int(value)%len(shareCodeAlphabet)])
 	}
+	code.WriteByte(suffix)
 	return code.String(), nil
 }
 
 func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, userID string) (CreatedShareCodeView, error) {
+	if in.Suffix != "1" && in.Suffix != "2" {
+		return CreatedShareCodeView{}, Err("invalid_share_suffix", "分享码尾数无效", http.StatusBadRequest)
+	}
 	if len(in.Data) == 0 {
 		return CreatedShareCodeView{}, Err("invalid_share_data", "分享数据不能为空", http.StatusBadRequest)
 	}
@@ -76,13 +83,31 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 	if len(payload) > 512<<10 {
 		return CreatedShareCodeView{}, Err("share_data_too_large", "分享数据不能超过 512 KB", http.StatusRequestEntityTooLarge)
 	}
+	payloadHash := sharePayloadHash(payload)
+	now := time.Now().UTC()
+	if strings.TrimSpace(userID) != "" {
+		candidates, err := a.Store.FindActiveShareCodesByUserPayload(ctx, userID, payloadHash, now)
+		if err != nil {
+			return CreatedShareCodeView{}, err
+		}
+		for _, candidate := range candidates {
+			code := a.decryptShareCode(candidate.CodeCiphertext)
+			if len(code) != 6 || code[5] != in.Suffix[0] {
+				continue
+			}
+			expiresAt := now.Add(7 * 24 * time.Hour)
+			if err := a.Store.RenewShareCode(ctx, candidate.ID, expiresAt); err != nil {
+				return CreatedShareCodeView{}, err
+			}
+			return CreatedShareCodeView{Code: code, CreatedAt: candidate.CreatedAt, ExpiresAt: expiresAt}, nil
+		}
+	}
 	encrypted, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, string(payload))
 	if err != nil {
 		return CreatedShareCodeView{}, err
 	}
-	now := time.Now().UTC()
 	for attempt := 0; attempt < 8; attempt++ {
-		code, err := newShareCode()
+		code, err := newShareCode(in.Suffix[0])
 		if err != nil {
 			return CreatedShareCodeView{}, err
 		}
@@ -99,6 +124,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 			CodeHash:          controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalShareCode(code)),
 			CodeCiphertext:    codeCiphertext,
 			PayloadCiphertext: encrypted,
+			PayloadHash:       payloadHash,
 			CreatedByUserID:   userID,
 			CreatedAt:         now,
 			ExpiresAt:         now.Add(7 * 24 * time.Hour),
@@ -112,6 +138,11 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 		return CreatedShareCodeView{Code: code, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt}, nil
 	}
 	return CreatedShareCodeView{}, errors.New("could not generate a unique share code")
+}
+
+func sharePayloadHash(payload []byte) string {
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
 }
 
 func (a *App) ReadShareCode(ctx context.Context, rawCode string) (map[string]any, ShareCodeView, error) {

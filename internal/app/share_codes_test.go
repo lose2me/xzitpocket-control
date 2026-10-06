@@ -32,11 +32,11 @@ func TestShareCodeRoundTripAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Data: map[string]any{"version": 1, "value": "配置"}}, "")
+	created, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"version": 1, "value": "配置"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.Code) != 6 || created.ExpiresAt.Sub(created.CreatedAt) != 7*24*time.Hour {
+	if len(created.Code) != 6 || created.Code[5] != '2' || created.ExpiresAt.Sub(created.CreatedAt) != 7*24*time.Hour {
 		t.Fatalf("unexpected share code metadata: %#v", created)
 	}
 	data, meta, err := a.ReadShareCode(ctx, "  "+created.Code+"  ")
@@ -92,10 +92,18 @@ func TestListShareCodesResolvesStudentID(t *testing.T) {
 		VALUES ('idn_share_test', ?, ?, 'hash', '', ?, ?, ?)`, userID, identityProvider, ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Data: map[string]any{"v": 1}}, userID); err != nil {
+	first, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "1", Data: map[string]any{"v": 1}}, userID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Data: map[string]any{"v": 2}}, ""); err != nil {
+	second, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "1", Data: map[string]any{"v": 1}}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Code != first.Code || !second.ExpiresAt.After(first.ExpiresAt.Add(-time.Second)) {
+		t.Fatalf("same user/payload did not reuse and renew share code: first=%#v second=%#v", first, second)
+	}
+	if _, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"v": 2}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	views, total, err := a.ListShareCodes(ctx, 10, 0)
@@ -141,7 +149,7 @@ func TestShareCodeListAndDetailExposeCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Data: map[string]any{"settings": map[string]any{"theme": "dark"}}}, "")
+	created, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"settings": map[string]any{"theme": "dark"}}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
