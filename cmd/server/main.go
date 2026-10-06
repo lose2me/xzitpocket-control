@@ -89,6 +89,9 @@ func main() {
 		logger.Error("migrate database", "error", err)
 		os.Exit(1)
 	}
+	if backup := store.LastResetBackup(); backup != "" {
+		logger.Warn("incompatible database schema replaced with an empty one", "backup", backup)
+	}
 	cancel()
 	application, err := app.New(cfg, store, logger)
 	if err != nil {

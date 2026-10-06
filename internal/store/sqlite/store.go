@@ -50,6 +50,10 @@ var currentSchemaTables = []struct {
 type Store struct {
 	DB   *sql.DB
 	Path string
+
+	// lastResetBackup is the path of the crash snapshot written the last time an
+	// incompatible database was replaced, empty when no reset happened.
+	lastResetBackup string
 }
 
 func Open(path string) (*Store, error) {
@@ -94,6 +98,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if !errors.Is(err, errSchemaMismatch) {
 			return fmt.Errorf("validate schema: %w", err)
 		}
+		backup, backupErr := s.backupIncompatibleDatabase(ctx)
+		if backupErr != nil {
+			return fmt.Errorf("backup incompatible database: %w", backupErr)
+		}
+		s.lastResetBackup = backup
 		if err := s.resetDatabase(ctx); err != nil {
 			return fmt.Errorf("reset incompatible database: %w", err)
 		}
@@ -176,6 +185,33 @@ func (s *Store) validateCurrentSchema(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// LastResetBackup returns the path of the crash snapshot taken before an
+// incompatible database was wiped, or "" when no reset occurred.
+func (s *Store) LastResetBackup() string { return s.lastResetBackup }
+
+// backupIncompatibleDatabase writes a consistent copy of the current database
+// next to it, prefixed with "crash-", before an incompatible schema is dropped.
+// VACUUM INTO includes any pending WAL content, so the snapshot is complete.
+func (s *Store) backupIncompatibleDatabase(ctx context.Context) (string, error) {
+	dir := filepath.Dir(s.Path)
+	if dir == "" {
+		dir = "."
+	}
+	stamp := time.Now().UTC().Format("20060102-150405")
+	dest := filepath.Join(dir, "crash-"+stamp+".db")
+	for i := 1; ; i++ {
+		if _, err := os.Stat(dest); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		dest = filepath.Join(dir, fmt.Sprintf("crash-%s-%d.db", stamp, i))
+	}
+	statement := "VACUUM INTO '" + strings.ReplaceAll(dest, "'", "''") + "'"
+	if _, err := s.DB.ExecContext(ctx, statement); err != nil {
+		return "", fmt.Errorf("snapshot database to %s: %w", dest, err)
+	}
+	return dest, nil
 }
 
 func (s *Store) resetDatabase(ctx context.Context) error {

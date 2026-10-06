@@ -220,6 +220,23 @@ body {
   overflow-x: auto;
 }
 
+/* 手机模式下表格不换行：整表按内容宽度展开，外层横向滑动即可。 */
+@media (max-width: 959.98px) {
+  .admin-table .v-table__wrapper > table {
+    table-layout: auto;
+    width: auto;
+  }
+
+  .admin-table .v-data-table__th {
+    width: auto !important;
+  }
+
+  .admin-table .v-data-table__th,
+  .admin-table .v-data-table__td {
+    white-space: nowrap;
+  }
+}
+
 .admin-table .v-data-table__th,
 .admin-table .v-data-table__td {
   overflow: hidden;

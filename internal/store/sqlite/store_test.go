@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,6 +60,50 @@ func TestMigrateRebuildsIncompatibleSchema(t *testing.T) {
 	var collegeName string
 	if err := store.DB.QueryRowContext(ctx, "SELECT college_name FROM users WHERE id = 'missing'").Scan(&collegeName); err == nil {
 		t.Fatal("missing row unexpectedly returned")
+	}
+}
+
+func TestMigrateBacksUpBeforeRebuilding(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE users (
+		id TEXT PRIMARY KEY,
+		status TEXT NOT NULL DEFAULT 'active',
+		display_name TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		last_login_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, "INSERT INTO users(id, status, display_name, created_at, last_login_at) VALUES ('usr_old', 'active', '旧用户', 1, 1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	backup := store.LastResetBackup()
+	if backup == "" {
+		t.Fatal("incompatible schema was rebuilt without a crash backup")
+	}
+	if base := filepath.Base(backup); !strings.HasPrefix(base, "crash-") {
+		t.Fatalf("backup name %q does not start with crash-", base)
+	}
+	backupStore, err := Open(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backupStore.Close()
+	var displayName string
+	if err := backupStore.DB.QueryRowContext(ctx, "SELECT display_name FROM users WHERE id = 'usr_old'").Scan(&displayName); err != nil {
+		t.Fatalf("backup did not retain the old data: %v", err)
+	}
+	if displayName != "旧用户" {
+		t.Fatalf("backup user display_name = %q", displayName)
 	}
 }
 
