@@ -50,6 +50,20 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 	return result, rows.Err()
 }
 
+// QuestionBanksUpdatedAt returns the most recent question-bank modification
+// time, or the zero time when no bank exists. Clients compare it against a
+// cached value to decide whether the library needs a re-download.
+func (s *Store) QuestionBanksUpdatedAt(ctx context.Context) (time.Time, error) {
+	var value sql.NullInt64
+	if err := s.DB.QueryRowContext(ctx, "SELECT MAX(updated_at) FROM question_banks").Scan(&value); err != nil {
+		return time.Time{}, err
+	}
+	if !value.Valid {
+		return time.Time{}, nil
+	}
+	return fromMillis(value.Int64), nil
+}
+
 func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, error) {
 	query := "SELECT COUNT(*) FROM question_banks"
 	args := []any{}

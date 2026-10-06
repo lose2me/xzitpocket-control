@@ -12,10 +12,11 @@ import (
 // for dashboard day/week/month boundaries; persisted timestamps remain UTC.
 var controlLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
-const activeEventTypesSQL = "('app_start','foreground','heartbeat','control_login_success','library_open')"
+const activeEventTypesSQL = "('app_start','foreground','control_login_success','library_open','share_code','service_open')"
 
 var activeEventTypes = map[string]bool{
-	"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true,
+	"app_start": true, "foreground": true, "control_login_success": true, "library_open": true,
+	"share_code": true, "service_open": true,
 }
 
 func controlDayStart(now time.Time) time.Time {

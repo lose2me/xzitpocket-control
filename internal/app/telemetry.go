@@ -11,7 +11,7 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-var allowedEventTypes = map[string]bool{"app_start": true, "foreground": true, "heartbeat": true, "control_login_success": true, "library_open": true, "logout": true}
+var allowedEventTypes = map[string]bool{"app_start": true, "foreground": true, "control_login_success": true, "library_open": true, "logout": true, "share_code": true, "service_open": true}
 var allowedPropertyKeys = map[string]bool{"app_version": true, "platform": true, "screen": true, "library": true, "question_bank": true, "result": true, "source": true, "duration_ms": true, "error_code": true}
 
 type TelemetryEventInput struct {

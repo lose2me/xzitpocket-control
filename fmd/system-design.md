@@ -120,7 +120,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 ## 5. 活跃统计、风控与审计
 
-允许事件：`app_start`、`foreground`、`heartbeat`、`control_login_success`、`logout`、`library_open`。`POST /api/v1/telemetry/events` 接受事件数组；同一设备的 `event_id` 幂等。DAU/WAU/MAU 使用当天及近 7/30 个日历日去重统计，原始事件默认保留 90 天。
+允许事件：`app_start`、`foreground`、`control_login_success`、`logout`、`library_open`、`share_code`、`service_open`。`POST /api/v1/telemetry/events` 接受事件数组；同一设备的 `event_id` 幂等。DAU/WAU/MAU 使用当天及近 7/30 个日历日去重统计，原始事件默认保留 90 天。
 
 总览提供用户、设备、事件趋势，以及文库 CDK 今日、本周和累计成功兑换数。
 
