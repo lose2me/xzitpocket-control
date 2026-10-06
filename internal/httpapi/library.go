@@ -29,7 +29,12 @@ func (s *Server) questionBanks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
+	hidden, err := s.App.ListInactiveQuestionBanks(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset, "hidden": hidden})
 }
 
 func (s *Server) questionBank(w http.ResponseWriter, r *http.Request, id string) {

@@ -119,4 +119,19 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	if adminBanks["total"].(float64) != 1 || len(adminBankItems) != 1 || adminBankItems[0].(map[string]any)["status"] != "disabled" {
 		t.Fatalf("disabled question bank was not retained: %#v", adminBanks)
 	}
+	userBanks := requestWithHeaders(t, ts.URL+"/api/v1/question-banks", http.MethodGet, nil, userHeaders)
+	hidden, ok := userBanks["hidden"].([]any)
+	if !ok {
+		t.Fatalf("user question-bank list is missing the hidden list: %#v", userBanks)
+	}
+	foundHidden := false
+	for _, raw := range hidden {
+		if raw.(map[string]any)["id"] == bankID {
+			foundHidden = true
+			break
+		}
+	}
+	if !foundHidden {
+		t.Fatalf("disabled question bank missing from user hidden list: %#v", userBanks)
+	}
 }

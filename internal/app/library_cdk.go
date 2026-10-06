@@ -250,3 +250,23 @@ func (a *App) ListQuestionBanksForUser(ctx context.Context, limit, offset int, u
 	}
 	return result, total, nil
 }
+
+// QuestionBankStatusView identifies a disabled or draft bank without exposing
+// its content. Clients mark these as hidden and keep local collections until the
+// bank is re-enabled or actually deleted.
+type QuestionBankStatusView struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+func (a *App) ListInactiveQuestionBanks(ctx context.Context) ([]QuestionBankStatusView, error) {
+	items, err := a.Store.ListInactiveQuestionBanks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]QuestionBankStatusView, 0, len(items))
+	for _, item := range items {
+		result = append(result, QuestionBankStatusView{ID: item.ID, Status: item.Status})
+	}
+	return result, nil
+}

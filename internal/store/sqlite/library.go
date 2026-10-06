@@ -50,20 +50,6 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 	return result, rows.Err()
 }
 
-// QuestionBanksUpdatedAt returns the most recent question-bank modification
-// time, or the zero time when no bank exists. Clients compare it against a
-// cached value to decide whether the library needs a re-download.
-func (s *Store) QuestionBanksUpdatedAt(ctx context.Context) (time.Time, error) {
-	var value sql.NullInt64
-	if err := s.DB.QueryRowContext(ctx, "SELECT MAX(updated_at) FROM question_banks").Scan(&value); err != nil {
-		return time.Time{}, err
-	}
-	if !value.Valid {
-		return time.Time{}, nil
-	}
-	return fromMillis(value.Int64), nil
-}
-
 func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, error) {
 	query := "SELECT COUNT(*) FROM question_banks"
 	args := []any{}
@@ -122,6 +108,32 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// QuestionBankStatus is the minimal identity of a bank that is not published to
+// users. Clients use it to hide disabled/draft banks without mistaking them for
+// deleted ones.
+type QuestionBankStatus struct {
+	ID     string
+	Status string
+}
+
+func (s *Store) ListInactiveQuestionBanks(ctx context.Context) ([]QuestionBankStatus, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		"SELECT id, status FROM question_banks WHERE status != 'active' ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]QuestionBankStatus, 0)
+	for rows.Next() {
+		var item QuestionBankStatus
+		if err := rows.Scan(&item.ID, &item.Status); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) GetQuestionBank(ctx context.Context, id string) (QuestionBank, error) {
