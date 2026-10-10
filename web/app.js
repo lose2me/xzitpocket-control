@@ -404,7 +404,9 @@ import { template } from './template.js';
       const loadOverview = async () => {
         overview.value = await api('/api/v1/admin/metrics/overview');
         breakdown.value = await api('/api/v1/admin/metrics/breakdown');
-        series.value = (await api('/api/v1/admin/metrics/series?days=30')).items || [];
+        // 趋势按天统计，当天数据尚未固定，只展示到昨天。
+        const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
         await nextTick(); drawChart();
       };
       const loadBanks = async () => {
@@ -584,7 +586,7 @@ import { template } from './template.js';
             series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: platformRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}: {c}' } }]
           });
         }
-        // 刻度保留全部 24 个时段，尚未到达的小时数据置空，折线不向后延伸。
+        // 刻度保留全部 24 个时段，未固定的小时（含当前小时）数据置空，折线只画到上一个完整小时。
         const eventHourLimit = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
         if (eventChart) eventChart.dispose();
         if (eventChartEl.value && eventRows.value.length) {
@@ -595,7 +597,7 @@ import { template } from './template.js';
             grid: { left: 42, right: 18, top: 18, bottom: 42 },
             xAxis: { type: 'category', data: eventRows.value.map(row => row.label), axisLabel: { color: '#697984', rotate: 24 }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
             yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
-            series: [{ name: '事件数', type: 'line', smooth: true, showSymbol: false, data: eventRows.value.map(row => Number(row.label.slice(0, 2)) <= eventHourLimit ? row.value : null), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } }]
+            series: [{ name: '事件数', type: 'line', smooth: true, showSymbol: false, data: eventRows.value.map(row => Number(row.label.slice(0, 2)) < eventHourLimit ? row.value : null), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } }]
           });
         }
         if (featureChart) featureChart.dispose();

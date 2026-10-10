@@ -138,6 +138,7 @@ type MetricsBreakdown struct {
 
 	// FeatureUsage counts user-triggered feature usage only: each service keyed
 	// by its screen, plus share codes. Login-lifecycle events are excluded.
+	// It aggregates the full retained history, not just the current day.
 	FeatureUsage        map[string]int `json:"feature_usage"`
 	LibraryEntries      int            `json:"library_entries"`
 	LibraryUsers        int            `json:"library_users"`
@@ -229,9 +230,30 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 				libraryUsers[userID.String] = true
 			}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	result.LibraryUsers = len(libraryUsers)
+	// Feature usage is aggregated over all retained events rather than only the
+	// current day, so the dashboard reflects lifetime service usage.
+	featureRows, err := s.DB.QueryContext(ctx, "SELECT type, properties_json FROM activity_events WHERE type IN ('service_open','library_open','share_code')")
+	if err != nil {
+		return result, err
+	}
+	defer featureRows.Close()
+	for featureRows.Next() {
+		var eventType, raw string
+		if err := featureRows.Scan(&eventType, &raw); err != nil {
+			return result, err
+		}
 		switch eventType {
 		case "service_open", "library_open":
-			screen, _ := props["screen"].(string)
+			screen := ""
+			var props map[string]any
+			if json.Unmarshal([]byte(raw), &props) == nil {
+				screen, _ = props["screen"].(string)
+			}
 			if screen == "" {
 				if eventType == "library_open" {
 					screen = "learning_center"
@@ -244,10 +266,9 @@ func (s *Store) MetricsBreakdown(ctx context.Context, now time.Time) (MetricsBre
 			result.FeatureUsage["share_code"]++
 		}
 	}
-	if err := rows.Err(); err != nil {
+	if err := featureRows.Err(); err != nil {
 		return result, err
 	}
-	result.LibraryUsers = len(libraryUsers)
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM devices WHERE created_at >= ? AND created_at <= ?", millis(start), millis(now)).Scan(&result.NewDevices); err != nil {
 		return result, err
 	}

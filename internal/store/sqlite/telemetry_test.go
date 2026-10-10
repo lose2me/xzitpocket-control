@@ -30,6 +30,9 @@ func TestMetricsBreakdownFeatureUsage(t *testing.T) {
 		{EventID: "e5", DeviceID: "dev_1", Type: "app_start", OccurredAt: now, ReceivedAt: now, Properties: `{}`},
 		{EventID: "e6", DeviceID: "dev_1", Type: "control_login_success", OccurredAt: now, ReceivedAt: now, Properties: `{}`},
 		{EventID: "e7", DeviceID: "dev_1", Type: "logout", OccurredAt: now, ReceivedAt: now, Properties: `{}`},
+		// 10 days old: excluded from the daily window but must still count toward
+		// lifetime feature usage.
+		{EventID: "e8", DeviceID: "dev_1", Type: "service_open", OccurredAt: now.Add(-10 * 24 * time.Hour), ReceivedAt: now, Properties: `{"screen":"power"}`},
 	}
 	if _, _, err := store.InsertEvents(ctx, events); err != nil {
 		t.Fatal(err)
@@ -38,7 +41,7 @@ func TestMetricsBreakdownFeatureUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"power": 1, "exams": 1, "learning_center": 1, "share_code": 1}
+	want := map[string]int{"power": 2, "exams": 1, "learning_center": 1, "share_code": 1}
 	if len(breakdown.FeatureUsage) != len(want) {
 		t.Fatalf("feature usage = %#v, want %#v", breakdown.FeatureUsage, want)
 	}
