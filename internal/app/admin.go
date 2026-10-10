@@ -52,7 +52,7 @@ func (a *App) RevokeAdmin(ctx context.Context, p AdminPrincipal) error {
 	return nil
 }
 
-func (a *App) ListUsers(ctx context.Context, limit, offset int, status, search, sort, order string) ([]sqlite.UserListItem, int, error) {
+func (a *App) ListUsers(ctx context.Context, limit, offset int, status, search, empty, sort, order string) ([]sqlite.UserListItem, int, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
@@ -61,11 +61,11 @@ func (a *App) ListUsers(ctx context.Context, limit, offset int, status, search, 
 	if err != nil {
 		return nil, 0, err
 	}
-	users, err := a.Store.ListUsers(ctx, limit, offset, status, search, sort, order)
+	users, err := a.Store.ListUsers(ctx, limit, offset, status, search, empty, sort, order)
 	if err != nil {
 		return nil, 0, err
 	}
-	count, err := a.Store.CountUsers(ctx, status, search)
+	count, err := a.Store.CountUsers(ctx, status, search, empty)
 	return users, count, err
 }
 

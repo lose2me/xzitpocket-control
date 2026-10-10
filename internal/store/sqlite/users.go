@@ -100,18 +100,21 @@ type UserListItem struct {
 	AppVersion  string `json:"app_version"`
 }
 
+// latestUserAppVersionSQL is the app version shown for a user in the list: the
+// most recently seen bound, non-revoked device. Shared by the list projection
+// and the search filter so they stay in sync.
+const latestUserAppVersionSQL = "COALESCE((SELECT d.app_version FROM user_devices ud2 JOIN devices d ON d.id = ud2.device_id WHERE ud2.user_id = u.id AND ud2.unbound_at IS NULL AND d.revoked_at IS NULL ORDER BY d.last_seen_at DESC LIMIT 1), '')"
+
 const userListQuery = `SELECT u.id, u.status, u.display_name, u.college_name, u.class_name, u.created_at, u.last_login_at,
 	r.seq AS seq,
 	COUNT(DISTINCT CASE WHEN ud.unbound_at IS NULL THEN ud.device_id END) AS device_count,
-	COALESCE((SELECT d.app_version FROM user_devices ud2 JOIN devices d ON d.id = ud2.device_id
-		WHERE ud2.user_id = u.id AND ud2.unbound_at IS NULL AND d.revoked_at IS NULL
-		ORDER BY d.last_seen_at DESC LIMIT 1), '') AS app_version
+	` + latestUserAppVersionSQL + ` AS app_version
 	FROM users u
 	LEFT JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS seq FROM users) r ON r.id = u.id
 	LEFT JOIN user_devices ud ON ud.user_id = u.id`
 
-func (s *Store) ListUsers(ctx context.Context, limit, offset int, status, search, sort, order string) ([]UserListItem, error) {
-	where, filterArgs := userListWhere(status, search)
+func (s *Store) ListUsers(ctx context.Context, limit, offset int, status, search, empty, sort, order string) ([]UserListItem, error) {
+	where, filterArgs := userListWhere(status, search, empty)
 	args := append(append([]any{}, filterArgs...), limit, offset)
 	rows, err := s.DB.QueryContext(ctx, userListQuery+where+" GROUP BY u.id ORDER BY "+userListOrderBy(sort, order)+" LIMIT ? OFFSET ?", args...)
 	if err != nil {
@@ -170,18 +173,27 @@ func userListOrderBy(sort, order string) string {
 }
 
 // userListWhere filters the admin user list by account status and by a free-text
-// query matched against college, class and display name.
-func userListWhere(status, search string) (string, []any) {
-	conditions := make([]string, 0, 2)
+// query matched against display name, college, class and the latest device's app
+// version.
+func userListWhere(status, search, empty string) (string, []any) {
+	conditions := make([]string, 0, 3)
 	args := []any{}
 	if status = strings.TrimSpace(status); status != "" {
 		conditions = append(conditions, "u.status = ?")
 		args = append(args, status)
 	}
+	// "empty" filters users missing a profile field, matching the dashboard's
+	// "未知" buckets: empty=college or empty=class.
+	switch strings.TrimSpace(empty) {
+	case "college":
+		conditions = append(conditions, "u.college_name = ''")
+	case "class":
+		conditions = append(conditions, "u.class_name = ''")
+	}
 	if search = strings.TrimSpace(search); search != "" {
 		like := "%" + escapeLike(search) + "%"
-		conditions = append(conditions, "(u.display_name LIKE ? ESCAPE '\\' OR u.college_name LIKE ? ESCAPE '\\' OR u.class_name LIKE ? ESCAPE '\\')")
-		args = append(args, like, like, like)
+		conditions = append(conditions, "(u.display_name LIKE ? ESCAPE '\\' OR u.college_name LIKE ? ESCAPE '\\' OR u.class_name LIKE ? ESCAPE '\\' OR "+latestUserAppVersionSQL+" LIKE ? ESCAPE '\\')")
+		args = append(args, like, like, like, like)
 	}
 	if len(conditions) == 0 {
 		return "", args
@@ -189,8 +201,8 @@ func userListWhere(status, search string) (string, []any) {
 	return " WHERE " + strings.Join(conditions, " AND "), args
 }
 
-func (s *Store) CountUsers(ctx context.Context, status, search string) (int, error) {
-	where, args := userListWhere(status, search)
+func (s *Store) CountUsers(ctx context.Context, status, search, empty string) (int, error) {
+	where, args := userListWhere(status, search, empty)
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users u"+where, args...).Scan(&count)
 	return count, err

@@ -40,11 +40,11 @@ func TestListUsersSeqFollowsGlobalCreationOrder(t *testing.T) {
 	insertUser(t, store, "usr_b", "中间", "数学与统计学院", "", base.Add(time.Hour))
 	insertUser(t, store, "usr_c", "最新", "", "25信计2", base.Add(2*time.Hour))
 
-	items, err := store.ListUsers(ctx, 50, 0, "", "", "", "")
+	items, err := store.ListUsers(ctx, 50, 0, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	total, err := store.CountUsers(ctx, "", "")
+	total, err := store.CountUsers(ctx, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestListUsersSeqFollowsGlobalCreationOrder(t *testing.T) {
 	same := base.Add(3 * time.Hour)
 	insertUser(t, store, "usr_d", "同刻1", "", "", same)
 	insertUser(t, store, "usr_e", "同刻2", "", "", same)
-	items, err = store.ListUsers(ctx, 50, 0, "", "", "", "")
+	items, err = store.ListUsers(ctx, 50, 0, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +75,11 @@ func TestListUsersSeqFollowsGlobalCreationOrder(t *testing.T) {
 	}
 
 	// A filtered search keeps the global numbers.
-	items, err = store.ListUsers(ctx, 50, 0, "active", "最新", "", "")
+	items, err = store.ListUsers(ctx, 50, 0, "active", "最新", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	total, err = store.CountUsers(ctx, "active", "最新")
+	total, err = store.CountUsers(ctx, "active", "最新", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestListUsersSortsAndPaginates(t *testing.T) {
 	insertUser(t, store, "usr_3", "三", "", "", base.Add(2*time.Hour))
 
 	// 默认：最近登录倒序（三人相同，稳定按 id 兜底）
-	items, err := store.ListUsers(ctx, 10, 0, "", "", "", "")
+	items, err := store.ListUsers(ctx, 10, 0, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestListUsersSortsAndPaginates(t *testing.T) {
 	}
 
 	// 按注册序号升序
-	items, err = store.ListUsers(ctx, 10, 0, "", "", "seq", "asc")
+	items, err = store.ListUsers(ctx, 10, 0, "", "", "", "seq", "asc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestListUsersSortsAndPaginates(t *testing.T) {
 	}
 
 	// 按注册序号降序 + 分页：第 2 页每页 1 条 → 序号 2
-	items, err = store.ListUsers(ctx, 1, 1, "", "", "seq", "desc")
+	items, err = store.ListUsers(ctx, 1, 1, "", "", "", "seq", "desc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestListUsersSortsAndPaginates(t *testing.T) {
 	}
 
 	// 按注册时间升序
-	items, err = store.ListUsers(ctx, 10, 0, "", "", "created_at", "asc")
+	items, err = store.ListUsers(ctx, 10, 0, "", "", "", "created_at", "asc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,10 +184,10 @@ func TestListUsersAcceptsEverySortKey(t *testing.T) {
 	insertUser(t, store, "usr_2", "乙", "", "", base.Add(time.Hour))
 	for key := range userListSorts {
 		for _, order := range []string{"asc", "desc"} {
-			if _, err := store.ListUsers(ctx, 10, 0, "", "", key, order); err != nil {
+			if _, err := store.ListUsers(ctx, 10, 0, "", "", "", key, order); err != nil {
 				t.Fatalf("sort %s %s: %v", key, order, err)
 			}
-			if _, err := store.CountUsers(ctx, "", ""); err != nil {
+			if _, err := store.CountUsers(ctx, "", "", ""); err != nil {
 				t.Fatal(err)
 			}
 		}

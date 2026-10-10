@@ -209,6 +209,7 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false },
       ];
       const userSearch = ref('');
+      const userEmptyField = ref('');
       const userPage = ref(1);
       const userItemsPerPage = ref(25);
       const userTotal = ref(0);
@@ -273,7 +274,11 @@ import { template } from './template.js';
         .map(([label, value]) => ({ label, value: Number(value) || 0 }))
         .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
       const collegeRows = computed(() => distributionRows(breakdown.value.colleges));
-      const classRows = computed(() => distributionRows(breakdown.value.classes));
+      // "未知"（无班级数据）始终排在最后。
+      const classRows = computed(() => {
+        const rows = distributionRows(breakdown.value.classes);
+        return rows.filter(row => row.label !== '未知').concat(rows.filter(row => row.label === '未知'));
+      });
       const eventRows = computed(() => Object.entries(breakdown.value.event_hours || {})
         .map(([label, value]) => ({ label, value: Number(value) || 0 }))
         .sort((a, b) => a.label.localeCompare(b.label)));
@@ -416,7 +421,7 @@ import { template } from './template.js';
       };
       const loadCDKs = async () => {
         const offset = (cdkPage.value - 1) * cdkItemsPerPage.value;
-        const search = cdkSearch.value.trim();
+        const search = (cdkSearch.value || '').trim();
         const query = search ? '&q=' + encodeURIComponent(search) : '';
         const out = await api('/api/v1/admin/library-cdks?limit=' + cdkItemsPerPage.value + '&offset=' + offset + query);
         cdks.value = out.items || []; cdkTotal.value = out.total || 0;
@@ -508,17 +513,39 @@ import { template } from './template.js';
         await loadShareCodes();
       });
       const loadUsers = async () => {
-        const search = userSearch.value.trim();
+        const search = (userSearch.value || '').trim();
+        const empty = userEmptyField.value;
         const sort = userSortBy.value[0] || { key: 'last_login_at', order: 'desc' };
         const offset = (userPage.value - 1) * userItemsPerPage.value;
         const query = '?limit=' + userItemsPerPage.value + '&offset=' + offset
           + '&sort=' + encodeURIComponent(sort.key || 'last_login_at') + '&order=' + encodeURIComponent(sort.order || 'desc')
-          + (search ? '&q=' + encodeURIComponent(search) : '');
+          + (empty ? '&empty=' + encodeURIComponent(empty) : '')
+          + (search && !empty ? '&q=' + encodeURIComponent(search) : '');
         const out = await api('/api/v1/admin/users' + query);
         users.value = out.items || [];
         userTotal.value = out.total || 0;
       };
-      const searchUsers = () => call(async () => { userPage.value = 1; await loadUsers(); });
+      const searchUsers = () => call(async () => {
+        const term = (userSearch.value || '').trim();
+        userEmptyField.value = term === '学院未知' ? 'college' : (term === '班级未知' ? 'class' : '');
+        userPage.value = 1;
+        await loadUsers();
+      });
+      // 从总览的分布图/列表跳到用户列表，并用该值作为搜索词；
+      // 点击“未知”时改为筛选对应字段为空（无数据）的用户。
+      const filterUsersBy = (value, field) => {
+        const term = String(value || '').trim();
+        if (!term) return;
+        if (term === '未知' && (field === 'college' || field === 'class')) {
+          userEmptyField.value = field;
+          userSearch.value = field === 'college' ? '学院未知' : '班级未知';
+        } else {
+          userEmptyField.value = '';
+          userSearch.value = term;
+        }
+        userPage.value = 1;
+        switchView('users');
+      };
       const sortUsers = (sortBy) => call(async () => {
         userSortBy.value = Array.isArray(sortBy) && sortBy.length ? sortBy : [{ key: 'last_login_at', order: 'desc' }];
         userPage.value = 1;
@@ -572,9 +599,10 @@ import { template } from './template.js';
           collegeChart.setOption({
             animationDuration: 350,
             tooltip: { trigger: 'item' },
-            legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' } },
-            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: collegeRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}' } }]
+            legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' }, selected: { '未知': false } },
+            series: [{ type: 'pie', cursor: 'pointer', radius: ['36%', '68%'], center: ['50%', '43%'], data: collegeRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}' } }]
           });
+          collegeChart.on('click', (params) => { if (params && params.componentType === 'series') filterUsersBy(params.name, 'college'); });
         }
         if (platformChart) platformChart.dispose();
         if (platformChartEl.value && platformRows.value.length) {
@@ -852,7 +880,7 @@ import { template } from './template.js';
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, sortUsers,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
       };
     },
