@@ -333,8 +333,8 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' },
       ];
       const userDeviceHeaders = [
-        { title: '设备码', key: 'device_serial', sortable: false }, { title: '平台', key: 'platform' },
-        { title: '最近活动', key: 'last_seen_at' }
+        { title: '设备码', key: 'device_serial', sortable: false, width: '52%' }, { title: '平台', key: 'platform', width: '18%' },
+        { title: '最近活动', key: 'last_seen_at', width: '30%' }
       ];
       const bankHeaders = [
         { title: '顺序 ID', key: 'orderId', sortable: false, align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', sortable: false, width: '13%' }, { title: '名称', key: 'name', width: '17%' },
@@ -573,7 +573,7 @@ import { template } from './template.js';
             animationDuration: 350,
             tooltip: { trigger: 'item' },
             legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' } },
-            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: collegeRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}: {c}' } }]
+            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: collegeRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}' } }]
           });
         }
         if (platformChart) platformChart.dispose();
@@ -607,7 +607,7 @@ import { template } from './template.js';
             animationDuration: 350,
             tooltip: { trigger: 'item' },
             legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5e6d76' } },
-            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: featureRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}: {c}' } }]
+            series: [{ type: 'pie', radius: ['36%', '68%'], center: ['50%', '43%'], data: featureRows.value.map(row => ({ name: row.label, value: row.value })), label: { formatter: '{b}' } }]
           });
         }
       };
