@@ -23,6 +23,7 @@ type Config struct {
 	EncryptionKey      []byte
 	AdminKey           string
 	EventRetentionDays int
+	AuditRetentionDays int
 	RiskLoginWindow    time.Duration
 	RiskLoginCount     int
 	RiskDeviceCount    int
@@ -53,12 +54,16 @@ func Load() (Config, error) {
 		WebDir:             configValue(values, "CONTROL_WEB_DIR", ""),
 		AdminKey:           configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
 		EventRetentionDays: intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
+		AuditRetentionDays: intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
 		RiskLoginWindow:    durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
 		RiskLoginCount:     intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
 		RiskDeviceCount:    intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
 	}
 	if cfg.EventRetentionDays < 1 {
 		cfg.EventRetentionDays = 90
+	}
+	if cfg.AuditRetentionDays < 1 {
+		cfg.AuditRetentionDays = 30
 	}
 	if cfg.RiskLoginCount < 1 {
 		cfg.RiskLoginCount = 5
@@ -147,6 +152,7 @@ func defaultDotEnvValues() (map[string]string, error) {
 		"CONTROL_ENCRYPTION_KEY":       encryptionKey,
 		"CONTROL_ADMIN_KEY":            "change-me",
 		"CONTROL_EVENT_RETENTION_DAYS": "90",
+		"CONTROL_AUDIT_RETENTION_DAYS": "30",
 		"CONTROL_RISK_LOGIN_WINDOW":    "10m",
 		"CONTROL_RISK_LOGIN_COUNT":     "5",
 		"CONTROL_RISK_DEVICE_COUNT":    "5",
@@ -191,6 +197,7 @@ func writeDotEnv(path string, values map[string]string) error {
 		"CONTROL_ENCRYPTION_KEY",
 		"CONTROL_ADMIN_KEY",
 		"CONTROL_EVENT_RETENTION_DAYS",
+		"CONTROL_AUDIT_RETENTION_DAYS",
 		"CONTROL_RISK_LOGIN_WINDOW",
 		"CONTROL_RISK_LOGIN_COUNT",
 		"CONTROL_RISK_DEVICE_COUNT",

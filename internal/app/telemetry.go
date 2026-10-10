@@ -127,4 +127,10 @@ func (a *App) CleanupTelemetry(ctx context.Context) {
 	} else if n > 0 {
 		a.Logger.Info("cleaned challenges", "count", n)
 	}
+	auditBefore := time.Now().UTC().AddDate(0, 0, -a.Cfg.AuditRetentionDays)
+	if n, err := a.Store.CleanupAuditLogs(ctx, auditBefore); err != nil {
+		a.Logger.Warn("cleanup audit logs failed", "error", err)
+	} else if n > 0 {
+		a.Logger.Info("cleaned audit logs", "count", n)
+	}
 }

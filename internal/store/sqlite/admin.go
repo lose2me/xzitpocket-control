@@ -119,6 +119,14 @@ func (s *Store) AddAudit(ctx context.Context, actorID, action, targetType, targe
 	return err
 }
 
+func (s *Store) CleanupAuditLogs(ctx context.Context, before time.Time) (int64, error) {
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM audit_logs WHERE created_at < ?", millis(before))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) ListAudit(ctx context.Context, limit, offset int) ([]AuditLog, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		"SELECT id, actor_id, action, target_type, target_id, detail_json, created_at FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?",
