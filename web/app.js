@@ -612,7 +612,7 @@ import { template } from './template.js';
           chart.setOption({
             animationDuration: 350, tooltip: { trigger: 'axis' },
             legend: { data: ['总用户', 'DAU', 'WAU'], top: 0, textStyle: { color: '#5e6d76' } },
-            grid: { left: 42, right: 18, top: 34, bottom: 30 },
+            grid: { left: 4, right: 18, top: 34, bottom: 30, containLabel: true },
             xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
             yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
             series: [
