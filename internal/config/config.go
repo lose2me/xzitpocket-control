@@ -14,19 +14,21 @@ import (
 )
 
 type Config struct {
-	Addr               string
-	DBPath             string
-	PublicBaseURL      string
-	WebDir             string
-	TokenPepper        []byte
-	IDPepper           []byte
-	EncryptionKey      []byte
-	AdminKey           string
-	EventRetentionDays int
-	AuditRetentionDays int
-	RiskLoginWindow    time.Duration
-	RiskLoginCount     int
-	RiskDeviceCount    int
+	Path                 string
+	Addr                 string
+	DBPath               string
+	PublicBaseURL        string
+	WebDir               string
+	TokenPepper          []byte
+	IDPepper             []byte
+	EncryptionKey        []byte
+	AdminKey             string
+	EventRetentionDays   int
+	AuditRetentionDays   int
+	OverviewScalePercent int
+	RiskLoginWindow      time.Duration
+	RiskLoginCount       int
+	RiskDeviceCount      int
 }
 
 func Load() (Config, error) {
@@ -48,22 +50,27 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Addr:               configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
-		DBPath:             dbPath,
-		PublicBaseURL:      strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
-		WebDir:             configValue(values, "CONTROL_WEB_DIR", ""),
-		AdminKey:           configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
-		EventRetentionDays: intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
-		AuditRetentionDays: intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
-		RiskLoginWindow:    durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
-		RiskLoginCount:     intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
-		RiskDeviceCount:    intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
+		Path:                 configPath,
+		Addr:                 configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
+		DBPath:               dbPath,
+		PublicBaseURL:        strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
+		WebDir:               configValue(values, "CONTROL_WEB_DIR", ""),
+		AdminKey:             configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
+		EventRetentionDays:   intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
+		AuditRetentionDays:   intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
+		OverviewScalePercent: intConfigValue(values, "CONTROL_OVERVIEW_SCALE_PERCENT", 100),
+		RiskLoginWindow:      durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
+		RiskLoginCount:       intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
+		RiskDeviceCount:      intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
 	}
 	if cfg.EventRetentionDays < 1 {
 		cfg.EventRetentionDays = 90
 	}
 	if cfg.AuditRetentionDays < 1 {
 		cfg.AuditRetentionDays = 30
+	}
+	if cfg.OverviewScalePercent < 0 || cfg.OverviewScalePercent > 100000 {
+		cfg.OverviewScalePercent = 100
 	}
 	if cfg.RiskLoginCount < 1 {
 		cfg.RiskLoginCount = 5
@@ -143,19 +150,20 @@ func defaultDotEnvValues() (map[string]string, error) {
 		return nil, err
 	}
 	return map[string]string{
-		"CONTROL_ADDR":                 "127.0.0.1:8080",
-		"CONTROL_DB":                   "data/control.db",
-		"CONTROL_PUBLIC_BASE_URL":      "https://con.xuda.live",
-		"CONTROL_WEB_DIR":              "",
-		"CONTROL_TOKEN_PEPPER":         tokenPepper,
-		"CONTROL_ID_PEPPER":            idPepper,
-		"CONTROL_ENCRYPTION_KEY":       encryptionKey,
-		"CONTROL_ADMIN_KEY":            "change-me",
-		"CONTROL_EVENT_RETENTION_DAYS": "90",
-		"CONTROL_AUDIT_RETENTION_DAYS": "30",
-		"CONTROL_RISK_LOGIN_WINDOW":    "10m",
-		"CONTROL_RISK_LOGIN_COUNT":     "5",
-		"CONTROL_RISK_DEVICE_COUNT":    "5",
+		"CONTROL_ADDR":                   "127.0.0.1:8080",
+		"CONTROL_DB":                     "data/control.db",
+		"CONTROL_PUBLIC_BASE_URL":        "https://con.xuda.live",
+		"CONTROL_WEB_DIR":                "",
+		"CONTROL_TOKEN_PEPPER":           tokenPepper,
+		"CONTROL_ID_PEPPER":              idPepper,
+		"CONTROL_ENCRYPTION_KEY":         encryptionKey,
+		"CONTROL_ADMIN_KEY":              "change-me",
+		"CONTROL_EVENT_RETENTION_DAYS":   "90",
+		"CONTROL_AUDIT_RETENTION_DAYS":   "30",
+		"CONTROL_OVERVIEW_SCALE_PERCENT": "100",
+		"CONTROL_RISK_LOGIN_WINDOW":      "10m",
+		"CONTROL_RISK_LOGIN_COUNT":       "5",
+		"CONTROL_RISK_DEVICE_COUNT":      "5",
 	}, nil
 }
 
@@ -198,6 +206,7 @@ func writeDotEnv(path string, values map[string]string) error {
 		"CONTROL_ADMIN_KEY",
 		"CONTROL_EVENT_RETENTION_DAYS",
 		"CONTROL_AUDIT_RETENTION_DAYS",
+		"CONTROL_OVERVIEW_SCALE_PERCENT",
 		"CONTROL_RISK_LOGIN_WINDOW",
 		"CONTROL_RISK_LOGIN_COUNT",
 		"CONTROL_RISK_DEVICE_COUNT",
@@ -247,6 +256,16 @@ func updateDotEnv(path string, updates map[string]string) error {
 		}
 	}
 	return os.WriteFile(path, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")+"\n"), 0o600)
+}
+
+// SaveValue persists key=value into the file this config was loaded from, so
+// runtime changes survive restarts.
+func (c Config) SaveValue(key, value string) error {
+	path := c.Path
+	if path == "" {
+		path = filepath.Join("data", ".env")
+	}
+	return updateDotEnv(path, map[string]string{key: value})
 }
 
 func parseDotEnvValue(value string) string {

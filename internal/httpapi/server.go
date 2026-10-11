@@ -179,6 +179,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminMetricsSeries(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/breakdown":
 		s.adminMetricsBreakdown(w, r)
+	case r.Method == http.MethodGet && path == "/admin/overview-display":
+		s.adminOverviewDisplay(w, r)
+	case r.Method == http.MethodPut && path == "/admin/overview-display":
+		s.adminOverviewDisplayUpdate(w, r)
 	case r.Method == http.MethodGet && path == "/admin/users":
 		s.adminUsers(w, r)
 	case r.Method == http.MethodGet && pathMatchesID(path, "admin", "users"):
@@ -692,6 +696,31 @@ func (s *Server) adminMetricsBreakdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+func (s *Server) adminOverviewDisplay(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authAdmin(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scalePercent": s.App.OverviewScalePercent()})
+}
+
+func (s *Server) adminOverviewDisplayUpdate(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		ScalePercent int `json:"scalePercent"`
+	}
+	if err := decodeJSON(r, &in, 4<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	if err := s.App.SetOverviewScalePercent(r.Context(), in.ScalePercent, p.Admin.ID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scalePercent": in.ScalePercent})
 }
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r); !ok {

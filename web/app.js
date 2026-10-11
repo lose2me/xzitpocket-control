@@ -260,28 +260,54 @@ import { template } from './template.js';
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
       watch(mdAndUp, (desktop) => { if (!desktop) drawer.value = false; }, { immediate: true });
 
+      // 总览显示比例（百分比，100=原始值，200=2 倍）。由后端保存在 data/.env。
+      const overviewDialog = ref(false);
+      const overviewScaleInput = ref(100);
+      const overviewScalePercent = ref(100);
+      const scaleOverviewValue = (value) => {
+        const base = Number(value) || 0;
+        const percent = Number(overviewScalePercent.value);
+        return Math.round(base * (Number.isFinite(percent) ? percent : 100) / 100);
+      };
+      const scaleRows = (rows) => rows.map(row => Object.assign({}, row, { value: scaleOverviewValue(row.value) }));
+      const applyOverviewScale = () => call(async () => {
+        const percent = Math.max(0, Math.min(100000, Math.round(Number(overviewScaleInput.value) || 0)));
+        await api('/api/v1/admin/overview-display', { method: 'PUT', body: JSON.stringify({ scalePercent: percent }) });
+        overviewScalePercent.value = percent;
+        overviewScaleInput.value = percent;
+        overviewDialog.value = false;
+        await nextTick();
+        drawChart();
+      });
+      const resetOverviewScale = () => call(async () => {
+        await api('/api/v1/admin/overview-display', { method: 'PUT', body: JSON.stringify({ scalePercent: 100 }) });
+        overviewScalePercent.value = 100;
+        overviewScaleInput.value = 100;
+        await nextTick();
+        drawChart();
+      });
       const statCards = computed(() => [
-        { label: 'DAU', value: overview.value.dau || 0, icon: 'mdi-account-check-outline', color: 'primary' },
-        { label: 'WAU', value: overview.value.wau || 0, icon: 'mdi-account-clock-outline', color: 'secondary' },
-        { label: 'MAU', value: overview.value.mau || 0, icon: 'mdi-account-multiple-outline', color: 'info' },
-        { label: '活跃设备', value: overview.value.active_devices || 0, icon: 'mdi-devices', color: 'success' },
-        { label: '用户总数', value: overview.value.total_users || 0, icon: 'mdi-account-multiple', color: 'warning' },
-        { label: '今日事件', value: overview.value.today_events || 0, icon: 'mdi-pulse', color: 'error' }
+        { label: 'DAU', value: scaleOverviewValue(overview.value.dau), icon: 'mdi-account-check-outline', color: 'primary' },
+        { label: 'WAU', value: scaleOverviewValue(overview.value.wau), icon: 'mdi-account-clock-outline', color: 'secondary' },
+        { label: 'MAU', value: scaleOverviewValue(overview.value.mau), icon: 'mdi-account-multiple-outline', color: 'info' },
+        { label: '活跃设备', value: scaleOverviewValue(overview.value.active_devices), icon: 'mdi-devices', color: 'success' },
+        { label: '用户总数', value: scaleOverviewValue(overview.value.total_users), icon: 'mdi-account-multiple', color: 'warning' },
+        { label: '今日事件', value: scaleOverviewValue(overview.value.today_events), icon: 'mdi-pulse', color: 'error' }
       ]);
-      const platformRows = computed(() => Object.entries(breakdown.value.platforms || {}).map(([label, value]) => ({ label, value })));
-      const versionRows = computed(() => Object.entries(breakdown.value.versions || {}).map(([label, value]) => ({ label, value })));
+      const platformRows = computed(() => scaleRows(Object.entries(breakdown.value.platforms || {}).map(([label, value]) => ({ label, value }))));
+      const versionRows = computed(() => scaleRows(Object.entries(breakdown.value.versions || {}).map(([label, value]) => ({ label, value }))));
       const distributionRows = (value) => Object.entries(value || {})
         .map(([label, value]) => ({ label, value: Number(value) || 0 }))
         .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
-      const collegeRows = computed(() => distributionRows(breakdown.value.colleges));
+      const collegeRows = computed(() => scaleRows(distributionRows(breakdown.value.colleges)));
       // "未知"（无班级数据）始终排在最后。
       const classRows = computed(() => {
-        const rows = distributionRows(breakdown.value.classes);
+        const rows = scaleRows(distributionRows(breakdown.value.classes));
         return rows.filter(row => row.label !== '未知').concat(rows.filter(row => row.label === '未知'));
       });
-      const eventRows = computed(() => Object.entries(breakdown.value.event_hours || {})
+      const eventRows = computed(() => scaleRows(Object.entries(breakdown.value.event_hours || {})
         .map(([label, value]) => ({ label, value: Number(value) || 0 }))
-        .sort((a, b) => a.label.localeCompare(b.label)));
+        .sort((a, b) => a.label.localeCompare(b.label))));
       const cdkActivationRows = computed(() => [
         { label: '今日激活数', value: breakdown.value.cdk_activations_today || 0 },
         { label: '本周激活数', value: breakdown.value.cdk_activations_week || 0 },
@@ -289,10 +315,10 @@ import { template } from './template.js';
       ]);
       const featureLabels = { campus_card: '一卡通', power: '电费', exams: '考试安排', academic: '学业情况', network: '网络管理', repair: '极速报修', learning_center: '题库中心', school_calendar: '学校校历', book_list: '教材查询', teacher_evaluation: '教师评价', share_code: '分享码' };
       // 功能使用分布：仅统计用户主动使用的服务与分享码，不含启动/登录/退出等生命周期事件。
-      const featureRows = computed(() => Object.entries(breakdown.value.feature_usage || {})
+      const featureRows = computed(() => scaleRows(Object.entries(breakdown.value.feature_usage || {})
         .map(([key, value]) => ({ label: featureLabels[key] || valueOrDash(key), value: Number(value) || 0 }))
         .filter(row => row.value > 0)
-        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)));
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))));
       const userDetails = computed(() => {
         if (!selectedUser.value) return [];
         const user = selectedUser.value.user || {};
@@ -409,6 +435,9 @@ import { template } from './template.js';
       const loadOverview = async () => {
         overview.value = await api('/api/v1/admin/metrics/overview');
         breakdown.value = await api('/api/v1/admin/metrics/breakdown');
+        const display = await api('/api/v1/admin/overview-display');
+        const percent = Number(display && display.scalePercent);
+        if (Number.isFinite(percent)) { overviewScalePercent.value = percent; overviewScaleInput.value = percent; }
         // 趋势按天统计，当天数据尚未固定，只展示到昨天。
         const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
         series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
@@ -587,9 +616,9 @@ import { template } from './template.js';
             xAxis: { type: 'category', data: series.value.map(x => x.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
             yAxis: { type: 'value', axisLabel: { color: '#697984' }, splitLine: { lineStyle: { color: '#edf1f3' } } },
             series: [
-              { name: '总用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.total_users), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
-              { name: 'DAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.dau), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
-              { name: 'WAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => x.wau), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } }
+              { name: '总用户', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => scaleOverviewValue(x.total_users)), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } },
+              { name: 'DAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => scaleOverviewValue(x.dau)), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } },
+              { name: 'WAU', type: 'line', smooth: true, showSymbol: false, data: series.value.map(x => scaleOverviewValue(x.wau)), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } }
             ]
           });
         }
@@ -878,7 +907,7 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
