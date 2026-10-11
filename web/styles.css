@@ -211,36 +211,38 @@ body {
   gap: 2px;
 }
 
+/* 电脑和手机一致：整表按内容宽度单行展开，超长时外层横向滑动。 */
 .admin-table .v-table__wrapper > table {
-  width: 100%;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
 }
 
 .admin-table .v-table__wrapper {
   overflow-x: auto;
 }
 
-/* 手机模式下表格不换行：整表按内容宽度展开，外层横向滑动即可。 */
-@media (max-width: 959.98px) {
-  .admin-table .v-table__wrapper > table {
-    table-layout: auto;
-    width: auto;
-  }
-
-  .admin-table .v-data-table__th {
-    width: auto !important;
-  }
-
-  .admin-table .v-data-table__th,
-  .admin-table .v-data-table__td {
-    white-space: nowrap;
-  }
-}
-
 .admin-table .v-data-table__th,
 .admin-table .v-data-table__td {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 桌面端使用常驻滚动条，避免内容被挤出可视区却看不到滑动条。 */
+@media (hover: hover) and (pointer: fine) {
+  .admin-table .v-table__wrapper::-webkit-scrollbar {
+    height: 10px;
+  }
+
+  .admin-table .v-table__wrapper::-webkit-scrollbar-track {
+    background: #e8eef1;
+  }
+
+  .admin-table .v-table__wrapper::-webkit-scrollbar-thumb {
+    border-radius: 5px;
+    background: #9fb3bb;
+  }
 }
 
 .cdk-search,
