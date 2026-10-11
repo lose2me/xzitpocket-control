@@ -432,12 +432,15 @@ import { template } from './template.js';
         await api('/api/v1/admin/session', { method: 'DELETE' });
         localStorage.removeItem('control_admin'); logged.value = false; drawer.value = false; snackbar.value.show = false;
       });
-      const loadOverview = async () => {
-        overview.value = await api('/api/v1/admin/metrics/overview');
-        breakdown.value = await api('/api/v1/admin/metrics/breakdown');
+      const loadOverviewScale = async () => {
         const display = await api('/api/v1/admin/overview-display');
         const percent = Number(display && display.scalePercent);
         if (Number.isFinite(percent)) { overviewScalePercent.value = percent; overviewScaleInput.value = percent; }
+      };
+      const loadOverview = async () => {
+        overview.value = await api('/api/v1/admin/metrics/overview');
+        breakdown.value = await api('/api/v1/admin/metrics/breakdown');
+        await loadOverviewScale();
         // 趋势按天统计，当天数据尚未固定，只展示到昨天。
         const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
         series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
@@ -584,7 +587,7 @@ import { template } from './template.js';
         if (!logged.value) return;
         await call(async () => {
           if (view.value === 'overview') await loadOverview();
-          else if (view.value === 'users') await loadUsers();
+          else if (view.value === 'users') { await loadOverviewScale(); await loadUsers(); }
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
@@ -906,7 +909,7 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
