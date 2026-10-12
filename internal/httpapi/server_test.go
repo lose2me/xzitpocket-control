@@ -205,6 +205,28 @@ func TestControlFlow(t *testing.T) {
 	if publicRelease["latestVersion"] != "2.0.4" || publicRelease["downloadUrl"] != "https://download.example.test/xzitpocket.apk" {
 		t.Fatalf("public app release config was not updated: %#v", publicRelease)
 	}
+	updatedReleaseWithLog := requestWithHeaders(t, ts.URL+"/api/v1/admin/app/release", http.MethodPut,
+		map[string]string{"latestVersion": "2.0.5", "downloadUrl": "https://download.example.test/xzitpocket.apk", "changelog": "## 新增\n- 更新日志"}, adminHeaders)
+	if updatedReleaseWithLog["changelog"] != "## 新增\n- 更新日志" {
+		t.Fatalf("release changelog was not stored: %#v", updatedReleaseWithLog)
+	}
+	initialTestRelease := request(t, ts.URL+"/api/v1/app/release-test", http.MethodGet, nil, nil)
+	if initialTestRelease["latestVersion"] != "" || initialTestRelease["changelog"] != "" {
+		t.Fatalf("unexpected initial test release config: %#v", initialTestRelease)
+	}
+	updatedTestRelease := requestWithHeaders(t, ts.URL+"/api/v1/admin/app/release-test", http.MethodPut,
+		map[string]string{"latestVersion": "2.1.0", "downloadUrl": "https://download.example.test/test.apk", "changelog": "测试日志"}, adminHeaders)
+	if updatedTestRelease["latestVersion"] != "2.1.0" || updatedTestRelease["changelog"] != "测试日志" {
+		t.Fatalf("unexpected updated test release config: %#v", updatedTestRelease)
+	}
+	publicTestRelease := request(t, ts.URL+"/api/v1/app/release-test", http.MethodGet, nil, nil)
+	if publicTestRelease["latestVersion"] != "2.1.0" || publicTestRelease["downloadUrl"] != "https://download.example.test/test.apk" {
+		t.Fatalf("public test release config was not updated: %#v", publicTestRelease)
+	}
+	prodAfterTest := request(t, ts.URL+"/api/v1/app/release", http.MethodGet, nil, nil)
+	if prodAfterTest["latestVersion"] != "2.0.5" || prodAfterTest["changelog"] != "## 新增\n- 更新日志" {
+		t.Fatalf("test release update leaked into production config: %#v", prodAfterTest)
+	}
 	calendarInput := map[string]any{"days": []any{
 		map[string]any{"date": "2027-02-22", "name": "校庆", "adjustment": "20270223"},
 		map[string]any{"date": "2027-02-23", "name": "", "adjustment": "/"},

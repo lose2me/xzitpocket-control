@@ -42,7 +42,8 @@ var currentSchemaTables = []struct {
 	{name: "audit_logs", columns: []string{"id", "actor_id", "action", "target_type", "target_id", "detail_json", "created_at"}},
 	{name: "admin_users", columns: []string{"id", "password_hash", "created_at", "last_login_at", "disabled_at"}},
 	{name: "admin_sessions", columns: []string{"id", "admin_id", "token_hash", "expires_at", "created_at", "last_used_at", "revoked_at"}},
-	{name: "app_release_config", columns: []string{"id", "latest_version", "download_url", "updated_at"}},
+	{name: "app_release_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
+	{name: "app_release_test_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 }
@@ -90,7 +91,63 @@ func (s *Store) Close() error {
 	return s.DB.Close()
 }
 
+// additiveMigrations lists columns introduced after the initial deployment.
+// They are ALTERed in place BEFORE schema validation so an existing production
+// database keeps its data instead of failing validation and being rebuilt.
+var additiveMigrations = []struct {
+	table  string
+	column string
+	ddl    string
+}{
+	{"app_release_config", "changelog", `ALTER TABLE app_release_config ADD COLUMN changelog TEXT NOT NULL DEFAULT ''`},
+}
+
+func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
+	for _, migration := range additiveMigrations {
+		rows, err := s.DB.QueryContext(ctx, `PRAGMA table_info("`+migration.table+`")`)
+		if err != nil {
+			return err
+		}
+		// A fresh database has no table yet; CREATE TABLE below adds the column
+		// directly, so there is nothing to ALTER.
+		tableExists := false
+		found := false
+		for rows.Next() {
+			tableExists = true
+			var cid, notNull, primaryKey int
+			var name, dataType string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			if name == migration.column {
+				found = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if tableExists && !found {
+			if _, err := s.DB.ExecContext(ctx, migration.ddl); err != nil {
+				return fmt.Errorf("add %s.%s: %w", migration.table, migration.column, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Store) Migrate(ctx context.Context) error {
+	// Additive column migrations must run BEFORE the embedded schema: the
+	// schema's singleton INSERTs already reference the new columns, and an
+	// old database would fail on them.
+	if err := s.applyAdditiveMigrations(ctx); err != nil {
+		return fmt.Errorf("apply additive migrations: %w", err)
+	}
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}

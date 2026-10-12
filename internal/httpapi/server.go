@@ -151,6 +151,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.readShareCode(w, r, segment(path, 1))
 	case r.Method == http.MethodGet && path == "/app/release":
 		s.appRelease(w, r)
+	case r.Method == http.MethodGet && path == "/app/release-test":
+		s.appReleaseTest(w, r)
 	case r.Method == http.MethodGet && path == "/config/versions":
 		s.configVersions(w, r)
 	case r.Method == http.MethodGet && path == "/school-calendar":
@@ -211,6 +213,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminAppRelease(w, r)
 	case r.Method == http.MethodPut && path == "/admin/app/release":
 		s.adminAppReleaseUpdate(w, r)
+	case r.Method == http.MethodGet && path == "/admin/app/release-test":
+		s.adminAppReleaseTest(w, r)
+	case r.Method == http.MethodPut && path == "/admin/app/release-test":
+		s.adminAppReleaseTestUpdate(w, r)
 	case r.Method == http.MethodGet && path == "/admin/school-calendar":
 		s.adminSchoolCalendar(w, r)
 	case r.Method == http.MethodPut && path == "/admin/school-calendar":

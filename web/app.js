@@ -214,8 +214,10 @@ import { template } from './template.js';
       const userItemsPerPage = ref(25);
       const userTotal = ref(0);
       const userSortBy = ref([{ key: 'last_login_at', order: 'desc' }]);
-      const releaseConfig = ref({ latestVersion: '', downloadUrl: '', updatedAt: '' });
-      const releaseForm = ref({ latestVersion: '', downloadUrl: '' });
+      const releaseConfig = ref({ latestVersion: '', downloadUrl: '', changelog: '', updatedAt: '' });
+      const releaseForm = ref({ latestVersion: '', downloadUrl: '', changelog: '' });
+      const releaseTestConfig = ref({ latestVersion: '', downloadUrl: '', changelog: '', updatedAt: '' });
+      const releaseTestForm = ref({ latestVersion: '', downloadUrl: '', changelog: '' });
       const schoolCalendarConfig = ref({ days: [], updatedAt: '' });
       const schoolCalendarDays = ref([]);
       const schoolCalendarRange = ref('');
@@ -461,7 +463,12 @@ import { template } from './template.js';
       const loadRelease = async () => {
         const out = await api('/api/v1/admin/app/release');
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
-        releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '' };
+        releaseForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '', changelog: out.changelog || '' };
+      };
+      const loadReleaseTest = async () => {
+        const out = await api('/api/v1/admin/app/release-test');
+        releaseTestConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
+        releaseTestForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '', changelog: out.changelog || '' };
       };
       const loadSchoolCalendar = async () => {
         const out = await api('/api/v1/admin/school-calendar');
@@ -592,7 +599,7 @@ import { template } from './template.js';
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
           else if (view.value === 'share-codes') await loadShareCodes();
-          else if (view.value === 'config') await Promise.all([loadRelease(), loadSchoolCalendar()]);
+          else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
         });
       };
@@ -709,12 +716,24 @@ import { template } from './template.js';
       const saveRelease = () => call(async () => {
         const latestVersion = (releaseForm.value.latestVersion || '').trim();
         const downloadUrl = (releaseForm.value.downloadUrl || '').trim();
+        const changelog = releaseForm.value.changelog || '';
         if (!latestVersion) throw new Error('请填写最新版版本号');
         if (!downloadUrl) throw new Error('请填写下载 URL');
-        const out = await api('/api/v1/admin/app/release', { method: 'PUT', body: JSON.stringify({ latestVersion, downloadUrl }) });
+        const out = await api('/api/v1/admin/app/release', { method: 'PUT', body: JSON.stringify({ latestVersion, downloadUrl, changelog }) });
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
-        releaseForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl };
+        releaseForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl, changelog: out.changelog || changelog };
         notify('APP 发布配置已保存');
+      });
+      const saveReleaseTest = () => call(async () => {
+        const latestVersion = (releaseTestForm.value.latestVersion || '').trim();
+        const downloadUrl = (releaseTestForm.value.downloadUrl || '').trim();
+        const changelog = releaseTestForm.value.changelog || '';
+        if (!latestVersion) throw new Error('请填写最新版版本号');
+        if (!downloadUrl) throw new Error('请填写下载 URL');
+        const out = await api('/api/v1/admin/app/release-test', { method: 'PUT', body: JSON.stringify({ latestVersion, downloadUrl, changelog }) });
+        releaseTestConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
+        releaseTestForm.value = { latestVersion: out.latestVersion || latestVersion, downloadUrl: out.downloadUrl || downloadUrl, changelog: out.changelog || changelog };
+        notify('APP 测试发布配置已保存');
       });
       const saveSchoolCalendar = () => call(async () => {
         if (!schoolCalendarDays.value.length) throw new Error('请至少配置一天校历');
@@ -893,7 +912,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); };
       onMounted(() => {
@@ -906,12 +925,12 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
       };
     },

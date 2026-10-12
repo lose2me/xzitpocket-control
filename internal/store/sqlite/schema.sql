@@ -203,11 +203,26 @@ CREATE TABLE IF NOT EXISTS app_release_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     latest_version TEXT NOT NULL DEFAULT '',
     download_url TEXT NOT NULL DEFAULT '',
+    changelog TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL DEFAULT 0
 );
 
-INSERT OR IGNORE INTO app_release_config(id, latest_version, download_url, updated_at)
-VALUES (1, '', '', 0);
+INSERT OR IGNORE INTO app_release_config(id, latest_version, download_url, changelog, updated_at)
+VALUES (1, '', '', '', 0);
+
+-- Singleton TEST APP release configuration. Mirrors app_release_config but is
+-- served on separate endpoints so release candidates never reach production
+-- clients.
+CREATE TABLE IF NOT EXISTS app_release_test_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    latest_version TEXT NOT NULL DEFAULT '',
+    download_url TEXT NOT NULL DEFAULT '',
+    changelog TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO app_release_test_config(id, latest_version, download_url, changelog, updated_at)
+VALUES (1, '', '', '', 0);
 
 -- Singleton public school-calendar configuration managed by the admin console.
 -- The payload is stored as normalized JSON so clients can cache it verbatim.

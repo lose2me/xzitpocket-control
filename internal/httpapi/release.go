@@ -35,11 +35,54 @@ func (s *Server) adminAppReleaseUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in app.AppReleaseInput
-	if err := decodeJSON(r, &in, 16<<10); err != nil {
+	// The Markdown changelog can be large; allow more headroom than the
+	// default admin body limit.
+	if err := decodeJSON(r, &in, 128<<10); err != nil {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
 	out, err := s.App.UpdateAppReleaseConfig(r.Context(), in, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// appReleaseTest serves the public test-channel release metadata. It is fully
+// independent from /app/release.
+func (s *Server) appReleaseTest(w http.ResponseWriter, r *http.Request) {
+	out, err := s.App.GetAppReleaseTestConfig(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminAppReleaseTest(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authAdmin(w, r); !ok {
+		return
+	}
+	out, err := s.App.GetAppReleaseTestConfig(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminAppReleaseTestUpdate(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	var in app.AppReleaseInput
+	if err := decodeJSON(r, &in, 128<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.UpdateAppReleaseTestConfig(r.Context(), in, p.Admin.ID)
 	if err != nil {
 		writeError(w, r, err)
 		return
