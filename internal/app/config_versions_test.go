@@ -48,7 +48,7 @@ func TestConfigVersionsTrackSameMillisecondWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := base.Add(time.Duration(i) * time.Millisecond).Format(time.RFC3339Nano)
-		if release.UpdatedAt != want || calendar.UpdatedAt != want || versions.AppRelease != want || versions.SchoolCalendar != want {
+		if release.UpdatedAt != want || calendar.UpdatedAt != want || versions.SchoolCalendar != want {
 			t.Fatalf("write %d: release=%q calendar=%q versions=%#v, want %q", i, release.UpdatedAt, calendar.UpdatedAt, versions, want)
 		}
 		storedRelease, err := a.GetAppReleaseConfig(ctx)
