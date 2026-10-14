@@ -229,11 +229,12 @@ VALUES (1, '', '', '', 0);
 CREATE TABLE IF NOT EXISTS school_calendar_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     days_json TEXT NOT NULL DEFAULT '[]',
+    slots_json TEXT NOT NULL DEFAULT '[]',
     updated_at INTEGER NOT NULL DEFAULT 0
 );
 
-INSERT OR IGNORE INTO school_calendar_config(id, days_json, updated_at)
-VALUES (1, '[]', 0);
+INSERT OR IGNORE INTO school_calendar_config(id, days_json, slots_json, updated_at)
+VALUES (1, '[]', '[]', 0);
 
 -- Short-lived encrypted configuration payloads shared between app installs.
 CREATE TABLE IF NOT EXISTS share_codes (

@@ -228,6 +228,24 @@ import { template } from './template.js';
       const schoolCalendarEditingAdjustment = ref('');
       const schoolCalendarEditingName = ref('');
       const schoolCalendarEditingNew = ref(false);
+      const schoolCalendarSlotsText = ref('');
+      const formatSchoolCalendarSlots = (slots) => (Array.isArray(slots) ? slots : [])
+        .map(slot => String((slot && slot.start) || '') + '-' + String((slot && slot.end) || ''))
+        .filter(line => line !== '-')
+        .join('\n');
+      const parseSchoolCalendarSlots = (text) => String(text || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map((line, index) => {
+          const parts = line.split(/[-~–—\s,，]+/).filter(Boolean);
+          if (parts.length < 2) throw new Error('作息时间第 ' + (index + 1) + ' 行格式无效，应为 08:00-08:45');
+          const start = parts[0];
+          const end = parts[1];
+          const clock = /^([01]\d|2[0-3]):[0-5]\d$/;
+          if (!clock.test(start) || !clock.test(end)) throw new Error('作息时间第 ' + (index + 1) + ' 行时间格式无效');
+          return { index: index + 1, start, end };
+        });
       const bankDialog = ref(false);
       const bankEditing = ref(false);
       const bankJSON = ref('');
@@ -327,7 +345,6 @@ import { template } from './template.js';
         return [
           { label: '显示名', value: valueOrDash(user.display_name) },
           { label: '学号', value: valueOrDash(selectedUser.value.student_id) },
-          { label: '伪名', value: valueOrDash(user.student_alias) },
           { label: '学院', value: valueOrDash(user.college_name) },
           { label: '班级', value: valueOrDash(user.class_name) },
           { label: '状态', value: statusLabel(user.status) },
@@ -474,6 +491,7 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/school-calendar');
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
         schoolCalendarDays.value = (out && out.days || []).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
+        schoolCalendarSlotsText.value = formatSchoolCalendarSlots(out && out.slots);
         schoolCalendarRange.value = schoolCalendarDays.value.length
           ? schoolCalendarDays.value[0].date.replaceAll('-', '') + '-' + schoolCalendarDays.value[schoolCalendarDays.value.length - 1].date.replaceAll('-', '')
           : '';
@@ -737,9 +755,11 @@ import { template } from './template.js';
       });
       const saveSchoolCalendar = () => call(async () => {
         if (!schoolCalendarDays.value.length) throw new Error('请至少配置一天校历');
-        const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days: schoolCalendarDays.value }) });
+        const slots = parseSchoolCalendarSlots(schoolCalendarSlotsText.value);
+        const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days: schoolCalendarDays.value, slots }) });
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
         schoolCalendarDays.value = (out.days || schoolCalendarDays.value).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
+        schoolCalendarSlotsText.value = formatSchoolCalendarSlots((out && out.slots) || slots);
         notify('学校校历已保存');
       });
       const openSchoolCalendarRebuild = () => {
@@ -925,7 +945,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,

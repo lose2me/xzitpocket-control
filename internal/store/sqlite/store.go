@@ -44,7 +44,7 @@ var currentSchemaTables = []struct {
 	{name: "admin_sessions", columns: []string{"id", "admin_id", "token_hash", "expires_at", "created_at", "last_used_at", "revoked_at"}},
 	{name: "app_release_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
 	{name: "app_release_test_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
-	{name: "school_calendar_config", columns: []string{"id", "days_json", "updated_at"}},
+	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 }
 
@@ -100,6 +100,7 @@ var additiveMigrations = []struct {
 	ddl    string
 }{
 	{"app_release_config", "changelog", `ALTER TABLE app_release_config ADD COLUMN changelog TEXT NOT NULL DEFAULT ''`},
+	{"school_calendar_config", "slots_json", `ALTER TABLE school_calendar_config ADD COLUMN slots_json TEXT NOT NULL DEFAULT '[]'`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
