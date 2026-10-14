@@ -230,21 +230,29 @@ import { template } from './template.js';
       const schoolCalendarEditingNew = ref(false);
       const schoolCalendarSlotsText = ref('');
       const formatSchoolCalendarSlots = (slots) => (Array.isArray(slots) ? slots : [])
-        .map(slot => String((slot && slot.start) || '') + '-' + String((slot && slot.end) || ''))
-        .filter(line => line !== '-')
+        .map(slot => {
+          const start = String((slot && slot.start) || '');
+          const end = String((slot && slot.end) || '');
+          if (!start && !end) return '';
+          return start + '-' + end + (slot && slot.lab ? ' T' : '');
+        })
+        .filter(Boolean)
         .join('\n');
       const parseSchoolCalendarSlots = (text) => String(text || '')
         .split('\n')
         .map(line => line.trim())
         .filter(Boolean)
         .map((line, index) => {
-          const parts = line.split(/[-~–—\s,，]+/).filter(Boolean);
-          if (parts.length < 2) throw new Error('作息时间第 ' + (index + 1) + ' 行格式无效，应为 08:00-08:45');
+          let body = line;
+          let lab = false;
+          if (/[Tt]$/.test(body)) { lab = true; body = body.slice(0, -1).trim(); }
+          const parts = body.split(/[-~–—\s,，]+/).filter(Boolean);
+          if (parts.length < 2) throw new Error('作息时间第 ' + (index + 1) + ' 行格式无效，应为 08:00-08:45，行尾可加 T');
           const start = parts[0];
           const end = parts[1];
           const clock = /^([01]\d|2[0-3]):[0-5]\d$/;
           if (!clock.test(start) || !clock.test(end)) throw new Error('作息时间第 ' + (index + 1) + ' 行时间格式无效');
-          return { index: index + 1, start, end };
+          return { index: index + 1, start, end, lab };
         });
       const bankDialog = ref(false);
       const bankEditing = ref(false);

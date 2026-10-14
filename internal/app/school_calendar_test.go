@@ -62,9 +62,12 @@ func TestSchoolCalendarSlotsRoundTrip(t *testing.T) {
 	if len(view.Slots) != 14 || view.Slots[0].Start != "08:00" || view.Slots[13].End != "21:20" {
 		t.Fatalf("default slots = %#v", view.Slots)
 	}
+	if !view.Slots[4].Lab || !view.Slots[5].Lab || view.Slots[0].Lab {
+		t.Fatalf("default lab flags = %#v", view.Slots)
+	}
 
 	custom := []SchoolCalendarSlot{
-		{Index: 99, Start: "07:30", End: "08:15"},
+		{Index: 99, Start: "07:30", End: "08:15", Lab: true},
 		{Index: 1, Start: "08:25", End: "09:10"},
 	}
 	out, err := a.UpdateSchoolCalendar(ctx, SchoolCalendarInput{Days: view.Days, Slots: custom}, "admin")
@@ -72,14 +75,14 @@ func TestSchoolCalendarSlotsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Indices are renumbered 1..N regardless of the submitted values.
-	if len(out.Slots) != 2 || out.Slots[0].Index != 1 || out.Slots[1].Index != 2 || out.Slots[0].Start != "07:30" {
+	if len(out.Slots) != 2 || out.Slots[0].Index != 1 || out.Slots[1].Index != 2 || out.Slots[0].Start != "07:30" || !out.Slots[0].Lab || out.Slots[1].Lab {
 		t.Fatalf("saved slots = %#v", out.Slots)
 	}
 	got, err := a.GetSchoolCalendar(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Slots) != 2 || got.Slots[1].End != "09:10" {
+	if len(got.Slots) != 2 || got.Slots[1].End != "09:10" || !got.Slots[0].Lab {
 		t.Fatalf("reloaded slots = %#v", got.Slots)
 	}
 

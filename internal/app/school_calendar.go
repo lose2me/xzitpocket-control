@@ -37,6 +37,9 @@ type SchoolCalendarSlot struct {
 	Index int    `json:"index"`
 	Start string `json:"start"`
 	End   string `json:"end"`
+	// Lab marks a lab period (实验时段): the client shows a "T" next to it and
+	// hides it by default when no course falls on it.
+	Lab bool `json:"lab"`
 }
 
 type SchoolCalendarView struct {
@@ -97,8 +100,8 @@ func defaultSchoolCalendarSlots() []SchoolCalendarSlot {
 		{Index: 2, Start: "08:55", End: "09:40"},
 		{Index: 3, Start: "10:05", End: "10:50"},
 		{Index: 4, Start: "11:00", End: "11:45"},
-		{Index: 5, Start: "12:00", End: "12:45"},
-		{Index: 6, Start: "12:55", End: "13:40"},
+		{Index: 5, Start: "12:00", End: "12:45", Lab: true},
+		{Index: 6, Start: "12:55", End: "13:40", Lab: true},
 		{Index: 7, Start: "14:00", End: "14:45"},
 		{Index: 8, Start: "14:55", End: "15:40"},
 		{Index: 9, Start: "16:05", End: "16:50"},
@@ -126,6 +129,7 @@ func validateSchoolCalendarSlots(in []SchoolCalendarSlot) (string, []SchoolCalen
 			Index: i + 1,
 			Start: strings.TrimSpace(in[i].Start),
 			End:   strings.TrimSpace(in[i].End),
+			Lab:   in[i].Lab,
 		}
 		if !schoolCalendarClockPattern.MatchString(slot.Start) || !schoolCalendarClockPattern.MatchString(slot.End) {
 			return "", nil, Err("invalid_school_calendar", "节次时间格式无效，应为 HH:MM", http.StatusBadRequest)
