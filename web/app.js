@@ -158,7 +158,7 @@ import { template } from './template.js';
       const { mdAndUp } = useDisplay();
       const logged = ref(!!localStorage.getItem('control_admin'));
       const drawer = ref(false);
-      const VIEW_ROUTES = ['overview', 'users', 'devices', 'risk', 'error-reports', 'library', 'share-codes', 'config', 'audit'];
+      const VIEW_ROUTES = ['overview', 'users', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'courses', 'share-codes', 'config', 'audit'];
       const viewForPath = (pathname) => {
         const name = String(pathname || '').replace(/^\/+|\/+$/g, '');
         return VIEW_ROUTES.includes(name) ? name : 'overview';
@@ -185,6 +185,23 @@ import { template } from './template.js';
       const cdkTotal = ref(0);
       const cdkPage = ref(1);
       const cdkItemsPerPage = ref(25);
+      const courses = ref([]);
+      const courseTotal = ref(0);
+      const coursePage = ref(1);
+      const courseItemsPerPage = ref(25);
+      const courseSearch = ref('');
+      const courseDialog = ref(false);
+      const courseEditingId = ref('');
+      const courseForm = ref({ code: '', name: '' });
+      const textbooks = ref([]);
+      const textbookTotal = ref(0);
+      const textbookPage = ref(1);
+      const textbookItemsPerPage = ref(25);
+      const textbookSearch = ref('');
+      const textbookDialog = ref(false);
+      const textbookEditingId = ref('');
+      const textbookForm = ref({ name: '', tags: '', courseCode: '' });
+      const courseOptions = ref([]);
       const cdkDialog = ref(false);
       const cdkRevealDialog = ref(false);
       const cdkForm = ref({ count: 1 });
@@ -281,6 +298,8 @@ import { template } from './template.js';
         { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
         { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
+        { key: 'textbooks', label: '书单', icon: 'mdi-bookshelf' },
+        { key: 'courses', label: '课程', icon: 'mdi-book-open-variant' },
         { key: 'share-codes', label: '分享码', icon: 'mdi-share-variant-outline' },
         { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
         { key: 'audit', label: '审计', icon: 'mdi-history' }
@@ -406,6 +425,20 @@ import { template } from './template.js';
         { title: '状态', key: 'status', width: '13%' }, { title: '绑定学号', key: 'bound_student_id', sortable: false, width: '16%' },
         { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
+      const textbookHeaders = [
+        { title: '教材名称', key: 'name', sortable: true, width: '30%' },
+        { title: '标签', key: 'tags', sortable: false, width: '28%' },
+        { title: '关联课程', key: 'course_code', sortable: true, width: '20%' },
+        { title: '更新时间', key: 'updated_at', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+      ];
+      const courseHeaders = [
+        { title: '课程编号', key: 'code', sortable: true, width: '20%' },
+        { title: '课程名称', key: 'name', sortable: true, width: '30%' },
+        { title: '关联书籍', key: 'books', sortable: false, width: '33%' },
+        { title: '更新时间', key: 'updated_at', width: '11%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '6%' }
+      ];
       const riskOptions = [{ title: '全部', value: '' }, { title: '未查看', value: 'false' }, { title: '已查看', value: 'true' }];
       const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
       const questionTypeOptions = ['单选题', '多选题', '判断题', '填空题'];
@@ -438,6 +471,8 @@ import { template } from './template.js';
         cdkDialog.value = false;
         cdkRevealDialog.value = false;
         createdCDKs.value = [];
+        textbookDialog.value = false;
+        courseDialog.value = false;
       };
       const call = async (fn) => {
         loading.value = true; error.value = '';
@@ -485,6 +520,90 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/library-cdks?limit=' + cdkItemsPerPage.value + '&offset=' + offset + query);
         cdks.value = out.items || []; cdkTotal.value = out.total || 0;
       };
+      const booksLabel = (books) => (books || [])
+        .map((book) => (book.tags ? (book.name + ' / ' + book.tags) : book.name))
+        .join('；');
+      const loadCourses = async () => {
+        const offset = (coursePage.value - 1) * courseItemsPerPage.value;
+        const search = (courseSearch.value || '').trim();
+        const query = search ? '&q=' + encodeURIComponent(search) : '';
+        const out = await api('/api/v1/admin/courses?limit=' + courseItemsPerPage.value + '&offset=' + offset + query);
+        courses.value = out.items || []; courseTotal.value = out.total || 0;
+      };
+      const searchCourses = () => call(async () => { coursePage.value = 1; await loadCourses(); });
+      const openNewCourse = () => {
+        courseEditingId.value = '';
+        courseForm.value = { code: '', name: '' };
+        courseDialog.value = true;
+      };
+      const editCourse = (row) => {
+        const item = rawItem(row);
+        courseEditingId.value = item.id || '';
+        courseForm.value = { code: item.code || '', name: item.name || '' };
+        courseDialog.value = true;
+      };
+      const saveCourse = () => call(async () => {
+        const form = courseForm.value;
+        if (!String(form.code || '').trim()) throw new Error('请填写课程编号');
+        if (!String(form.name || '').trim()) throw new Error('请填写课程名称');
+        const editing = !!courseEditingId.value;
+        const path = '/api/v1/admin/courses' + (editing ? '/' + encodeURIComponent(courseEditingId.value) : '');
+        const body = { code: form.code, name: form.name };
+        await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        courseDialog.value = false;
+        notify(editing ? '课程已更新' : '课程已创建');
+        await loadCourses();
+      });
+      const deleteCourse = (row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定删除课程“' + item.name + '”吗？App 重新上报后会再次收录。')) return;
+        await api('/api/v1/admin/courses/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        notify('课程已删除');
+        await loadCourses();
+      });
+      const loadCourseOptions = async () => {
+        const out = await api('/api/v1/admin/courses?limit=200');
+        courseOptions.value = (out.items || []).map((item) => ({ title: (item.code || '') + ' ' + (item.name || ''), value: item.code || '' }));
+      };
+      const loadTextbooks = async () => {
+        const offset = (textbookPage.value - 1) * textbookItemsPerPage.value;
+        const search = (textbookSearch.value || '').trim();
+        const query = search ? '&q=' + encodeURIComponent(search) : '';
+        const out = await api('/api/v1/admin/textbooks?limit=' + textbookItemsPerPage.value + '&offset=' + offset + query);
+        textbooks.value = out.items || []; textbookTotal.value = out.total || 0;
+      };
+      const searchTextbooks = () => call(async () => { textbookPage.value = 1; await loadTextbooks(); });
+      const openNewTextbook = () => call(async () => {
+        textbookEditingId.value = '';
+        textbookForm.value = { name: '', tags: '', courseCode: '' };
+        await loadCourseOptions();
+        textbookDialog.value = true;
+      });
+      const editTextbook = (row) => call(async () => {
+        const item = rawItem(row);
+        textbookEditingId.value = item.id || '';
+        textbookForm.value = { name: item.name || '', tags: item.tags || '', courseCode: item.course_code || '' };
+        await loadCourseOptions();
+        textbookDialog.value = true;
+      });
+      const saveTextbook = () => call(async () => {
+        const form = textbookForm.value;
+        if (!String(form.name || '').trim()) throw new Error('请填写教材名称');
+        const editing = !!textbookEditingId.value;
+        const path = '/api/v1/admin/textbooks' + (editing ? '/' + encodeURIComponent(textbookEditingId.value) : '');
+        const body = { name: form.name, tags: form.tags, course_code: form.courseCode || '' };
+        await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        textbookDialog.value = false;
+        notify(editing ? '教材已更新' : '教材已创建');
+        await loadTextbooks();
+      });
+      const deleteTextbook = (row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定删除教材“' + item.name + '”吗？App 重新上报后会再次收录。')) return;
+        await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        notify('教材已删除');
+        await loadTextbooks();
+      });
       const loadRelease = async () => {
         const out = await api('/api/v1/admin/app/release');
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
@@ -624,6 +743,8 @@ import { template } from './template.js';
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
+          else if (view.value === 'textbooks') await loadTextbooks();
+          else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
           else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
@@ -940,7 +1061,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); };
       onMounted(() => {
@@ -955,11 +1076,15 @@ import { template } from './template.js';
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
+        textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
+        courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
-        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor
+        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
+        loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook,
+        loadCourses, searchCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
       };
     },
     template,

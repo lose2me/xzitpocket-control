@@ -2,7 +2,7 @@
 
 ## 1. 定位与边界
 
-control 是 Go + Vue CDN + Vuetify 4 + SQLite 的模块化单体，面向 xzitpocket 提供设备登记、用户会话、活跃统计、风控记录、审计、APP 发布配置和内置文库。
+control 是 Go + Vue CDN + Vuetify 4 + SQLite 的模块化单体，面向 xzitpocket 提供设备登记、用户会话、活跃统计、风控记录、审计、APP 发布配置、内置文库和教材/课程汇总。
 
 OA 登录由 xzitpocket 客户端完成。control 不读取、转发或保存 OA 密码、Cookie、Ticket 或 OA 响应，只接收客户端完成登录后提交的学号、显示名、固定伪名和设备断言。
 
@@ -19,7 +19,7 @@ xzitpocket 客户端
           ▼
 control 单体
   ├─ httpapi：路由、认证、请求校验
-  ├─ app：身份、会话、统计、发布配置、文库、风控
+  ├─ app：身份、会话、统计、发布配置、文库、采集、风控
   ├─ store/sqlite：事务和查询
   └─ web：嵌入式 Vue 管理后台
           │
@@ -118,7 +118,43 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 管理员通过 `POST /api/v1/admin/library-cdks` 生成 CDK，可用 `count` 批量生成，单次最多 500 个。CDK 明文只在创建响应中返回一次，数据库只保存哈希。首次兑换绑定学号，同一学号重复兑换幂等，其他学号拒绝；同一学号换设备仍可访问。
 
-## 5. 活跃统计、风控与审计
+## 5. 课程与书单采集
+
+客户端登录成功、拉取课表与书单后，把课程数据上报给 control：每门课程一条，按课程编号唯一；课程使用的教材单独成表，通过课程编号关联。上报异步进行，失败只记录日志，不影响客户端功能。
+
+### 5.1 模型
+
+| 表 | 唯一键 | 用途 |
+| --- | --- | --- |
+| `courses` | `code` | 每门课程一条，记录课程名 |
+| `textbooks` | `(name, tags, course_code)` | 每本教材一条，按课程编号关联到课程 |
+
+教材的课程关联用课程编号保存，改动教材的名称/标签不会丢失关联；也可在后台手动改关联课程。课程页的「书籍信息」只读，由关联派生。
+
+### 5.2 端点
+
+| 方法 | 路径 | 认证 |
+| --- | --- | --- |
+| POST | `/api/v1/courses` | 用户会话（课程 + 教材一起上报） |
+| GET/POST | `/api/v1/admin/courses` | 管理员 |
+| GET/PUT/DELETE | `/api/v1/admin/courses/{id}` | 管理员 |
+| GET/POST | `/api/v1/admin/textbooks` | 管理员 |
+| GET/PUT/DELETE | `/api/v1/admin/textbooks/{id}` | 管理员 |
+
+批量上报单次最多 200 条，单批内按课程编号去重；每门课程最多 50 本教材。
+
+### 5.3 唯一性与关联
+
+课程编号唯一，已有课程不覆盖，只补空课程名；教材按 `(name, tags, course_code)` 唯一，已有记录不覆盖。教材的课程关联用课程编号保存，编辑教材信息不会改变关联，管理员可在书单页手动修改关联课程；删除后客户端再次上报会重新收录，不做墓碑。
+
+### 5.4 验收标准
+
+- 课程按 `code` 唯一，教材按 `(name, tags, course_code)` 唯一；
+- 编辑教材信息不丢关联，且可手动改关联课程；
+- 上报失败不影响客户端课表；
+- 管理后台可搜索、新建、编辑和删除课程与教材记录。
+
+## 6. 活跃统计、风控与审计
 
 允许事件：`app_start`、`foreground`、`control_login_success`、`logout`、`library_open`、`share_code`、`service_open`。`POST /api/v1/telemetry/events` 接受事件数组；同一设备的 `event_id` 幂等。DAU/WAU/MAU 使用当天及近 7/30 个日历日去重统计，原始事件默认保留 90 天。
 
@@ -126,7 +162,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 风控只观察并列出两类异常：短时间登录尝试过多、账号绑定设备过多。达到阈值创建 `risk_events`，后台可清空记录，并可对关联设备执行封禁或恢复；封禁设备会撤销其现有会话。重要写操作记录 `audit_logs`。
 
-## 6. 管理 API
+## 7. 管理 API
 
 管理员登录：`POST /api/v1/admin/session`，请求体 `{"key":"..."}`。系统只有一个本地管理员，不显示用户名或角色；浏览器使用会话 Cookie 和 CSRF，脚本可使用 Bearer 管理员令牌。
 
@@ -140,6 +176,10 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | DELETE | `/admin/risk-events` |
 | GET/POST | `/admin/question-banks` |
 | GET/PUT/DELETE | `/admin/question-banks/{id}` |
+| GET/POST | `/admin/textbooks` |
+| GET/PUT/DELETE | `/admin/textbooks/{id}` |
+| GET/POST | `/admin/courses` |
+| GET/PUT/DELETE | `/admin/courses/{id}` |
 | GET/POST | `/admin/library-cdks` |
 | PATCH | `/admin/library-cdks/{id}` |
 | GET | `/app/release`（公开读取 APP 发布信息） |
@@ -149,7 +189,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 题库创建和更新只接受 `{ "questionBank": ... }`；创建不带题库 ID，更新通过 URL 指定 ID。`orderId` 可在创建或更新时设置，必须是未占用的正整数；省略时创建自动分配、更新保留原值。错误统一返回 `error.code`、`error.message` 和 `request_id`。
 
-## 6.1 APP 发布配置
+## 7.1 APP 发布配置
 
 管理后台的“配置”页只维护当前 APP 的最新版版本号和下载 URL。配置保存在 `app_release_config` 单例表中，更新操作写入 `audit_logs`，动作名为 `app_release_update`。客户端未来可通过无需登录的 `GET /api/v1/app/release` 读取：
 
@@ -162,7 +202,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 版本号必须以数字开头，下载地址必须是绝对 HTTP 或 HTTPS 地址；control 不负责托管安装包文件。
 
-## 7. 配置与数据
+## 8. 配置与数据
 
 程序只读取运行目录 `data/.env`，不读取系统环境变量。文件缺失时自动创建并生成随机密钥。
 
@@ -182,11 +222,11 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 当前数据库唯一结构来源为 `internal/store/sqlite/schema.sql`，启动时直接创建表和索引。SQLite 开启外键、WAL 和 `busy_timeout=5000`。
 
-## 8. 响应式后台
+## 9. 响应式后台
 
 管理后台使用 Vuetify 4 CDN，桌面端固定侧栏，移动端临时抽屉；表格在窄屏横向滚动，工具栏和表单自动换行。导航使用纯色背景和明确的悬停、选中状态，不使用渐变。分页、空状态和辅助标签使用中文。
 
-## 9. 验收标准
+## 10. 验收标准
 
 - OA 凭据不会进入 control；
 - 同一学号可在多设备登录，设备签名不阻止其他设备；
