@@ -63,6 +63,52 @@ func TestMigrateRebuildsIncompatibleSchema(t *testing.T) {
 	}
 }
 
+func TestMigrateDropsRemovedCoursesBooksColumn(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	// Simulate a courses table that still embedded its book list.
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE courses (
+		id TEXT PRIMARY KEY,
+		code TEXT NOT NULL UNIQUE,
+		name TEXT NOT NULL,
+		books TEXT NOT NULL DEFAULT '[]',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO courses(id, code, name, books, created_at, updated_at)
+		VALUES ('crs_old', '3007B2106', '数学分析（Ⅲ）', '[{"name":"数学分析","tags":"高教社"}]', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	hasBooks, err := store.tableHasColumn(ctx, "courses", "books")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasBooks {
+		t.Fatal("courses.books was not removed")
+	}
+	var count int
+	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM courses").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("course row was lost during migration, got %d", count)
+	}
+	if store.LastMigrationBackup() == "" {
+		t.Fatal("no snapshot was written before removing the column")
+	}
+}
+
 func TestMigrateBacksUpBeforeRebuilding(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(filepath.Join(dir, "control.db"))

@@ -25,8 +25,8 @@ func (s *Store) GetIdentityByUser(ctx context.Context, userID, provider string) 
 
 func (s *Store) CreateUser(ctx context.Context, user User) error {
 	_, err := s.DB.ExecContext(ctx,
-		"INSERT INTO users(id, status, display_name, college_name, class_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		user.ID, user.Status, user.DisplayName, user.CollegeName, user.ClassName, millis(user.CreatedAt), millis(user.LastLoginAt))
+		"INSERT INTO users(id, status, display_name, college_name, class_name, major_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		user.ID, user.Status, user.DisplayName, user.CollegeName, user.ClassName, user.MajorName, millis(user.CreatedAt), millis(user.LastLoginAt))
 	return err
 }
 
@@ -51,7 +51,7 @@ func (s *Store) FindOrCreateIdentity(ctx context.Context, user User, identity Id
 	} else if !errors.Is(scanErr, sql.ErrNoRows) {
 		return Identity{}, scanErr
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO users(id, status, display_name, college_name, class_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)", user.ID, user.Status, user.DisplayName, user.CollegeName, user.ClassName, millis(user.CreatedAt), millis(user.LastLoginAt)); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO users(id, status, display_name, college_name, class_name, major_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", user.ID, user.Status, user.DisplayName, user.CollegeName, user.ClassName, user.MajorName, millis(user.CreatedAt), millis(user.LastLoginAt)); err != nil {
 		return Identity{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO identities(id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", identity.ID, identity.UserID, identity.Provider, identity.StudentIDHash, identity.StudentAlias, identity.StudentIDCiphertext, millis(identity.CreatedAt), millis(identity.UpdatedAt)); err != nil {
@@ -72,18 +72,19 @@ func (s *Store) UpdateIdentity(ctx context.Context, identity Identity) error {
 
 func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, status, display_name, college_name, class_name, created_at, last_login_at FROM users WHERE id = ?", id)
+		"SELECT id, status, display_name, college_name, class_name, major_name, created_at, last_login_at FROM users WHERE id = ?", id)
 	return scanUser(row)
 }
 
-func (s *Store) UpdateUserLogin(ctx context.Context, id, displayName, collegeName, className string, now time.Time) error {
+func (s *Store) UpdateUserLogin(ctx context.Context, id, displayName, collegeName, className, majorName string, now time.Time) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE users SET
 			display_name = CASE WHEN ? <> '' THEN ? ELSE display_name END,
 			college_name = CASE WHEN ? <> '' THEN ? ELSE college_name END,
 			class_name = CASE WHEN ? <> '' THEN ? ELSE class_name END,
+			major_name = CASE WHEN ? <> '' THEN ? ELSE major_name END,
 			last_login_at = ? WHERE id = ?`,
-		displayName, displayName, collegeName, collegeName, className, className, millis(now), id)
+		displayName, displayName, collegeName, collegeName, className, className, majorName, majorName, millis(now), id)
 	return err
 }
 
@@ -105,7 +106,7 @@ type UserListItem struct {
 // and the search filter so they stay in sync.
 const latestUserAppVersionSQL = "COALESCE((SELECT d.app_version FROM user_devices ud2 JOIN devices d ON d.id = ud2.device_id WHERE ud2.user_id = u.id AND ud2.unbound_at IS NULL AND d.revoked_at IS NULL ORDER BY d.last_seen_at DESC LIMIT 1), '')"
 
-const userListQuery = `SELECT u.id, u.status, u.display_name, u.college_name, u.class_name, u.created_at, u.last_login_at,
+const userListQuery = `SELECT u.id, u.status, u.display_name, u.college_name, u.class_name, u.major_name, u.created_at, u.last_login_at,
 	r.seq AS seq,
 	COUNT(DISTINCT CASE WHEN ud.unbound_at IS NULL THEN ud.device_id END) AS device_count,
 	` + latestUserAppVersionSQL + ` AS app_version
@@ -125,7 +126,7 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int, status, search
 	for rows.Next() {
 		var u UserListItem
 		var created, lastLogin int64
-		if err := rows.Scan(&u.ID, &u.Status, &u.DisplayName, &u.CollegeName, &u.ClassName, &created, &lastLogin, &u.Seq, &u.DeviceCount, &u.AppVersion); err != nil {
+		if err := rows.Scan(&u.ID, &u.Status, &u.DisplayName, &u.CollegeName, &u.ClassName, &u.MajorName, &created, &lastLogin, &u.Seq, &u.DeviceCount, &u.AppVersion); err != nil {
 			return nil, err
 		}
 		u.CreatedAt = fromMillis(created)
@@ -233,7 +234,7 @@ type rowScannerUser interface {
 func scanUser(row rowScannerUser) (User, error) {
 	var user User
 	var created, lastLogin int64
-	if err := row.Scan(&user.ID, &user.Status, &user.DisplayName, &user.CollegeName, &user.ClassName, &created, &lastLogin); err != nil {
+	if err := row.Scan(&user.ID, &user.Status, &user.DisplayName, &user.CollegeName, &user.ClassName, &user.MajorName, &created, &lastLogin); err != nil {
 		return User{}, err
 	}
 	user.CreatedAt = fromMillis(created)

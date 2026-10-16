@@ -62,10 +62,11 @@ func TestControlFlow(t *testing.T) {
 	alias := controlcrypto.StudentAlias(student)
 	collegeName := "计算机学院"
 	className := "计科2301班"
+	majorName := "计算机科学与技术"
 	asserted := time.Now().UTC().Format(time.RFC3339)
-	loginPayload := map[string]any{"challenge_id": challenge1["challenge_id"], "challenge": challenge1["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "asserted_at": asserted}
+	loginPayload := map[string]any{"challenge_id": challenge1["challenge_id"], "challenge": challenge1["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "major_name": majorName, "asserted_at": asserted}
 	signedAt := time.Now().UTC().Format(time.RFC3339)
-	loginSignature := sign(t, d1.priv, lines("xzitpocket-control-login", challenge1["challenge_id"].(string), challenge1["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, asserted))
+	loginSignature := sign(t, d1.priv, lines("xzitpocket-control-login", challenge1["challenge_id"].(string), challenge1["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, majorName, asserted))
 	session1 := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginPayload, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": loginSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
 	access, refresh := session1["access_token"].(string), session1["refresh_token"].(string)
 	if access == "" || refresh == "" {
@@ -305,8 +306,8 @@ func TestControlFlow(t *testing.T) {
 	requestFailure(t, ts.URL+"/api/v1/question-banks", map[string]string{"Authorization": "Bearer " + access}, http.StatusUnauthorized, "access_token_expired")
 	challengeAfterEnable := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
 	assertedAfterEnable := time.Now().UTC().Format(time.RFC3339)
-	loginAfterEnable := map[string]any{"challenge_id": challengeAfterEnable["challenge_id"], "challenge": challengeAfterEnable["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "asserted_at": assertedAfterEnable}
-	signatureAfterEnable := sign(t, d1.priv, lines("xzitpocket-control-login", challengeAfterEnable["challenge_id"].(string), challengeAfterEnable["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, assertedAfterEnable))
+	loginAfterEnable := map[string]any{"challenge_id": challengeAfterEnable["challenge_id"], "challenge": challengeAfterEnable["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "major_name": majorName, "asserted_at": assertedAfterEnable}
+	signatureAfterEnable := sign(t, d1.priv, lines("xzitpocket-control-login", challengeAfterEnable["challenge_id"].(string), challengeAfterEnable["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, majorName, assertedAfterEnable))
 	newSession := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginAfterEnable, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": signatureAfterEnable, "X-Device-Signed-At": assertedAfterEnable, "X-Installation-ID": d1.installation})
 	access = newSession["access_token"].(string)
 

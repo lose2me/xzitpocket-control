@@ -92,6 +92,9 @@ func main() {
 	if backup := store.LastResetBackup(); backup != "" {
 		logger.Warn("incompatible database schema replaced with an empty one", "backup", backup)
 	}
+	if backup := store.LastMigrationBackup(); backup != "" {
+		logger.Warn("removed columns dropped from the schema; snapshot saved", "backup", backup)
+	}
 	cancel()
 	application, err := app.New(cfg, store, logger)
 	if err != nil {

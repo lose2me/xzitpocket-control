@@ -137,6 +137,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.errorReport(w, r)
+	case r.Method == http.MethodPost && path == "/courses":
+		if !s.allow(r, "course-upload", 120, time.Minute) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.courseUpload(w, r)
 	case r.Method == http.MethodPost && path == "/share-codes":
 		if !s.allow(r, "share-code-create", 30, time.Hour) {
 			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
@@ -247,6 +253,22 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminShareCodeDetail(w, r, segment(path, 2))
 	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "share-codes"):
 		s.adminDeleteShareCode(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/textbooks":
+		s.adminTextbooks(w, r)
+	case r.Method == http.MethodPost && path == "/admin/textbooks":
+		s.adminTextbookCreate(w, r)
+	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "textbooks"):
+		s.adminTextbookUpdate(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "textbooks"):
+		s.adminTextbookDelete(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/courses":
+		s.adminCourses(w, r)
+	case r.Method == http.MethodPost && path == "/admin/courses":
+		s.adminCourseCreate(w, r)
+	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "courses"):
+		s.adminCourseUpdate(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "courses"):
+		s.adminCourseDelete(w, r, segment(path, 2))
 	default:
 		writeError(w, r, app.Err("not_found", "接口不存在", http.StatusNotFound))
 	}

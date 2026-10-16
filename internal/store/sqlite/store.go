@@ -23,7 +23,7 @@ var currentSchemaTables = []struct {
 	name    string
 	columns []string
 }{
-	{name: "users", columns: []string{"id", "status", "display_name", "college_name", "class_name", "created_at", "last_login_at"}},
+	{name: "users", columns: []string{"id", "status", "display_name", "college_name", "class_name", "major_name", "created_at", "last_login_at"}},
 	{name: "identities", columns: []string{"id", "user_id", "provider", "student_id_hash", "student_alias", "student_id_ciphertext", "created_at", "updated_at"}},
 	{name: "devices", columns: []string{"id", "device_serial", "installation_id", "device_token_hash", "public_key", "platform", "app_version", "created_at", "last_seen_at", "revoked_at"}},
 	{name: "user_devices", columns: []string{"user_id", "device_id", "first_bound_at", "last_login_at", "unbound_at"}},
@@ -46,6 +46,8 @@ var currentSchemaTables = []struct {
 	{name: "app_release_test_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
+	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
+	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -55,6 +57,10 @@ type Store struct {
 	// lastResetBackup is the path of the crash snapshot written the last time an
 	// incompatible database was replaced, empty when no reset happened.
 	lastResetBackup string
+
+	// lastMigrationBackup is the path of the snapshot written before schema
+	// columns were removed, empty when no destructive migration happened.
+	lastMigrationBackup string
 }
 
 func Open(path string) (*Store, error) {
@@ -101,6 +107,7 @@ var additiveMigrations = []struct {
 }{
 	{"app_release_config", "changelog", `ALTER TABLE app_release_config ADD COLUMN changelog TEXT NOT NULL DEFAULT ''`},
 	{"school_calendar_config", "slots_json", `ALTER TABLE school_calendar_config ADD COLUMN slots_json TEXT NOT NULL DEFAULT '[]'`},
+	{"users", "major_name", `ALTER TABLE users ADD COLUMN major_name TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -142,12 +149,69 @@ func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
 	return nil
 }
 
+// removedColumns lists columns dropped from the schema after the initial
+// deployment. They are dropped before validation so an existing production
+// database keeps its other data instead of failing validation and being wiped.
+// A snapshot is written before the first change so an operator can recover.
+var removedColumns = []struct {
+	table  string
+	column string
+}{
+	{"courses", "books"},
+}
+
+func (s *Store) applyColumnRemovals(ctx context.Context) error {
+	for _, removal := range removedColumns {
+		found, err := s.tableHasColumn(ctx, removal.table, removal.column)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		if s.lastMigrationBackup == "" {
+			backup, backupErr := s.backupIncompatibleDatabase(ctx)
+			if backupErr != nil {
+				return fmt.Errorf("snapshot before removing %s.%s: %w", removal.table, removal.column, backupErr)
+			}
+			s.lastMigrationBackup = backup
+		}
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE "`+removal.table+`" DROP COLUMN "`+removal.column+`"`); err != nil {
+			return fmt.Errorf("remove %s.%s: %w", removal.table, removal.column, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `PRAGMA table_info("`+table+`")`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 func (s *Store) Migrate(ctx context.Context) error {
 	// Additive column migrations must run BEFORE the embedded schema: the
 	// schema's singleton INSERTs already reference the new columns, and an
 	// old database would fail on them.
 	if err := s.applyAdditiveMigrations(ctx); err != nil {
 		return fmt.Errorf("apply additive migrations: %w", err)
+	}
+	if err := s.applyColumnRemovals(ctx); err != nil {
+		return fmt.Errorf("apply column removals: %w", err)
 	}
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -249,6 +313,10 @@ func (s *Store) validateCurrentSchema(ctx context.Context) error {
 // incompatible database was wiped, or "" when no reset occurred.
 func (s *Store) LastResetBackup() string { return s.lastResetBackup }
 
+// LastMigrationBackup returns the path of the snapshot taken before schema
+// columns were removed, or "" when no destructive migration occurred.
+func (s *Store) LastMigrationBackup() string { return s.lastMigrationBackup }
+
 // backupIncompatibleDatabase writes a consistent copy of the current database
 // next to it, prefixed with "crash-", before an incompatible schema is dropped.
 // VACUUM INTO includes any pending WAL content, so the snapshot is complete.
@@ -332,6 +400,7 @@ type User struct {
 	DisplayName string    `json:"display_name"`
 	CollegeName string    `json:"college_name"`
 	ClassName   string    `json:"class_name"`
+	MajorName   string    `json:"major_name"`
 	StudentID   string    `json:"-"`
 	Alias       string    `json:"student_alias,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`

@@ -124,6 +124,7 @@ type AssertionInput struct {
 	DisplayName  string `json:"display_name"`
 	CollegeName  string `json:"college_name"`
 	ClassName    string `json:"class_name"`
+	MajorName    string `json:"major_name"`
 	AssertedAt   string `json:"asserted_at"`
 }
 
@@ -180,10 +181,11 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.CollegeName = strings.TrimSpace(in.CollegeName)
 	in.ClassName = strings.TrimSpace(in.ClassName)
+	in.MajorName = strings.TrimSpace(in.MajorName)
 	if len(in.DisplayName) > 128 || strings.ContainsAny(in.DisplayName, "\r\n\x00") {
 		return SessionOutput{}, Err("invalid_display_name", "姓名无效", http.StatusBadRequest)
 	}
-	if len(in.CollegeName) > 128 || len(in.ClassName) > 128 || strings.ContainsAny(in.CollegeName, "\r\n\x00") || strings.ContainsAny(in.ClassName, "\r\n\x00") {
+	if len(in.CollegeName) > 128 || len(in.ClassName) > 128 || len(in.MajorName) > 128 || strings.ContainsAny(in.CollegeName, "\r\n\x00") || strings.ContainsAny(in.ClassName, "\r\n\x00") || strings.ContainsAny(in.MajorName, "\r\n\x00") {
 		return SessionOutput{}, Err("invalid_profile", "学院或班级信息无效", http.StatusBadRequest)
 	}
 	assertedAt, err := time.Parse(time.RFC3339, in.AssertedAt)
@@ -201,8 +203,8 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, err
 	}
 	signedFields := []string{"xzitpocket-control-login", in.ChallengeID, in.Challenge, in.DeviceSerial, in.StudentID, in.StudentAlias, in.DisplayName}
-	if in.CollegeName != "" || in.ClassName != "" {
-		signedFields = append(signedFields, in.CollegeName, in.ClassName)
+	if in.CollegeName != "" || in.ClassName != "" || in.MajorName != "" {
+		signedFields = append(signedFields, in.CollegeName, in.ClassName, in.MajorName)
 	}
 	signedFields = append(signedFields, in.AssertedAt)
 	message, err := controlcrypto.CanonicalLines(signedFields...)
@@ -241,7 +243,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 			return SessionOutput{}, idErr
 		}
 		identity = sqlite.Identity{ID: identityID, UserID: userID, Provider: identityProvider, StudentIDHash: studentHash, StudentAlias: in.StudentAlias, StudentIDCiphertext: ciphertext, CreatedAt: now, UpdatedAt: now}
-		identity, err = a.Store.FindOrCreateIdentity(ctx, sqlite.User{ID: userID, Status: "active", DisplayName: in.DisplayName, CollegeName: in.CollegeName, ClassName: in.ClassName, CreatedAt: now, LastLoginAt: now}, identity)
+		identity, err = a.Store.FindOrCreateIdentity(ctx, sqlite.User{ID: userID, Status: "active", DisplayName: in.DisplayName, CollegeName: in.CollegeName, ClassName: in.ClassName, MajorName: in.MajorName, CreatedAt: now, LastLoginAt: now}, identity)
 		if err != nil {
 			return SessionOutput{}, err
 		}
@@ -257,7 +259,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, Err("account_disabled", "账号已被停用，无法登录", http.StatusForbidden)
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, in.CollegeName, in.ClassName, now); err != nil {
+	if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, in.CollegeName, in.ClassName, in.MajorName, now); err != nil {
 		return SessionOutput{}, err
 	}
 	if err := a.Store.BindUserDevice(ctx, user.ID, device.ID, now); err != nil {
@@ -435,6 +437,7 @@ type UserView struct {
 	DisplayName  string `json:"display_name"`
 	CollegeName  string `json:"college_name"`
 	ClassName    string `json:"class_name"`
+	MajorName    string `json:"major_name"`
 	StudentAlias string `json:"student_alias,omitempty"`
 	CreatedAt    string `json:"created_at"`
 	LastLoginAt  string `json:"last_login_at"`
@@ -451,7 +454,7 @@ type DeviceView struct {
 }
 
 func toUserView(u sqlite.User, alias string) UserView {
-	return UserView{ID: u.ID, Status: u.Status, DisplayName: u.DisplayName, CollegeName: u.CollegeName, ClassName: u.ClassName, StudentAlias: alias, CreatedAt: u.CreatedAt.Format(time.RFC3339), LastLoginAt: u.LastLoginAt.Format(time.RFC3339)}
+	return UserView{ID: u.ID, Status: u.Status, DisplayName: u.DisplayName, CollegeName: u.CollegeName, ClassName: u.ClassName, MajorName: u.MajorName, StudentAlias: alias, CreatedAt: u.CreatedAt.Format(time.RFC3339), LastLoginAt: u.LastLoginAt.Format(time.RFC3339)}
 }
 func toDeviceView(d sqlite.Device) DeviceView {
 	var revoked *string

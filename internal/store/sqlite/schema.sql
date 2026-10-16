@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT NOT NULL DEFAULT '',
     college_name TEXT NOT NULL DEFAULT '',
     class_name TEXT NOT NULL DEFAULT '',
+    major_name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL
 );
@@ -261,3 +262,28 @@ CREATE INDEX IF NOT EXISTS idx_question_options_question_order ON question_optio
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bank_status ON library_cdks(question_bank_id, status);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bound_student ON library_cdks(bound_student_id_hash, question_bank_id, status);
 CREATE INDEX IF NOT EXISTS idx_share_codes_expires ON share_codes(expires_at);
+
+-- Courses uploaded by clients at login. One row per course number (code).
+CREATE TABLE IF NOT EXISTS courses (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- Textbooks uploaded with courses. One row per (name, tags) per course; the
+-- course association is by course code and is edited manually in the console.
+CREATE TABLE IF NOT EXISTS textbooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '',
+    course_code TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(name, tags, course_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_courses_name ON courses(name);
+CREATE INDEX IF NOT EXISTS idx_textbooks_name ON textbooks(name);
+CREATE INDEX IF NOT EXISTS idx_textbooks_course ON textbooks(course_code);
