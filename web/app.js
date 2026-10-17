@@ -648,6 +648,7 @@ import { template } from './template.js';
             count: 1
           };
         }
+        if (cdnTab.value.startsWith('__bucket_')) return null;
         return cdnPackage.value;
       });
       const hostCards = computed(() => {
