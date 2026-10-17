@@ -206,15 +206,10 @@ import { template } from './template.js';
       const textbookDialog = ref(false);
       const textbookEditingId = ref('');
       const textbookForm = ref({ name: '', tags: '', courseCode: '' });
-      const resources = ref([]);
-      const resourceTotal = ref(0);
-      const resourcePage = ref(1);
-      const resourceItemsPerPage = ref(25);
-      const resourceSearch = ref('');
       const resourceDialog = ref(false);
-      const resourceEditingId = ref('');
-      const resourceForm = ref({ name: '', tags: '', courseCode: '' });
-      const resourcePdfFile = ref(null);
+      const resourceCourse = ref({ code: '', name: '' });
+      const courseResources = ref([]);
+      const resourceFiles = ref([]);
       const courseOptions = ref([]);
       const pdfCanvasEl = ref(null);
       const pdfFile = ref(null);
@@ -455,11 +450,15 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
       ];
       const resourceHeaders = [
-        { title: '资源名称', key: 'name', sortable: true, width: '30%' },
-        { title: '标签', key: 'tags', sortable: false, width: '28%' },
-        { title: '关联课程', key: 'course_code', sortable: true, width: '20%' },
-        { title: '更新时间', key: 'updated_at', width: '14%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+        { title: '课程编号', key: 'code', sortable: true, width: '22%' },
+        { title: '课程名称', key: 'name', sortable: true, width: '34%' },
+        { title: '资源数', key: 'resource_count', sortable: false, align: 'center', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
+      ];
+      const courseResourceHeaders = [
+        { title: '文件名', key: 'name', width: '55%' },
+        { title: '上传时间', key: 'created_at', width: '25%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '20%' }
       ];
       const courseHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '20%' },
@@ -645,52 +644,43 @@ import { template } from './template.js';
         await navigator.clipboard.writeText(out.url);
         notify('已复制临时 CDN 地址（' + (out.expires_at || '') + '）');
       });
-      const loadResources = async () => {
-        const offset = (resourcePage.value - 1) * resourceItemsPerPage.value;
-        const search = (resourceSearch.value || '').trim();
-        const query = search ? '&q=' + encodeURIComponent(search) : '';
-        const out = await api('/api/v1/admin/resources?limit=' + resourceItemsPerPage.value + '&offset=' + offset + query);
-        resources.value = out.items || []; resourceTotal.value = out.total || 0;
+      const loadCourseResources = async () => {
+        const code = (resourceCourse.value && resourceCourse.value.code) || '';
+        const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code));
+        courseResources.value = out.items || [];
       };
-      const searchResources = () => call(async () => { resourcePage.value = 1; await loadResources(); });
-      const openNewResource = () => call(async () => {
-        resourceEditingId.value = '';
-        resourceForm.value = { name: '', tags: '', courseCode: '' };
-        resourcePdfFile.value = null;
-        await loadCourseOptions();
-        resourceDialog.value = true;
-      });
-      const editResource = (row) => call(async () => {
+      const openResourceDialog = (row) => call(async () => {
         const item = rawItem(row);
-        resourceEditingId.value = item.id || '';
-        resourceForm.value = { name: item.name || '', tags: item.tags || '', courseCode: item.course_code || '' };
-        resourcePdfFile.value = null;
-        await loadCourseOptions();
+        resourceCourse.value = { code: item.code || '', name: item.name || '' };
+        resourceFiles.value = [];
+        await loadCourseResources();
         resourceDialog.value = true;
       });
-      const saveResource = () => call(async () => {
-        const form = resourceForm.value;
-        if (!String(form.name || '').trim()) throw new Error('请填写资源名称');
-        const editing = !!resourceEditingId.value;
-        const path = '/api/v1/admin/resources' + (editing ? '/' + encodeURIComponent(resourceEditingId.value) : '');
-        const body = { name: form.name, tags: form.tags, course_code: form.courseCode || '' };
-        const saved = await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
-        const id = editing ? resourceEditingId.value : (saved && saved.id);
-        if (id && resourcePdfFile.value) {
-          const data = new FormData();
-          data.append('file', resourcePdfFile.value, resourcePdfFile.value.name || 'original.pdf');
-          await api('/api/v1/admin/resources/' + encodeURIComponent(id) + '/pdf', { method: 'POST', body: data });
+      const uploadResources = () => call(async () => {
+        const files = Array.isArray(resourceFiles.value) ? resourceFiles.value : (resourceFiles.value ? [resourceFiles.value] : []);
+        if (!files.length) throw new Error('请选择至少一个 PDF 文件');
+        const data = new FormData();
+        data.append('course_code', (resourceCourse.value && resourceCourse.value.code) || '');
+        files.forEach((file) => data.append('files', file, file.name || 'resource.pdf'));
+        const out = await api('/api/v1/admin/resources/upload', { method: 'POST', body: data });
+        const created = out && out.items ? out.items.length : 0;
+        const failed = out && out.failed ? out.failed : [];
+        resourceFiles.value = [];
+        await loadCourseResources();
+        await loadCourses();
+        if (failed.length) {
+          notify('已上传 ' + created + ' 个，失败 ' + failed.length + ' 个：' + failed.map(f => f.name + '（' + f.reason + '）').join('；'), 'warning');
+        } else {
+          notify('已上传 ' + created + ' 个 PDF');
         }
-        resourceDialog.value = false;
-        notify(editing ? '资源已更新' : '资源已创建');
-        await loadResources();
       });
       const deleteResource = (row) => call(async () => {
         const item = rawItem(row);
-        if (!window.confirm('确定删除资源“' + item.name + '”吗？')) return;
+        if (!window.confirm('确定删除文件“' + item.name + '”吗？')) return;
         await api('/api/v1/admin/resources/' + encodeURIComponent(item.id), { method: 'DELETE' });
-        notify('资源已删除');
-        await loadResources();
+        notify('文件已删除');
+        await loadCourseResources();
+        await loadCourses();
       });
       const copyResourceLink = (row) => call(async () => {
         const item = rawItem(row);
@@ -930,7 +920,7 @@ import { template } from './template.js';
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
           else if (view.value === 'textbooks') await loadTextbooks();
-          else if (view.value === 'resources') await loadResources();
+          else if (view.value === 'resources') await loadCourses();
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
@@ -1248,7 +1238,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_create: '创建资源', resource_update: '更新资源', resource_delete: '删除资源', resource_pdf: '上传资源', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传资源', resource_delete: '删除资源', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); };
       onMounted(() => {
@@ -1264,7 +1254,7 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
-        resources, resourceTotal, resourcePage, resourceItemsPerPage, resourceSearch, resourceDialog, resourceEditingId, resourceForm, resourcePdfFile, resourceHeaders,
+        resourceDialog, resourceCourse, courseResources, resourceFiles, resourceHeaders, courseResourceHeaders,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
@@ -1273,7 +1263,7 @@ import { template } from './template.js';
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
-        loadResources, searchResources, openNewResource, editResource, saveResource, deleteResource, copyResourceLink,
+        openResourceDialog, loadCourseResources, uploadResources, deleteResource, copyResourceLink,
         loadCourses, searchCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
       };
     },

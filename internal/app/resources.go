@@ -13,15 +13,6 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-// ResourceWriteInput is the administrator create/update payload. The course
-// association is by course code and can be changed here without touching the
-// other fields.
-type ResourceWriteInput struct {
-	Name       string `json:"name"`
-	Tags       string `json:"tags"`
-	CourseCode string `json:"course_code"`
-}
-
 // ResourceView is the administrator-facing resource row.
 type ResourceView struct {
 	ID         string `json:"id"`
@@ -39,7 +30,16 @@ type ResourceURLView struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-const maxResourcePdfBytes = 80 << 20
+// ResourceUpload is one file in a course resource upload.
+type ResourceUpload struct {
+	Name string
+	Data []byte
+}
+
+const (
+	maxResourcePdfBytes = 80 << 20
+	maxResourceUploads  = 20
+)
 
 func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
@@ -49,12 +49,12 @@ func resourceView(item sqlite.Resource) ResourceView {
 	}
 }
 
-func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, sort, order string) ([]ResourceView, int, error) {
-	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, sort, order)
+func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, courseCode, sort, order string) ([]ResourceView, int, error) {
+	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, courseCode, sort, order)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := a.Store.CountResources(ctx, search)
+	total, err := a.Store.CountResources(ctx, search, courseCode)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -65,64 +65,82 @@ func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, sear
 	return views, total, nil
 }
 
-func validateResourceWriteInput(in ResourceWriteInput) (sqlite.ResourceInput, error) {
-	in.Name = strings.TrimSpace(in.Name)
-	in.Tags = strings.TrimSpace(in.Tags)
-	in.CourseCode = strings.TrimSpace(in.CourseCode)
-	if in.Name == "" || len(in.Name) > 256 || strings.ContainsAny(in.Name, "\r\n\x00") {
-		return sqlite.ResourceInput{}, Err("invalid_resource", "资源名称无效", 400)
+// resourceFileName keeps just the file name of an uploaded part so a crafted
+// path can never escape the display name stored for a resource.
+func resourceFileName(raw string) string {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	if index := strings.LastIndex(raw, "/"); index >= 0 {
+		raw = raw[index+1:]
 	}
-	if len(in.Tags) > 1024 || strings.ContainsAny(in.Tags, "\r\n\x00") {
-		return sqlite.ResourceInput{}, Err("invalid_resource", "资源标签无效", 400)
+	raw = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, raw)
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 256 {
+		raw = raw[:256]
 	}
-	if len(in.CourseCode) > 64 || strings.ContainsAny(in.CourseCode, "\r\n\x00") {
-		return sqlite.ResourceInput{}, Err("invalid_resource", "关联课程编号无效", 400)
+	if raw == "" {
+		raw = "resource.pdf"
 	}
-	return sqlite.ResourceInput{Name: in.Name, Tags: in.Tags, CourseCode: in.CourseCode}, nil
+	return raw
 }
 
-func (a *App) CreateResourceForAdmin(ctx context.Context, in ResourceWriteInput, actor string) (ResourceView, error) {
-	input, err := validateResourceWriteInput(in)
-	if err != nil {
-		return ResourceView{}, err
+// UploadCourseResources stores each uploaded PDF under the given course. Every
+// valid file becomes one resource row named after the file; invalid files are
+// skipped and reported instead of failing the whole batch.
+func (a *App) UploadCourseResources(ctx context.Context, courseCode string, uploads []ResourceUpload, actor string) (map[string]any, error) {
+	courseCode = strings.TrimSpace(courseCode)
+	if courseCode == "" || len(courseCode) > 64 || strings.ContainsAny(courseCode, "\r\n\x00") {
+		return nil, Err("invalid_resource", "关联课程编号无效", 400)
 	}
-	now := time.Now().UTC()
-	item, err := a.Store.CreateResource(ctx, input, now)
-	if err != nil {
-		if err == sqlite.ErrResourceExists {
-			return ResourceView{}, Err("resource_exists", "该资源已存在", 409)
-		}
-		return ResourceView{}, err
+	if len(uploads) == 0 {
+		return nil, Err("invalid_upload", "请选择至少一个 PDF 文件", 400)
 	}
-	_ = a.Store.AddAudit(ctx, actor, "resource_create", "resource", item.ID, "{}", now)
-	return resourceView(item), nil
-}
+	if len(uploads) > maxResourceUploads {
+		return nil, Err("invalid_upload", fmt.Sprintf("一次最多上传 %d 个文件", maxResourceUploads), 400)
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		return nil, err
+	}
 
-func (a *App) UpdateResourceForAdmin(ctx context.Context, id string, in ResourceWriteInput, actor string) (ResourceView, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ResourceView{}, Err("invalid_resource_id", "资源标识无效", 400)
-	}
-	input, err := validateResourceWriteInput(in)
-	if err != nil {
-		return ResourceView{}, err
-	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateResource(ctx, id, input, now); err != nil {
-		if err == sqlite.ErrResourceExists {
-			return ResourceView{}, Err("resource_exists", "该资源已存在", 409)
+	items := make([]ResourceView, 0, len(uploads))
+	failed := make([]map[string]string, 0)
+	for _, upload := range uploads {
+		name := resourceFileName(upload.Name)
+		if len(upload.Data) == 0 || len(upload.Data) > maxResourcePdfBytes || !bytes.HasPrefix(upload.Data, []byte("%PDF")) {
+			failed = append(failed, map[string]string{"name": name, "reason": "PDF 内容无效"})
+			continue
 		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return ResourceView{}, ErrNotFound
+		item, err := a.Store.CreateResource(ctx, sqlite.ResourceInput{Name: name, CourseCode: courseCode}, now)
+		if err != nil {
+			if err == sqlite.ErrResourceExists {
+				failed = append(failed, map[string]string{"name": name, "reason": "该课程下已有同名资源"})
+				continue
+			}
+			return nil, err
 		}
-		return ResourceView{}, err
+		key := fmt.Sprintf("resources/%s/original.pdf", item.ID)
+		if err := client.PutObject(ctx, key, "application/pdf", upload.Data); err != nil {
+			a.Logger.Error("upload resource pdf failed", "error", err, "resource", item.ID)
+			_ = a.Store.DeleteResource(ctx, item.ID)
+			failed = append(failed, map[string]string{"name": name, "reason": "上传失败"})
+			continue
+		}
+		if err := a.Store.SetResourcePdfKey(ctx, item.ID, key, now); err != nil {
+			_ = a.Store.DeleteResource(ctx, item.ID)
+			return nil, err
+		}
+		item.PdfKey = key
+		a.purgeCDN(ctx, key)
+		_ = a.Store.AddAudit(ctx, actor, "resource_upload", "resource", item.ID, "{}", now)
+		items = append(items, resourceView(item))
 	}
-	_ = a.Store.AddAudit(ctx, actor, "resource_update", "resource", id, "{}", now)
-	item, err := a.Store.GetResource(ctx, id)
-	if err != nil {
-		return ResourceView{}, err
-	}
-	return resourceView(item), nil
+	return map[string]any{"items": items, "failed": failed, "course_code": courseCode}, nil
 }
 
 func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) error {
@@ -168,34 +186,6 @@ func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, 
 		return sqlite.Resource{}, err
 	}
 	return item, nil
-}
-
-// UploadResourcePdf stores a resource's PDF in object storage.
-func (a *App) UploadResourcePdf(ctx context.Context, id string, data []byte, actor string) (ResourceView, error) {
-	item, err := a.requireResource(ctx, id)
-	if err != nil {
-		return ResourceView{}, err
-	}
-	if len(data) == 0 || len(data) > maxResourcePdfBytes || !bytes.HasPrefix(data, []byte("%PDF")) {
-		return ResourceView{}, Err("invalid_pdf", "PDF 内容无效", 400)
-	}
-	client, err := a.requireStorage()
-	if err != nil {
-		return ResourceView{}, err
-	}
-	key := fmt.Sprintf("resources/%s/original.pdf", item.ID)
-	if err := client.PutObject(ctx, key, "application/pdf", data); err != nil {
-		a.Logger.Error("upload resource pdf failed", "error", err, "resource", item.ID)
-		return ResourceView{}, Err("storage_error", "上传 PDF 失败", 502)
-	}
-	now := time.Now().UTC()
-	if err := a.Store.SetResourcePdfKey(ctx, item.ID, key, now); err != nil {
-		return ResourceView{}, err
-	}
-	item.PdfKey = key
-	a.purgeCDN(ctx, key)
-	_ = a.Store.AddAudit(ctx, actor, "resource_pdf", "resource", item.ID, "{}", now)
-	return resourceView(item), nil
 }
 
 // ResourceURL returns a temporary signed CDN URL for a resource PDF.

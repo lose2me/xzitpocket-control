@@ -4,13 +4,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"xzitpocket-control/internal/app"
 )
 
-// The resource endpoints are administrator-only: resources are uploaded and
-// associated with courses by hand in the console.
+// The resource endpoints are administrator-only. Resources are PDFs uploaded
+// into a course; a resource row is named after its file.
 
 func (s *Server) adminResources(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r); !ok {
@@ -18,7 +19,8 @@ func (s *Server) adminResources(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, offset := queryPage(r)
 	items, total, err := s.App.ListResourcesForAdmin(r.Context(), limit, offset,
-		r.URL.Query().Get("q"), r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+		r.URL.Query().Get("q"), r.URL.Query().Get("course_code"),
+		r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -26,35 +28,40 @@ func (s *Server) adminResources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
 
-func (s *Server) adminResourceCreate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminResourceUpload(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authAdmin(w, r)
 	if !ok || !checkAdminCSRF(w, r) {
 		return
 	}
-	var in app.ResourceWriteInput
-	if err := decodeJSON(r, &in, 32<<10); err != nil {
-		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, r, app.Err("invalid_upload", "上传内容无效", http.StatusBadRequest))
 		return
 	}
-	out, err := s.App.CreateResourceForAdmin(r.Context(), in, p.Admin.ID)
-	if err != nil {
-		writeError(w, r, err)
+	if r.MultipartForm == nil {
+		writeError(w, r, app.Err("invalid_upload", "上传内容无效", http.StatusBadRequest))
 		return
 	}
-	writeJSON(w, http.StatusCreated, out)
-}
-
-func (s *Server) adminResourceUpdate(w http.ResponseWriter, r *http.Request, id string) {
-	p, ok := s.authAdmin(w, r)
-	if !ok || !checkAdminCSRF(w, r) {
+	headers := r.MultipartForm.File["files"]
+	if len(headers) == 0 {
+		writeError(w, r, app.Err("invalid_upload", "缺少 PDF 文件", http.StatusBadRequest))
 		return
 	}
-	var in app.ResourceWriteInput
-	if err := decodeJSON(r, &in, 32<<10); err != nil {
-		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
-		return
+	uploads := make([]app.ResourceUpload, 0, len(headers))
+	for _, header := range headers {
+		file, err := header.Open()
+		if err != nil {
+			writeError(w, r, app.Err("invalid_upload", "读取文件失败", http.StatusBadRequest))
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(file, (80<<20)+1))
+		_ = file.Close()
+		if err != nil {
+			writeError(w, r, app.Err("invalid_upload", "读取文件失败", http.StatusBadRequest))
+			return
+		}
+		uploads = append(uploads, app.ResourceUpload{Name: header.Filename, Data: data})
 	}
-	out, err := s.App.UpdateResourceForAdmin(r.Context(), id, in, p.Admin.ID)
+	out, err := s.App.UploadCourseResources(r.Context(), strings.TrimSpace(r.FormValue("course_code")), uploads, p.Admin.ID)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -72,34 +79,6 @@ func (s *Server) adminResourceDelete(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
-}
-
-func (s *Server) adminResourceUploadPdf(w http.ResponseWriter, r *http.Request, id string) {
-	p, ok := s.authAdmin(w, r)
-	if !ok || !checkAdminCSRF(w, r) {
-		return
-	}
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
-		writeError(w, r, app.Err("invalid_upload", "上传内容无效", http.StatusBadRequest))
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, r, app.Err("invalid_upload", "缺少 PDF 文件", http.StatusBadRequest))
-		return
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (80<<20)+1))
-	if err != nil {
-		writeError(w, r, app.Err("invalid_upload", "读取文件失败", http.StatusBadRequest))
-		return
-	}
-	out, err := s.App.UploadResourcePdf(r.Context(), id, data, p.Admin.ID)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) adminResourceResourceURL(w http.ResponseWriter, r *http.Request, id string) {

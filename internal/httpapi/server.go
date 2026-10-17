@@ -269,14 +269,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/resources":
 		s.adminResources(w, r)
-	case r.Method == http.MethodPost && path == "/admin/resources":
-		s.adminResourceCreate(w, r)
-	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "resources"):
-		s.adminResourceUpdate(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && path == "/admin/resources/upload":
+		s.adminResourceUpload(w, r)
 	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "resources"):
 		s.adminResourceDelete(w, r, segment(path, 2))
-	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "pdf", "admin", "resources"):
-		s.adminResourceUploadPdf(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resources"):
 		s.adminResourceResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/courses":

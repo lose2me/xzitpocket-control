@@ -55,16 +55,25 @@ func resourceOrderBy(sort, order string) string {
 	return column + " " + direction + ", r.id"
 }
 
-func resourceWhere(search string) (string, []any) {
-	if search = strings.TrimSpace(search); search == "" {
+func resourceWhere(search, courseCode string) (string, []any) {
+	clauses := make([]string, 0, 2)
+	args := make([]any, 0, 4)
+	if search = strings.TrimSpace(search); search != "" {
+		like := "%" + escapeLike(search) + "%"
+		clauses = append(clauses, "(r.name LIKE ? ESCAPE '\\' OR r.tags LIKE ? ESCAPE '\\' OR r.course_code LIKE ? ESCAPE '\\')")
+		args = append(args, like, like, like)
+	}
+	if courseCode = strings.TrimSpace(courseCode); courseCode != "" {
+		clauses = append(clauses, "r.course_code = ?")
+		args = append(args, courseCode)
+	}
+	if len(clauses) == 0 {
 		return "", nil
 	}
-	like := "%" + escapeLike(search) + "%"
-	return " WHERE (r.name LIKE ? ESCAPE '\\' OR r.tags LIKE ? ESCAPE '\\' OR r.course_code LIKE ? ESCAPE '\\')",
-		[]any{like, like, like}
+	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func (s *Store) ListResources(ctx context.Context, limit, offset int, search, sort, order string) ([]Resource, error) {
+func (s *Store) ListResources(ctx context.Context, limit, offset int, search, courseCode, sort, order string) ([]Resource, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -73,7 +82,7 @@ func (s *Store) ListResources(ctx context.Context, limit, offset int, search, so
 	if offset < 0 {
 		offset = 0
 	}
-	where, args := resourceWhere(search)
+	where, args := resourceWhere(search, courseCode)
 	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, "SELECT "+resourceColumns+" FROM resources r"+where+
 		" ORDER BY "+resourceOrderBy(sort, order)+" LIMIT ? OFFSET ?", args...)
@@ -92,11 +101,41 @@ func (s *Store) ListResources(ctx context.Context, limit, offset int, search, so
 	return result, rows.Err()
 }
 
-func (s *Store) CountResources(ctx context.Context, search string) (int, error) {
-	where, args := resourceWhere(search)
+func (s *Store) CountResources(ctx context.Context, search, courseCode string) (int, error) {
+	where, args := resourceWhere(search, courseCode)
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM resources r"+where, args...).Scan(&count)
 	return count, err
+}
+
+// CountResourcesByCourse returns the resource count for each of the given
+// course codes. Codes without resources are omitted.
+func (s *Store) CountResourcesByCourse(ctx context.Context, codes []string) (map[string]int, error) {
+	counts := make(map[string]int, len(codes))
+	if len(codes) == 0 {
+		return counts, nil
+	}
+	placeholders := make([]string, 0, len(codes))
+	args := make([]any, 0, len(codes))
+	for _, code := range codes {
+		placeholders = append(placeholders, "?")
+		args = append(args, code)
+	}
+	rows, err := s.DB.QueryContext(ctx, "SELECT course_code, COUNT(*) FROM resources WHERE course_code IN ("+
+		strings.Join(placeholders, ",")+") GROUP BY course_code", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code string
+		var count int
+		if err := rows.Scan(&code, &count); err != nil {
+			return nil, err
+		}
+		counts[code] = count
+	}
+	return counts, rows.Err()
 }
 
 func (s *Store) GetResource(ctx context.Context, id string) (Resource, error) {
@@ -123,25 +162,6 @@ func (s *Store) CreateResource(ctx context.Context, input ResourceInput, now tim
 		return Resource{}, ErrResourceExists
 	}
 	return s.GetResource(ctx, id)
-}
-
-func (s *Store) UpdateResource(ctx context.Context, id string, input ResourceInput, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE resources SET name = ?, tags = ?, course_code = ?, updated_at = ? WHERE id = ?`,
-		input.Name, input.Tags, input.CourseCode, millis(now), id)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return ErrResourceExists
-		}
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
 }
 
 func (s *Store) DeleteResource(ctx context.Context, id string) error {
