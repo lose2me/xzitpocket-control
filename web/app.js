@@ -596,11 +596,12 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '10%' }
       ];
       const submissionHeaders = [
-        { title: '名称', key: 'name', width: '34%' },
-        { title: '关联课程', key: 'course_code', width: '14%' },
-        { title: '提交人', key: 'submitted_by_name', width: '15%' },
-        { title: '大小', key: 'size_bytes', align: 'center', width: '9%' },
-        { title: '提交时间', key: 'created_at', width: '14%' },
+        { title: '名称', key: 'name', width: '26%' },
+        { title: '学号', key: 'student_id', width: '15%' },
+        { title: '关联课程', key: 'course_code', width: '12%' },
+        { title: '提交人', key: 'submitted_by_name', width: '13%' },
+        { title: '大小', key: 'size_bytes', align: 'center', width: '8%' },
+        { title: '提交时间', key: 'created_at', width: '12%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '14%' }
       ];
       const resourceHeaders = [
