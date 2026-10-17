@@ -46,39 +46,61 @@ export const template = `
                     <v-icon icon="mdi-rocket-launch-outline" color="primary" />
                     <span>CDN 统计</span>
                     <v-spacer />
-                    <span v-if="cdnPackage" class="cdn-meta text-medium-emphasis">
-                      流量包剩余 {{ cdnPackage.remaining }} / {{ cdnPackage.total }}<template v-if="cdnPackage.expire">（{{ cdnPackage.count > 1 ? '共 ' + cdnPackage.count + ' 个，最近到期 ' : '到期 ' }}{{ cdnPackage.expire }}）</template>
+                    <span v-if="activePackage" class="cdn-meta text-medium-emphasis">
+                      流量包剩余 {{ activePackage.remaining }} / {{ activePackage.total }}<template v-if="activePackage.expire">（{{ activePackage.count > 1 ? '共 ' + activePackage.count + ' 个，最近到期 ' : '到期 ' }}{{ activePackage.expire }}）</template>
                     </span>
-                    <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="cdnLoading" @click="loadCDNStats(true)">刷新</v-btn>
+                    <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="cdnLoading || hostLoading" @click="refreshActiveStats">刷新</v-btn>
                   </v-card-title>
                   <v-divider />
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
                     <v-tab v-for="domain in cdnDomains" :key="domain.domain" :value="domain.domain">{{ domain.domain }}</v-tab>
+                    <v-tab value="__host__">本机</v-tab>
                   </v-tabs>
                   <v-divider />
                   <v-card-text>
-                    <v-progress-linear v-if="cdnLoading" indeterminate color="primary" class="mb-3" />
-                    <div v-if="cdnError" class="empty-state">{{ cdnError }}</div>
-                    <div v-else-if="!cdnStats || !cdnDomains.length" class="empty-state">{{ cdnLoading ? '加载中…' : '暂无 CDN 数据' }}</div>
-                    <template v-else-if="cdnDomain">
-                      <v-row dense class="mb-3">
-                        <v-col v-for="card in cdnCards" :key="card.label" cols="6" sm="4" md="2">
-                          <v-card variant="tonal" class="stat-card h-100">
-                            <v-card-text>
-                              <div class="text-caption text-medium-emphasis">{{ card.label }}</div>
-                              <div class="text-h6 font-weight-bold mt-1">{{ card.value }}</div>
-                            </v-card-text>
-                          </v-card>
-                        </v-col>
-                      </v-row>
-                      <div ref="cdnChartEl" class="chart" aria-label="CDN 流量趋势" />
-                      <div class="d-flex align-center flex-wrap ga-2 mt-3">
-                        <v-chip size="small" color="success" variant="tonal">2xx {{ cdnStats.status.status_2xx }}</v-chip>
-                        <v-chip size="small" color="info" variant="tonal">3xx {{ cdnStats.status.status_3xx }}</v-chip>
-                        <v-chip size="small" color="warning" variant="tonal">4xx {{ cdnStats.status.status_4xx }}</v-chip>
-                        <v-chip size="small" color="error" variant="tonal">5xx {{ cdnStats.status.status_5xx }}</v-chip>
-                        <span class="cdn-meta text-medium-emphasis">状态码为全部域名合计</span>
-                      </div>
+                    <template v-if="cdnTab === '__host__'">
+                      <v-progress-linear v-if="hostLoading" indeterminate color="primary" class="mb-3" />
+                      <div v-if="hostError" class="empty-state">{{ hostError }}</div>
+                      <div v-else-if="!hostStats" class="empty-state">{{ hostLoading ? '加载中…' : '暂无主机数据' }}</div>
+                      <template v-else>
+                        <v-row dense class="mb-3">
+                          <v-col v-for="card in hostCards" :key="card.label" cols="6" sm="4" md="2">
+                            <v-card variant="tonal" class="stat-card h-100">
+                              <v-card-text>
+                                <div class="text-caption text-medium-emphasis">{{ card.label }}</div>
+                                <div class="text-h6 font-weight-bold mt-1">{{ card.value }}</div>
+                              </v-card-text>
+                            </v-card>
+                          </v-col>
+                        </v-row>
+                        <div ref="hostChartEl" class="chart" aria-label="本机外网出带宽趋势" />
+                        <div class="cdn-meta text-medium-emphasis mt-2">{{ hostStats.instance_name }} · {{ hostStats.instance_id }} · {{ hostStats.region }} · 带宽上限 {{ hostStats.bandwidth_cap }} Mbps</div>
+                      </template>
+                    </template>
+                    <template v-else>
+                      <v-progress-linear v-if="cdnLoading" indeterminate color="primary" class="mb-3" />
+                      <div v-if="cdnError" class="empty-state">{{ cdnError }}</div>
+                      <div v-else-if="!cdnStats || !cdnDomains.length" class="empty-state">{{ cdnLoading ? '加载中…' : '暂无 CDN 数据' }}</div>
+                      <template v-else-if="cdnDomain">
+                        <v-row dense class="mb-3">
+                          <v-col v-for="card in cdnCards" :key="card.label" cols="6" sm="4" md="2">
+                            <v-card variant="tonal" class="stat-card h-100">
+                              <v-card-text>
+                                <div class="text-caption text-medium-emphasis">{{ card.label }}</div>
+                                <div class="text-h6 font-weight-bold mt-1">{{ card.value }}</div>
+                              </v-card-text>
+                            </v-card>
+                          </v-col>
+                        </v-row>
+                        <div ref="cdnChartEl" class="chart" aria-label="CDN 流量趋势" />
+                        <div class="d-flex align-center flex-wrap ga-2 mt-3">
+                          <v-chip size="small" color="success" variant="tonal">2xx {{ cdnStats.status.status_2xx }}</v-chip>
+                          <v-chip size="small" color="info" variant="tonal">3xx {{ cdnStats.status.status_3xx }}</v-chip>
+                          <v-chip size="small" color="warning" variant="tonal">4xx {{ cdnStats.status.status_4xx }}</v-chip>
+                          <v-chip size="small" color="error" variant="tonal">5xx {{ cdnStats.status.status_5xx }}</v-chip>
+                          <span class="cdn-meta text-medium-emphasis">状态码为全部域名合计</span>
+                        </div>
+                      </template>
                     </template>
                   </v-card-text>
                 </v-card>

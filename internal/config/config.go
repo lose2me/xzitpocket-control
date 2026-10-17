@@ -38,6 +38,10 @@ type Config struct {
 	CDNDomain    string
 	CDNAuthKey   string
 	CDNURLTTL    time.Duration
+
+	// Tencent Cloud credentials for this host's Lighthouse monitoring.
+	MonitorSecretID  string
+	MonitorSecretKey string
 }
 
 func Load() (Config, error) {
@@ -78,6 +82,8 @@ func Load() (Config, error) {
 		CDNDomain:            strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
 		CDNAuthKey:           configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
 		CDNURLTTL:            durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
+		MonitorSecretID:      configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
+		MonitorSecretKey:     configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
 	}
 	if cfg.EventRetentionDays < 1 {
 		cfg.EventRetentionDays = 90
