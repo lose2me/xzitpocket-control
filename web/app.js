@@ -85,20 +85,25 @@ import { template } from './template.js';
   async function api(path, options) {
     options = options || {};
     const csrf = document.cookie.match(/(?:^|; )control_csrf=([^;]+)/);
-    const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+    const body = options.body;
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    const isBlob = typeof Blob !== 'undefined' && body instanceof Blob;
+    const headers = Object.assign({}, options.headers || {});
+    if (!isForm && !isBlob && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    if (isBlob && !headers['Content-Type']) headers['Content-Type'] = 'application/octet-stream';
     const access = localStorage.getItem('control_admin');
     if (access && !headers.Authorization) headers.Authorization = 'Bearer ' + access;
     if (csrf && options.method && options.method !== 'GET') headers['X-CSRF-Token'] = decodeURIComponent(csrf[1]);
     const response = await fetch(path, Object.assign({ credentials: 'same-origin' }, options, { headers }));
-    let body = {};
-    try { body = await response.json(); } catch (_) {}
+    let responseBody = {};
+    try { responseBody = await response.json(); } catch (_) {}
     if (!response.ok) {
-      const error = new Error((body.error && body.error.message) || '请求失败');
+      const error = new Error((responseBody.error && responseBody.error.message) || '请求失败');
       error.status = response.status;
-      error.code = body.error && body.error.code;
+      error.code = responseBody.error && responseBody.error.code;
       throw error;
     }
-    return body;
+    return responseBody;
   }
 
   const padDatePart = (value) => String(value).padStart(2, '0');
@@ -202,6 +207,13 @@ import { template } from './template.js';
       const textbookEditingId = ref('');
       const textbookForm = ref({ name: '', tags: '', courseCode: '' });
       const courseOptions = ref([]);
+      const pdfCanvasEl = ref(null);
+      const pdfFile = ref(null);
+      const pdfPage = ref(1);
+      const pdfPageCount = ref(0);
+      const coverBlob = ref(null);
+      const coverPreviewUrl = ref('');
+      const existingCoverUrl = ref('');
       const cdkDialog = ref(false);
       const cdkRevealDialog = ref(false);
       const cdkForm = ref({ count: 1 });
@@ -576,6 +588,7 @@ import { template } from './template.js';
       const openNewTextbook = () => call(async () => {
         textbookEditingId.value = '';
         textbookForm.value = { name: '', tags: '', courseCode: '' };
+        resetPdfState();
         await loadCourseOptions();
         textbookDialog.value = true;
       });
@@ -583,8 +596,10 @@ import { template } from './template.js';
         const item = rawItem(row);
         textbookEditingId.value = item.id || '';
         textbookForm.value = { name: item.name || '', tags: item.tags || '', courseCode: item.course_code || '' };
+        resetPdfState();
         await loadCourseOptions();
         textbookDialog.value = true;
+        if (item.id && item.has_cover) await loadExistingCover(item.id);
       });
       const saveTextbook = () => call(async () => {
         const form = textbookForm.value;
@@ -592,7 +607,9 @@ import { template } from './template.js';
         const editing = !!textbookEditingId.value;
         const path = '/api/v1/admin/textbooks' + (editing ? '/' + encodeURIComponent(textbookEditingId.value) : '');
         const body = { name: form.name, tags: form.tags, course_code: form.courseCode || '' };
-        await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        const saved = await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        const id = editing ? textbookEditingId.value : (saved && saved.id);
+        if (id) await uploadTextbookAssets(id);
         textbookDialog.value = false;
         notify(editing ? '教材已更新' : '教材已创建');
         await loadTextbooks();
@@ -604,6 +621,104 @@ import { template } from './template.js';
         notify('教材已删除');
         await loadTextbooks();
       });
+      const copyResourceUrl = (row) => call(async () => {
+        const item = rawItem(row);
+        const out = await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + '/resource-url?kind=pdf');
+        await navigator.clipboard.writeText(out.url);
+        notify('已复制临时 CDN 地址（' + (out.expires_at || '') + '）');
+      });
+
+      // ── Textbook PDF + cover (rendered in the browser with pdf.js) ──
+      let pdfModule = null;
+      let pdfDoc = null;
+      const loadPdfModule = () => {
+        if (!pdfModule) {
+          pdfModule = import('/vendor/js/pdf.min.mjs').then((mod) => {
+            const lib = mod.default ?? mod;
+            lib.GlobalWorkerOptions.workerSrc = '/vendor/js/pdf.worker.min.mjs';
+            return lib;
+          });
+        }
+        return pdfModule;
+      };
+      const clearCoverPreview = () => {
+        if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
+        coverPreviewUrl.value = '';
+        coverBlob.value = null;
+      };
+      const resetPdfState = () => {
+        pdfDoc = null;
+        pdfFile.value = null;
+        pdfPage.value = 1;
+        pdfPageCount.value = 0;
+        existingCoverUrl.value = '';
+        clearCoverPreview();
+      };
+      const renderPdfPage = async (page) => {
+        if (!pdfDoc || !pdfCanvasEl.value) return;
+        const rendered = await pdfDoc.getPage(page);
+        const viewport = rendered.getViewport({ scale: 1.1 });
+        const canvas = pdfCanvasEl.value;
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await rendered.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      };
+      const onPdfSelected = (files) => call(async () => {
+        const file = Array.isArray(files) ? files[0] : files;
+        pdfDoc = null;
+        pdfPageCount.value = 0;
+        clearCoverPreview();
+        if (!file) { pdfFile.value = null; return; }
+        pdfFile.value = file;
+        const lib = await loadPdfModule();
+        pdfDoc = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
+        pdfPageCount.value = pdfDoc.numPages;
+        pdfPage.value = 1;
+        await nextTick();
+        await renderPdfPage(1);
+      });
+      const onPdfPageChange = () => call(async () => {
+        if (!pdfDoc) return;
+        const page = Math.min(Math.max(1, parseInt(pdfPage.value, 10) || 1), pdfDoc.numPages);
+        pdfPage.value = page;
+        await renderPdfPage(page);
+      });
+      const generateCover = () => call(async () => {
+        if (!pdfDoc) throw new Error('请先选择 PDF');
+        const page = Math.min(Math.max(1, parseInt(pdfPage.value, 10) || 1), pdfDoc.numPages);
+        const rendered = await pdfDoc.getPage(page);
+        const viewport = rendered.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await rendered.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
+        if (!blob) throw new Error('生成封面失败（浏览器不支持 WebP）');
+        if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
+        coverBlob.value = blob;
+        coverPreviewUrl.value = URL.createObjectURL(blob);
+        notify('封面已生成，保存后上传');
+      });
+      const uploadTextbookAssets = async (id) => {
+        if (pdfFile.value) {
+          const data = new FormData();
+          data.append('file', pdfFile.value, pdfFile.value.name || 'original.pdf');
+          await api('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/pdf', { method: 'POST', body: data });
+        }
+        if (coverBlob.value) {
+          await api('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/cover', {
+            method: 'POST', body: coverBlob.value, headers: { 'Content-Type': 'image/webp' }
+          });
+        }
+      };
+      const loadExistingCover = async (id) => {
+        try {
+          const out = await api('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/resource-url?kind=cover');
+          existingCoverUrl.value = out.url || '';
+        } catch (_) {
+          existingCoverUrl.value = '';
+        }
+      };
       const loadRelease = async () => {
         const out = await api('/api/v1/admin/app/release');
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
@@ -1077,13 +1192,14 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
+        pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
-        loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook,
+        loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
         loadCourses, searchCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
       };
     },

@@ -378,3 +378,23 @@ body {
     padding-inline: clamp(12px, 1.25vw, 24px) !important;
   }
 }
+
+/* Textbook PDF preview + generated cover (server console). */
+.pdf-page-field { max-width: 140px; }
+.pdf-preview {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  margin-top: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: #f4f7f8;
+}
+.cover-preview {
+  display: block;
+  max-width: 180px;
+  max-height: 240px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
