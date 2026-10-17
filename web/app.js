@@ -273,7 +273,7 @@ import { template } from './template.js';
       const textbookSortBy = ref([]);
       const textbookDialog = ref(false);
       const textbookEditingId = ref('');
-      const textbookForm = ref({ name: '', tags: '', courseCode: '' });
+      const textbookForm = ref({ name: '', tags: '', courseCodes: [] });
       const resourceDialog = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
@@ -361,7 +361,7 @@ import { template } from './template.js';
       const bankDialog = ref(false);
       const bankEditing = ref(false);
       const bankJSON = ref('');
-      const bankCourseCode = ref('');
+      const bankCourseCodes = ref([]);
       const bankNewOptions = [{ title: '是', value: true }, { title: '否', value: false }];
       const bankCDKOptions = [{ title: '需要', value: true }, { title: '不需要', value: false }];
       const selectedUser = ref(null);
@@ -598,7 +598,7 @@ import { template } from './template.js';
         bankDialog.value = false;
         bankEditing.value = false;
         bankJSON.value = '';
-        bankCourseCode.value = '';
+        bankCourseCodes.value = [];
       };
       const setBankDialog = (visible) => { if (visible) bankDialog.value = true; else closeBankEditor(); };
       const clearAdminSession = () => {
@@ -966,7 +966,7 @@ import { template } from './template.js';
       const searchTextbooks = () => call(async () => { textbookPage.value = 1; await loadTextbooks(); });
       const openNewTextbook = () => call(async () => {
         textbookEditingId.value = '';
-        textbookForm.value = { name: '', tags: '', courseCode: '' };
+        textbookForm.value = { name: '', tags: '', courseCodes: [] };
         resetPdfState();
         await loadCourseOptions();
         textbookDialog.value = true;
@@ -974,7 +974,8 @@ import { template } from './template.js';
       const editTextbook = (row) => call(async () => {
         const item = rawItem(row);
         textbookEditingId.value = item.id || '';
-        textbookForm.value = { name: item.name || '', tags: item.tags || '', courseCode: item.course_code || '' };
+        const codes = Array.isArray(item.course_codes) && item.course_codes.length ? item.course_codes : (item.course_code ? [item.course_code] : []);
+        textbookForm.value = { name: item.name || '', tags: item.tags || '', courseCodes: codes };
         resetPdfState();
         await loadCourseOptions();
         textbookDialog.value = true;
@@ -985,7 +986,7 @@ import { template } from './template.js';
         if (!String(form.name || '').trim()) throw new Error('请填写教材名称');
         const editing = !!textbookEditingId.value;
         const path = '/api/v1/admin/textbooks' + (editing ? '/' + encodeURIComponent(textbookEditingId.value) : '');
-        const body = { name: form.name, tags: form.tags, course_code: form.courseCode || '' };
+        const body = { name: form.name, tags: form.tags, course_codes: form.courseCodes || [] };
         const saved = await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
         const id = editing ? textbookEditingId.value : (saved && saved.id);
         if (id) await uploadTextbookAssets(id);
@@ -1478,7 +1479,7 @@ import { template } from './template.js';
       };
       const openNewBank = () => call(async () => {
         bankEditing.value = false;
-        bankCourseCode.value = '';
+        bankCourseCodes.value = [];
         bankJSON.value = JSON.stringify(emptyBankTemplate(), null, 2);
         await loadCourseOptions();
         bankDialog.value = true;
@@ -1486,7 +1487,9 @@ import { template } from './template.js';
       const editBank = (row) => call(async () => {
         const out = await api('/api/v1/admin/question-banks/' + encodeURIComponent(rawItem(row).id));
         bankEditing.value = true;
-        bankCourseCode.value = out.questionBank.courseCode || '';
+        bankCourseCodes.value = Array.isArray(out.questionBank.courseCodes) && out.questionBank.courseCodes.length
+          ? out.questionBank.courseCodes.slice()
+          : (out.questionBank.courseCode ? [out.questionBank.courseCode] : []);
         await loadCourseOptions();
         bankJSON.value = JSON.stringify({
           questionBank: {
@@ -1512,7 +1515,8 @@ import { template } from './template.js';
         // The update endpoint takes the bank ID from the URL and rejects
         // unknown JSON fields, so it must not be echoed in the payload.
         delete bank.id;
-        bank.courseCode = (bankCourseCode.value || '').trim();
+        delete bank.courseCode;
+        bank.courseCodes = (bankCourseCodes.value || []).map((code) => String(code).trim()).filter(Boolean);
         const payload = { questionBank: bank };
         const path = '/api/v1/admin/question-banks' + (bankEditing.value ? '/' + encodeURIComponent(bankID) : '');
         const editing = bankEditing.value;
@@ -1716,6 +1720,7 @@ import { template } from './template.js';
         if (value === undefined || value === null || value === '') return '-';
         return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ? formatDateTime(value) : value;
       };
+      const courseCodesText = (codes) => (Array.isArray(codes) ? codes.filter(Boolean).join('、') : '') || '-';
       const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
@@ -1736,7 +1741,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCode, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
         resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,

@@ -90,3 +90,45 @@ func TestTextbookAdminCRUDAndReassign(t *testing.T) {
 		t.Fatal("deleting a missing textbook should fail")
 	}
 }
+
+func TestTextbookMultipleCourses(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+
+	created, err := store.CreateTextbook(ctx, TextbookInput{Name: "多课程教材", Tags: "版次", CourseCodes: []string{"C1", "C2"}}, now)
+	if err != nil || created.CourseCode != "C1" || len(created.CourseCodes) != 2 {
+		t.Fatalf("create = %#v, err = %v", created, err)
+	}
+	grouped, err := store.ListTextbooksForCourses(ctx, []string{"C1", "C2"})
+	if err != nil || len(grouped["C1"]) != 1 || len(grouped["C2"]) != 1 {
+		t.Fatalf("grouped = %#v, err = %v", grouped, err)
+	}
+
+	if err := store.UpdateTextbook(ctx, created.ID, TextbookInput{Name: "多课程教材", Tags: "版次", CourseCodes: []string{"C2", "C3"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetTextbook(ctx, created.ID)
+	if err != nil || got.CourseCode != "C2" || len(got.CourseCodes) != 2 {
+		t.Fatalf("updated = %#v, err = %v", got, err)
+	}
+	grouped, err = store.ListTextbooksForCourses(ctx, []string{"C1", "C2", "C3"})
+	if err != nil || len(grouped["C1"]) != 0 || len(grouped["C2"]) != 1 || len(grouped["C3"]) != 1 {
+		t.Fatalf("regrouped = %#v, err = %v", grouped, err)
+	}
+
+	if err := store.DeleteTextbook(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	var associations int
+	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM textbook_courses").Scan(&associations); err != nil || associations != 0 {
+		t.Fatalf("associations after delete = %d, err = %v", associations, err)
+	}
+}

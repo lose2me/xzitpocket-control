@@ -71,7 +71,16 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := s.attachQuestionBankCourses(ctx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, error) {
@@ -124,6 +133,9 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 		return nil, 0, err
 	}
 	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if err := s.attachQuestionBankCourses(ctx, items); err != nil {
 		return nil, 0, err
 	}
 	var total int
@@ -217,6 +229,15 @@ func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string
 		return QuestionBank{}, err
 	}
 	bank.Questions = questions
+	codes, err := loadQuestionBankCodes(ctx, queryer, []string{bank.ID})
+	if err != nil {
+		return QuestionBank{}, err
+	}
+	if list := codes[bank.ID]; len(list) > 0 {
+		bank.CourseCodes = list
+	} else if bank.CourseCode != "" {
+		bank.CourseCodes = []string{bank.CourseCode}
+	}
 	return bank, nil
 }
 
@@ -242,6 +263,9 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, course_code, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
 		return err
 	}
 	if err := insertQuestions(ctx, tx, bank); err != nil {
@@ -298,6 +322,9 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 			return QuestionBank{}, err
 		}
+		if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+			return QuestionBank{}, err
+		}
 		if err := insertQuestions(ctx, tx, bank); err != nil {
 			return QuestionBank{}, err
 		}
@@ -346,6 +373,12 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	if affected != 1 {
 		return sql.ErrNoRows
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM question_bank_courses WHERE question_bank_id = ?", bank.ID); err != nil {
+		return err
+	}
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM questions WHERE bank_id = ?", bank.ID); err != nil {
 		return err
 	}
@@ -359,7 +392,7 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 }
 
 func sameQuestionBankContent(a, b QuestionBank) bool {
-	if a.OrderID != b.OrderID || a.IsNew != b.IsNew || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || a.CourseCode != b.CourseCode || len(a.Questions) != len(b.Questions) {
+	if a.OrderID != b.OrderID || a.IsNew != b.IsNew || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || a.CourseCode != b.CourseCode || !equalStringSlices(a.CourseCodes, b.CourseCodes) || len(a.Questions) != len(b.Questions) {
 		return false
 	}
 	for i := range a.Questions {
@@ -371,6 +404,99 @@ func sameQuestionBankContent(a, b QuestionBank) bool {
 			if left.Options[j].Label != right.Options[j].Label || left.Options[j].Text != right.Options[j].Text || left.Options[j].SortOrder != right.Options[j].SortOrder {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// questionBankCourseCodes merges the legacy single course with the multi-course
+// list so direct store callers and older payloads still create associations.
+func questionBankCourseCodes(bank QuestionBank) []string {
+	codes := make([]string, 0, len(bank.CourseCodes)+1)
+	seen := make(map[string]bool, len(bank.CourseCodes)+1)
+	add := func(code string) {
+		code = strings.TrimSpace(code)
+		if code == "" || seen[code] {
+			return
+		}
+		seen[code] = true
+		codes = append(codes, code)
+	}
+	for _, code := range bank.CourseCodes {
+		add(code)
+	}
+	add(bank.CourseCode)
+	return codes
+}
+
+func insertQuestionBankCourses(ctx context.Context, tx *sql.Tx, id string, codes []string) error {
+	for _, code := range codes {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO question_bank_courses(question_bank_id, course_code) VALUES (?, ?)", id, code); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// attachQuestionBankCourses fills CourseCodes for a page of banks in one query.
+func (s *Store) attachQuestionBankCourses(ctx context.Context, items []QuestionBankSummary) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	codes, err := loadQuestionBankCodes(ctx, s.DB, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if list := codes[items[i].ID]; len(list) > 0 {
+			items[i].CourseCodes = list
+		} else if items[i].CourseCode != "" {
+			items[i].CourseCodes = []string{items[i].CourseCode}
+		}
+	}
+	return nil
+}
+
+func loadQuestionBankCodes(ctx context.Context, queryer questionBankQuerier, ids []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, 0, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	rows, err := queryer.QueryContext(ctx, `SELECT c.question_bank_id, c.course_code
+		FROM question_bank_courses c JOIN question_banks b ON b.id = c.question_bank_id
+		WHERE c.question_bank_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY c.question_bank_id, CASE WHEN c.course_code = b.course_code THEN 0 ELSE 1 END, c.course_code`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, code string
+		if err := rows.Scan(&id, &code); err != nil {
+			return nil, err
+		}
+		result[id] = append(result[id], code)
+	}
+	return result, rows.Err()
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
 	return true

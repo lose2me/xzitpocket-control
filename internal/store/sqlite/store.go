@@ -33,6 +33,7 @@ var currentSchemaTables = []struct {
 	{name: "error_reports", columns: []string{"id", "event_id", "user_id", "device_id", "student_id_hash", "app_version", "platform", "title", "message", "error_text", "stack_trace", "occurred_at", "received_at"}},
 	{name: "error_report_ignored_students", columns: []string{"student_id_hash", "ignored_at"}},
 	{name: "question_banks", columns: []string{"id", "order_id", "is_new", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
+	{name: "question_bank_courses", columns: []string{"question_bank_id", "course_code"}},
 	{name: "question_bank_id_counter", columns: []string{"id", "next_number"}},
 	{name: "question_bank_order_counter", columns: []string{"id", "next_number"}},
 	{name: "questions", columns: []string{"id", "bank_id", "question_number", "type", "title", "question_text", "correct_answer", "sort_order"}},
@@ -48,6 +49,7 @@ var currentSchemaTables = []struct {
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "created_at", "updated_at"}},
+	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "created_at", "updated_at"}},
 }
 
@@ -190,6 +192,21 @@ func (s *Store) applyColumnRemovals(ctx context.Context) error {
 	return nil
 }
 
+// backfillCourseAssociations copies the legacy single course_code column into
+// the association tables. It is idempotent and keeps rows written before
+// multi-course support visible to the new queries.
+func (s *Store) backfillCourseAssociations(ctx context.Context) error {
+	if _, err := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO textbook_courses(textbook_id, course_code)
+		SELECT id, course_code FROM textbooks WHERE TRIM(course_code) <> ''`); err != nil {
+		return err
+	}
+	if _, err := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO question_bank_courses(question_bank_id, course_code)
+		SELECT id, course_code FROM question_banks WHERE TRIM(course_code) <> ''`); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
 	rows, err := s.DB.QueryContext(ctx, `PRAGMA table_info("`+table+`")`)
 	if err != nil {
@@ -222,6 +239,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
+	}
+	if err := s.backfillCourseAssociations(ctx); err != nil {
+		return fmt.Errorf("backfill course associations: %w", err)
 	}
 	if err := s.validateCurrentSchema(ctx); err != nil {
 		if !errors.Is(err, errSchemaMismatch) {
@@ -456,6 +476,7 @@ type QuestionBank struct {
 	Status      string
 	RequiresCDK bool
 	CourseCode  string
+	CourseCodes []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	Questions   []Question
@@ -489,6 +510,7 @@ type QuestionBankSummary struct {
 	Status        string
 	RequiresCDK   bool
 	CourseCode    string
+	CourseCodes   []string
 	QuestionCount int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

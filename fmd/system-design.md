@@ -73,11 +73,14 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 | 表 | 用途 |
 | --- | --- |
-| `question_banks` | 题库 ID、顺序 ID、名称、状态、关联课程编号和 CDK 解锁开关 |
+| `question_banks` | 题库 ID、顺序 ID、名称、状态、首个关联课程编号和 CDK 解锁开关 |
+| `question_bank_courses` | 题库与多个课程编号的关联 |
 | `questions` | 题号、题型、题干和答案 |
 | `question_options` | 选择题选项 |
 | `question_bank_id_counter` | 事务内单调分配 `QB-001` 等 ID |
 | `library_cdks` | 单题库、单次使用的 CDK |
+
+题库可关联多个课程编号，`question_banks.course_code` 保留第一个用于排序和旧客户端，完整关联在 `question_bank_courses`。
 
 题库状态只有 `active`、`draft`、`disabled`。创建时客户端不能指定题库 ID，control 自动生成且不复用；`orderId` 是正整数，用于控制 xzitpocket 展示顺序。未填写时按顺序计数器自动分配，管理员可编辑为未占用的顺序 ID；停用只是改为 `disabled`，管理员列表仍显示。
 
@@ -128,9 +131,10 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | 表 | 唯一键 | 用途 |
 | --- | --- | --- |
 | `courses` | `code` | 每门课程一条，记录课程名 |
-| `textbooks` | `(name, tags, course_code)` | 每本教材一条，按课程编号关联到课程 |
+| `textbooks` | `(name, tags, course_code)` | 每本教材一条，`course_code` 保留首个关联课程 |
+| `textbook_courses` | `(textbook_id, course_code)` | 教材与多个课程编号的关联 |
 
-教材的课程关联用课程编号保存，改动教材的名称/标签不会丢失关联；也可在后台手动改关联课程。课程页的「书籍信息」只读，由关联派生。
+教材可关联多个课程，完整关联保存在 `textbook_courses`；`textbooks.course_code` 保留第一个用于排序和旧客户端。改动教材的名称/标签不会丢失关联，也可在后台手动改关联课程。课程页的「书籍信息」只读，由关联派生，一本教材会出现在它关联的每个课程下。
 
 ### 5.2 端点
 
@@ -146,12 +150,12 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 ### 5.3 唯一性与关联
 
-课程编号唯一，已有课程不覆盖，只补空课程名；教材按 `(name, tags, course_code)` 唯一，已有记录不覆盖。教材的课程关联用课程编号保存，编辑教材信息不会改变关联，管理员可在书单页手动修改关联课程；删除后客户端再次上报会重新收录，不做墓碑。
+课程编号唯一，已有课程不覆盖，只补空课程名；教材按 `(name, tags, course_code)` 唯一，已有记录不覆盖。教材可关联多个课程编号，编辑教材信息不会改变关联，管理员可在书单页多选修改关联课程；删除后客户端再次上报会重新收录，不做墓碑。
 
 ### 5.4 验收标准
 
 - 课程按 `code` 唯一，教材按 `(name, tags, course_code)` 唯一；
-- 编辑教材信息不丢关联，且可手动改关联课程；
+- 编辑教材信息不丢关联，且可多选修改关联课程；
 - 上报失败不影响客户端课表；
 - 管理后台可搜索、新建、编辑和删除课程与教材记录。
 

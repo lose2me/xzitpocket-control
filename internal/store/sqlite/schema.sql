@@ -111,6 +111,16 @@ CREATE TABLE IF NOT EXISTS question_banks (
     updated_at INTEGER NOT NULL
 );
 
+-- A question bank may be shared by several courses. question_banks.course_code
+-- keeps the first association for sorting and older clients.
+CREATE TABLE IF NOT EXISTS question_bank_courses (
+    question_bank_id TEXT NOT NULL REFERENCES question_banks(id) ON DELETE CASCADE,
+    course_code TEXT NOT NULL,
+    PRIMARY KEY (question_bank_id, course_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_bank_courses_code ON question_bank_courses(course_code);
+
 CREATE TABLE IF NOT EXISTS question_bank_id_counter (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     next_number INTEGER NOT NULL CHECK (next_number > 0)
@@ -290,9 +300,18 @@ CREATE TABLE IF NOT EXISTS textbooks (
     UNIQUE(name, tags, course_code)
 );
 
+-- A textbook may be used by several courses. textbooks.course_code keeps the
+-- first association for sorting and older clients.
+CREATE TABLE IF NOT EXISTS textbook_courses (
+    textbook_id TEXT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
+    course_code TEXT NOT NULL,
+    PRIMARY KEY (textbook_id, course_code)
+);
+
 CREATE INDEX IF NOT EXISTS idx_courses_name ON courses(name);
 CREATE INDEX IF NOT EXISTS idx_textbooks_name ON textbooks(name);
 CREATE INDEX IF NOT EXISTS idx_textbooks_course ON textbooks(course_code);
+CREATE INDEX IF NOT EXISTS idx_textbook_courses_code ON textbook_courses(course_code);
 
 -- Resources uploaded with courses. One row per (name, tags) per course; the
 -- course association is by course code and is edited manually in the console.

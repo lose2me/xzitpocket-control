@@ -349,3 +349,36 @@ func TestMetricsBreakdownCountsCDKActivations(t *testing.T) {
 		t.Fatalf("CDK activation metrics = today %d, week %d, total %d; want 1, 2, 3", breakdown.CDKActivationsToday, breakdown.CDKActivationsWeek, breakdown.CDKActivationsTotal)
 	}
 }
+
+func TestMigrateBackfillsCourseAssociations(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate rows created before multi-course support: the legacy column is
+	// filled but no association rows exist.
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
+		VALUES ('tbx_old', '旧教材', '', 'C9', '', '', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES ('QB-900', 900, 1, '旧题库', 'active', 0, 'C8', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	textbook, err := store.GetTextbook(ctx, "tbx_old")
+	if err != nil || len(textbook.CourseCodes) != 1 || textbook.CourseCodes[0] != "C9" {
+		t.Fatalf("textbook = %#v, err = %v", textbook, err)
+	}
+	bank, err := store.GetQuestionBank(ctx, "QB-900")
+	if err != nil || len(bank.CourseCodes) != 1 || bank.CourseCodes[0] != "C8" {
+		t.Fatalf("question bank = %#v, err = %v", bank, err)
+	}
+}

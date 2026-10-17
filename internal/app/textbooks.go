@@ -13,25 +13,27 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-// TextbookWriteInput is the administrator create/update payload. The course
-// association is by course code and can be changed here without touching the
-// book fields.
+// TextbookWriteInput is the administrator create/update payload. CourseCodes
+// holds every associated course; the legacy CourseCode is still accepted and
+// becomes the first association.
 type TextbookWriteInput struct {
-	Name       string `json:"name"`
-	Tags       string `json:"tags"`
-	CourseCode string `json:"course_code"`
+	Name        string   `json:"name"`
+	Tags        string   `json:"tags"`
+	CourseCode  string   `json:"course_code"`
+	CourseCodes []string `json:"course_codes"`
 }
 
 // TextbookView is the administrator-facing textbook row.
 type TextbookView struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Tags       string `json:"tags"`
-	CourseCode string `json:"course_code"`
-	HasPdf     bool   `json:"has_pdf"`
-	HasCover   bool   `json:"has_cover"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Tags        string   `json:"tags"`
+	CourseCode  string   `json:"course_code"`
+	CourseCodes []string `json:"course_codes"`
+	HasPdf      bool     `json:"has_pdf"`
+	HasCover    bool     `json:"has_cover"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 // TextbookResourceView is a temporary, signed CDN URL for a textbook asset.
@@ -46,11 +48,48 @@ const (
 )
 
 func textbookView(item sqlite.Textbook) TextbookView {
+	codes := item.CourseCodes
+	if codes == nil {
+		codes = []string{}
+	}
 	return TextbookView{
-		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
+		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: codes,
 		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "",
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
+}
+
+// normalizeCourseAssociations trims and deduplicates course codes, keeping the
+// caller's order. The first code becomes the legacy primary association.
+func normalizeCourseAssociations(codes []string, fallback string) ([]string, bool) {
+	result := make([]string, 0, len(codes)+1)
+	seen := make(map[string]bool, len(codes)+1)
+	add := func(code string) bool {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			return true
+		}
+		if len(code) > 64 || strings.ContainsAny(code, "\r\n\x00") {
+			return false
+		}
+		if !seen[code] {
+			seen[code] = true
+			result = append(result, code)
+		}
+		return true
+	}
+	for _, code := range codes {
+		if !add(code) {
+			return nil, false
+		}
+	}
+	if !add(fallback) {
+		return nil, false
+	}
+	if len(result) > 20 {
+		return nil, false
+	}
+	return result, true
 }
 
 func (a *App) cosClient() *cloud.COSClient {
@@ -76,17 +115,21 @@ func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, sear
 func validateTextbookWriteInput(in TextbookWriteInput) (sqlite.TextbookInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Tags = strings.TrimSpace(in.Tags)
-	in.CourseCode = strings.TrimSpace(in.CourseCode)
 	if in.Name == "" || len(in.Name) > 256 || strings.ContainsAny(in.Name, "\r\n\x00") {
 		return sqlite.TextbookInput{}, Err("invalid_textbook", "教材名称无效", 400)
 	}
 	if len(in.Tags) > 1024 || strings.ContainsAny(in.Tags, "\r\n\x00") {
 		return sqlite.TextbookInput{}, Err("invalid_textbook", "教材标签无效", 400)
 	}
-	if len(in.CourseCode) > 64 || strings.ContainsAny(in.CourseCode, "\r\n\x00") {
+	codes, ok := normalizeCourseAssociations(in.CourseCodes, in.CourseCode)
+	if !ok {
 		return sqlite.TextbookInput{}, Err("invalid_textbook", "关联课程编号无效", 400)
 	}
-	return sqlite.TextbookInput{Name: in.Name, Tags: in.Tags, CourseCode: in.CourseCode}, nil
+	primary := ""
+	if len(codes) > 0 {
+		primary = codes[0]
+	}
+	return sqlite.TextbookInput{Name: in.Name, Tags: in.Tags, CourseCode: primary, CourseCodes: codes}, nil
 }
 
 func (a *App) CreateTextbookForAdmin(ctx context.Context, in TextbookWriteInput, actor string) (TextbookView, error) {
