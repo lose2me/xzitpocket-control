@@ -134,17 +134,63 @@ func (a *App) UpdateTextbookForAdmin(ctx context.Context, id string, in Textbook
 }
 
 func (a *App) DeleteTextbookForAdmin(ctx context.Context, id, actor string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return Err("invalid_textbook_id", "教材标识无效", 400)
+	item, err := a.requireTextbook(ctx, id)
+	if err != nil {
+		return err
 	}
-	if err := a.Store.DeleteTextbook(ctx, id); err != nil {
+	if err := a.Store.DeleteTextbook(ctx, item.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", id, "{}", time.Now().UTC())
+	a.removeTextbookAssets(ctx, item)
+	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", item.ID, "{}", time.Now().UTC())
+}
+
+// purgeCDN invalidates cached copies of the given object keys. It is
+// best-effort: the object is already stored, and refreshes wear off once the
+// cache TTL expires even when the API call fails.
+func (a *App) purgeCDN(ctx context.Context, keys ...string) {
+	if a.Cfg.CDNDomain == "" || a.Cfg.COSSecretID == "" || a.Cfg.COSSecretKey == "" {
+		return
+	}
+	urls := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		urls = append(urls, a.Cfg.CDNDomain+"/"+strings.TrimPrefix(key, "/"))
+	}
+	if len(urls) == 0 {
+		return
+	}
+	if err := cloud.PurgeCDNCache(ctx, a.Cfg.COSSecretID, a.Cfg.COSSecretKey, urls); err != nil {
+		a.Logger.Warn("cdn purge failed", "error", err, "urls", urls)
+	}
+}
+
+// removeTextbookAssets deletes a removed textbook's PDF/cover from object
+// storage and drops their CDN copies. It is best-effort: the row is already
+// gone, so a storage failure is logged rather than surfaced.
+func (a *App) removeTextbookAssets(ctx context.Context, item sqlite.Textbook) {
+	keys := make([]string, 0, 2)
+	for _, key := range []string{item.PdfKey, item.CoverKey} {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	if client := a.cosClient(); client.Configured() {
+		for _, key := range keys {
+			if err := client.DeleteObject(ctx, key); err != nil {
+				a.Logger.Warn("delete textbook object failed", "error", err, "key", key)
+			}
+		}
+	}
+	a.purgeCDN(ctx, keys...)
 }
 
 func (a *App) requireTextbook(ctx context.Context, id string) (sqlite.Textbook, error) {
@@ -193,6 +239,7 @@ func (a *App) UploadTextbookPdf(ctx context.Context, id string, data []byte, act
 		return TextbookView{}, err
 	}
 	item.PdfKey = key
+	a.purgeCDN(ctx, key)
 	_ = a.Store.AddAudit(ctx, actor, "textbook_pdf", "textbook", item.ID, "{}", now)
 	return textbookView(item), nil
 }
@@ -220,6 +267,7 @@ func (a *App) UploadTextbookCover(ctx context.Context, id string, data []byte, a
 		return TextbookView{}, err
 	}
 	item.CoverKey = key
+	a.purgeCDN(ctx, key)
 	_ = a.Store.AddAudit(ctx, actor, "textbook_cover", "textbook", item.ID, "{}", now)
 	return textbookView(item), nil
 }

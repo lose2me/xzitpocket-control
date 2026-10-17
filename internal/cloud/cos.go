@@ -79,6 +79,34 @@ func cosAuthorization(secretID, secretKey, keyTime, method, path, headerList, he
 		"&q-signature=" + signature
 }
 
+// cosHeaderSignature renders the q-header-list and canonical header string for
+// the given headers, both sorted by header name as the COS v5 signature needs.
+func cosHeaderSignature(headers map[string]string) (string, string) {
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, cosURIEncode(k)+"="+cosURIEncode(headers[k]))
+	}
+	return strings.Join(keys, ";"), strings.Join(pairs, "&")
+}
+
+func (c *COSClient) do(req *http.Request, operation, key string) error {
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("cos %s %s: %s: %s", operation, key, resp.Status, strings.TrimSpace(string(raw)))
+	}
+	return nil
+}
+
 // PutObject uploads body to key with the given content type.
 func (c *COSClient) PutObject(ctx context.Context, key, contentType string, body []byte) error {
 	if !c.Configured() {
@@ -89,19 +117,7 @@ func (c *COSClient) PutObject(ctx context.Context, key, contentType string, body
 	now := time.Now().Unix()
 	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
 
-	headers := map[string]string{"content-type": contentType, "host": host}
-	headerKeys := make([]string, 0, len(headers))
-	for k := range headers {
-		headerKeys = append(headerKeys, k)
-	}
-	sort.Strings(headerKeys)
-	headerPairs := make([]string, 0, len(headerKeys))
-	for _, k := range headerKeys {
-		headerPairs = append(headerPairs, cosURIEncode(k)+"="+cosURIEncode(headers[k]))
-	}
-	headerList := strings.Join(headerKeys, ";")
-	headerString := strings.Join(headerPairs, "&")
-
+	headerList, headerString := cosHeaderSignature(map[string]string{"content-type": contentType, "host": host})
 	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "put", path, headerList, headerString)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut,
@@ -112,15 +128,29 @@ func (c *COSClient) PutObject(ctx context.Context, key, contentType string, body
 	req.Host = host
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", authorization)
+	return c.do(req, "put", key)
+}
 
-	resp, err := c.HTTP.Do(req)
+// DeleteObject removes key from the bucket. COS reports success for a key that
+// does not exist, so the call is idempotent.
+func (c *COSClient) DeleteObject(ctx context.Context, key string) error {
+	if !c.Configured() {
+		return fmt.Errorf("cos is not configured")
+	}
+	path := "/" + strings.TrimPrefix(key, "/")
+	host := c.host()
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
+
+	headerList, headerString := cosHeaderSignature(map[string]string{"host": host})
+	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "delete", path, headerList, headerString)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		fmt.Sprintf("https://%s%s", host, path), nil)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("cos put %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
-	}
-	return nil
+	req.Host = host
+	req.Header.Set("Authorization", authorization)
+	return c.do(req, "delete", key)
 }
