@@ -74,6 +74,18 @@ func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) userUploadTextbooks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authSession(w, r); !ok {
+		return
+	}
+	items, err := s.App.ListTextbooksForUpload(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (s *Server) userUploadStats(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authSession(w, r)
 	if !ok {

@@ -90,3 +90,28 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 		t.Fatalf("upload stats = %#v, err = %v", stats, err)
 	}
 }
+
+func TestListTextbooksForUploadIncludesCourses(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C2", Name: "课程二"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1", CourseCodes: []string{"C1", "C2"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCode: "C2"}, now); err != nil {
+		t.Fatal(err)
+	}
+	items, err := a.ListTextbooksForUpload(ctx)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items = %#v, err = %v", items, err)
+	}
+	if items[0].Name != "教材乙" || items[1].Name != "教材甲" || len(items[1].CourseCodes) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+}

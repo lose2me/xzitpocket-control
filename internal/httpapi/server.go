@@ -179,6 +179,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.userResourceCourses(w, r)
 	case r.Method == http.MethodGet && path == "/resource-center/upload-stats":
 		s.userUploadStats(w, r)
+	case r.Method == http.MethodGet && path == "/resource-center/upload-textbooks":
+		s.userUploadTextbooks(w, r)
 	case r.Method == http.MethodPost && path == "/resource-center/submissions":
 		if !s.allow(r, "resource-submission", 30, time.Hour) {
 			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))

@@ -137,6 +137,20 @@ func validateTextbookWriteInput(in TextbookWriteInput) (sqlite.TextbookInput, er
 	return sqlite.TextbookInput{Name: in.Name, Tags: in.Tags, CourseCode: primary, CourseCodes: codes}, nil
 }
 
+// ListTextbooksForUpload feeds the app upload picker with every textbook and
+// its course associations.
+func (a *App) ListTextbooksForUpload(ctx context.Context) ([]TextbookView, error) {
+	items, err := a.Store.ListAllTextbooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]TextbookView, 0, len(items))
+	for _, item := range items {
+		views = append(views, textbookView(item))
+	}
+	return views, nil
+}
+
 func (a *App) CreateTextbookForAdmin(ctx context.Context, in TextbookWriteInput, actor string) (TextbookView, error) {
 	input, err := validateTextbookWriteInput(in)
 	if err != nil {

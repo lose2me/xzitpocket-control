@@ -211,6 +211,30 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 	return grouped, rows.Err()
 }
 
+// ListAllTextbooks returns every textbook, used by the app upload picker.
+func (s *Store) ListAllTextbooks(ctx context.Context) ([]Textbook, error) {
+	rows, err := s.DB.QueryContext(ctx, "SELECT "+textbookColumns+" FROM textbooks t ORDER BY t.name ASC, t.id ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Textbook, 0)
+	for rows.Next() {
+		item, scanErr := scanTextbook(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachTextbookCourses(ctx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *Store) GetTextbook(ctx context.Context, id string) (Textbook, error) {
 	row := s.DB.QueryRowContext(ctx, "SELECT "+textbookColumns+" FROM textbooks WHERE id = ?", id)
 	item, err := scanTextbook(row)
