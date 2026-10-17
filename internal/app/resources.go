@@ -20,6 +20,7 @@ type ResourceView struct {
 	Tags       string `json:"tags"`
 	CourseCode string `json:"course_code"`
 	HasPdf     bool   `json:"has_pdf"`
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 }
@@ -44,7 +45,7 @@ const (
 func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
-		HasPdf: item.PdfKey != "",
+		HasPdf:    item.PdfKey != "",
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }

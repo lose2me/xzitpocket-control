@@ -64,7 +64,9 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 	}
 	views := make([]ResourceView, 0, len(items))
 	for _, item := range items {
-		views = append(views, resourceView(item))
+		view := resourceView(item)
+		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
+		views = append(views, view)
 	}
 	return views, total, nil
 }
@@ -83,7 +85,27 @@ func (a *App) ListCourseTextbooksForUser(ctx context.Context, courseCode string)
 	items := grouped[code]
 	views := make([]TextbookView, 0, len(items))
 	for _, item := range items {
-		views = append(views, textbookView(item))
+		view := textbookView(item)
+		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
+		views = append(views, view)
 	}
 	return views, len(views), nil
+}
+
+// objectSize returns the stored PDF's byte size for the app file rows. A
+// missing storage configuration or a failed HEAD request only hides the size.
+func (a *App) objectSize(ctx context.Context, key string) int64 {
+	if key == "" {
+		return 0
+	}
+	client := a.cosClient()
+	if !client.Configured() {
+		return 0
+	}
+	size, err := client.HeadObject(ctx, key)
+	if err != nil {
+		a.Logger.Warn("read object size failed", "error", err, "key", key)
+		return 0
+	}
+	return size
 }

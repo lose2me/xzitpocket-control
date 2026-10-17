@@ -32,6 +32,7 @@ type TextbookView struct {
 	CourseCodes []string `json:"course_codes"`
 	HasPdf      bool     `json:"has_pdf"`
 	HasCover    bool     `json:"has_cover"`
+	SizeBytes   int64    `json:"size_bytes,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
 }

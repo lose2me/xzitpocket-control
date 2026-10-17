@@ -131,6 +131,37 @@ func (c *COSClient) PutObject(ctx context.Context, key, contentType string, body
 	return c.do(req, "put", key)
 }
 
+// HeadObject returns the object's size in bytes without downloading it.
+func (c *COSClient) HeadObject(ctx context.Context, key string) (int64, error) {
+	if !c.Configured() {
+		return 0, fmt.Errorf("cos is not configured")
+	}
+	path := "/" + strings.TrimPrefix(key, "/")
+	host := c.host()
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
+
+	headerList, headerString := cosHeaderSignature(map[string]string{"host": host})
+	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "head", path, headerList, headerString)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, fmt.Sprintf("https://%s%s", host, path), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Host = host
+	req.Header.Set("Authorization", authorization)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return 0, fmt.Errorf("cos head %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
+	}
+	return resp.ContentLength, nil
+}
+
 // DeleteObject removes key from the bucket. COS reports success for a key that
 // does not exist, so the call is idempotent.
 func (c *COSClient) DeleteObject(ctx context.Context, key string) error {
