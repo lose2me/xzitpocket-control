@@ -30,13 +30,11 @@ type ShareCodeView struct {
 	CreatedByUserID string    `json:"created_by_user_id,omitempty"`
 	StudentID       string    `json:"student_id,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
 }
 
 type CreatedShareCodeView struct {
 	Code      string    `json:"code"`
 	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func canonicalShareCode(value string) string {
@@ -87,7 +85,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 	payloadHash := sharePayloadHash(payload)
 	now := time.Now().UTC()
 	if strings.TrimSpace(userID) != "" {
-		candidates, err := a.Store.FindActiveShareCodesByUserPayload(ctx, userID, payloadHash, now)
+		candidates, err := a.Store.FindShareCodesByUserPayload(ctx, userID, payloadHash)
 		if err != nil {
 			return CreatedShareCodeView{}, err
 		}
@@ -96,11 +94,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 			if len(code) != 6 || code[5] != in.Suffix[0] {
 				continue
 			}
-			expiresAt := now.Add(7 * 24 * time.Hour)
-			if err := a.Store.RenewShareCode(ctx, candidate.ID, expiresAt); err != nil {
-				return CreatedShareCodeView{}, err
-			}
-			return CreatedShareCodeView{Code: code, CreatedAt: candidate.CreatedAt, ExpiresAt: expiresAt}, nil
+			return CreatedShareCodeView{Code: code, CreatedAt: candidate.CreatedAt}, nil
 		}
 	}
 	encrypted, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, string(payload))
@@ -128,7 +122,6 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 			PayloadHash:       payloadHash,
 			CreatedByUserID:   userID,
 			CreatedAt:         now,
-			ExpiresAt:         now.Add(7 * 24 * time.Hour),
 		}
 		if err := a.Store.CreateShareCode(ctx, item); err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -136,7 +129,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 			}
 			return CreatedShareCodeView{}, err
 		}
-		return CreatedShareCodeView{Code: code, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt}, nil
+		return CreatedShareCodeView{Code: code, CreatedAt: item.CreatedAt}, nil
 	}
 	return CreatedShareCodeView{}, errors.New("could not generate a unique share code")
 }
@@ -153,13 +146,10 @@ func (a *App) ReadShareCode(ctx context.Context, rawCode string) (map[string]any
 	}
 	item, err := a.Store.GetShareCodeByHash(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, code))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ShareCodeView{}, Err("share_code_not_found", "分享码不存在或已过期", http.StatusNotFound)
+		return nil, ShareCodeView{}, Err("share_code_not_found", "分享码不存在", http.StatusNotFound)
 	}
 	if err != nil {
 		return nil, ShareCodeView{}, err
-	}
-	if !item.ExpiresAt.After(time.Now().UTC()) {
-		return nil, ShareCodeView{}, Err("share_code_expired", "分享码已过期", http.StatusGone)
 	}
 	plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.PayloadCiphertext)
 	if err != nil {
@@ -169,7 +159,7 @@ func (a *App) ReadShareCode(ctx context.Context, rawCode string) (map[string]any
 	if err := json.Unmarshal([]byte(plain), &data); err != nil || data == nil {
 		return nil, ShareCodeView{}, Err("invalid_share_data", "分享数据格式无效", http.StatusInternalServerError)
 	}
-	return data, ShareCodeView{ID: item.ID, CreatedByUserID: item.CreatedByUserID, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt}, nil
+	return data, ShareCodeView{ID: item.ID, CreatedByUserID: item.CreatedByUserID, CreatedAt: item.CreatedAt}, nil
 }
 
 // The plaintext code is never stored as-is; keeping an encrypted copy lets
@@ -196,7 +186,6 @@ func (a *App) shareCodeView(ctx context.Context, item sqlite.ShareCode) ShareCod
 		CreatedByUserID: item.CreatedByUserID,
 		StudentID:       a.studentIDForUser(ctx, item.CreatedByUserID),
 		CreatedAt:       item.CreatedAt,
-		ExpiresAt:       item.ExpiresAt,
 	}
 }
 

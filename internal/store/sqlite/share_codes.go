@@ -113,12 +113,14 @@ func scanShareCode(row shareCodeScanner) (ShareCode, error) {
 	return code, nil
 }
 
-func (s *Store) FindActiveShareCodesByUserPayload(ctx context.Context, userID, payloadHash string, now time.Time) ([]ShareCode, error) {
+// FindShareCodesByUserPayload returns every code the user already created for
+// the same payload. Share codes no longer expire, so any match can be reused.
+func (s *Store) FindShareCodesByUserPayload(ctx context.Context, userID, payloadHash string) ([]ShareCode, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, code_hash, code_ciphertext, payload_ciphertext, payload_hash, COALESCE(created_by_user_id, ''), created_at, expires_at
 		FROM share_codes
-		WHERE created_by_user_id = ? AND payload_hash = ? AND expires_at > ?
-		ORDER BY created_at DESC`, userID, payloadHash, millis(now))
+		WHERE created_by_user_id = ? AND payload_hash = ?
+		ORDER BY created_at DESC`, userID, payloadHash)
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +134,4 @@ func (s *Store) FindActiveShareCodesByUserPayload(ctx context.Context, userID, p
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-func (s *Store) RenewShareCode(ctx context.Context, id string, expiresAt time.Time) error {
-	_, err := s.DB.ExecContext(ctx, "UPDATE share_codes SET expires_at = ? WHERE id = ?", millis(expiresAt), id)
-	return err
 }

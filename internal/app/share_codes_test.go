@@ -13,7 +13,7 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-func TestShareCodeRoundTripAndExpiry(t *testing.T) {
+func TestShareCodeRoundTrip(t *testing.T) {
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestShareCodeRoundTripAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.Code) != 6 || created.Code[5] != '2' || created.ExpiresAt.Sub(created.CreatedAt) != 7*24*time.Hour {
+	if len(created.Code) != 6 || created.Code[5] != '2' {
 		t.Fatalf("unexpected share code metadata: %#v", created)
 	}
 	data, meta, err := a.ReadShareCode(ctx, "  "+created.Code+"  ")
@@ -49,11 +49,13 @@ func TestShareCodeRoundTripAndExpiry(t *testing.T) {
 	if _, _, err := a.ReadShareCode(ctx, "123456"); err == nil {
 		t.Fatal("unknown share code should fail")
 	}
+	// Legacy rows may still carry an expiry timestamp; it is ignored, so old
+	// codes stay readable like newly created ones.
 	if _, err := store.DB.ExecContext(ctx, "UPDATE share_codes SET expires_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour).UnixMilli(), meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := a.ReadShareCode(ctx, created.Code); err == nil || err.(*APIError).Code != "share_code_expired" {
-		t.Fatalf("expired share code error = %v", err)
+	if _, _, err := a.ReadShareCode(ctx, created.Code); err != nil {
+		t.Fatalf("share code should not expire: %v", err)
 	}
 }
 
@@ -100,8 +102,8 @@ func TestListShareCodesResolvesStudentID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Code != first.Code || !second.ExpiresAt.After(first.ExpiresAt.Add(-time.Second)) {
-		t.Fatalf("same user/payload did not reuse and renew share code: first=%#v second=%#v", first, second)
+	if second.Code != first.Code {
+		t.Fatalf("same user/payload did not reuse share code: first=%#v second=%#v", first, second)
 	}
 	if _, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"v": 2}}, ""); err != nil {
 		t.Fatal(err)

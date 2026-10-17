@@ -33,7 +33,6 @@ func (s *Server) readShareCode(w http.ResponseWriter, r *http.Request, code stri
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data":      data,
 		"createdAt": meta.CreatedAt,
-		"expiresAt": meta.ExpiresAt,
 	})
 }
 

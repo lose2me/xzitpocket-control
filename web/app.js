@@ -308,7 +308,6 @@ import { template } from './template.js';
         { title: '分享码', key: 'code' },
         { title: '类型', key: 'type' },
         { title: '创建时间', key: 'created_at' },
-        { title: '过期时间', key: 'expires_at' },
         { title: '学号', key: 'student_id' },
         { title: '操作', key: 'actions', sortable: false },
       ];
