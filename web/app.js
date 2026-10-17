@@ -133,6 +133,37 @@ import { template } from './template.js';
     });
   }
 
+  // Fetch an authenticated attachment and save it through a blob, so the
+  // browser downloads instead of opening the PDF viewer.
+  async function downloadFile(path, filename) {
+    const headers = {};
+    const access = localStorage.getItem('control_admin');
+    if (access) headers.Authorization = 'Bearer ' + access;
+    const response = await fetch(path, { credentials: 'same-origin', headers });
+    if (!response.ok) {
+      let body = {};
+      try { body = await response.json(); } catch (_) {}
+      const error = new Error((body.error && body.error.message) || '下载失败');
+      error.status = response.status;
+      error.code = body.error && body.error.code;
+      throw error;
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename || 'download.pdf';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  }
+
+  const pdfFileName = (name) => {
+    const base = String(name || '资料').trim().replace(/[\\/:*?"<>|]+/g, '_') || '资料';
+    return /\.pdf$/i.test(base) ? base : base + '.pdf';
+  };
+
   const padDatePart = (value) => String(value).padStart(2, '0');
   const formatDateTime = (value) => {
     if (value === undefined || value === null || value === '') return '-';
@@ -274,6 +305,10 @@ import { template } from './template.js';
       const textbookDialog = ref(false);
       const textbookEditingId = ref('');
       const textbookForm = ref({ name: '', tags: '', courseCodes: [] });
+      const textbookSubmissions = ref([]);
+      const textbookSubmissionTotal = ref(0);
+      const resourceSubmissions = ref([]);
+      const resourceSubmissionTotal = ref(0);
       const resourceDialog = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
@@ -553,22 +588,33 @@ import { template } from './template.js';
         { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
       const textbookHeaders = [
-        { title: '教材名称', key: 'name', sortable: true, width: '30%' },
-        { title: '标签', key: 'tags', width: '28%' },
-        { title: '关联课程', key: 'course_code', sortable: true, width: '20%' },
-        { title: '更新时间', key: 'updated_at', width: '14%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
+        { title: '教材名称', key: 'name', sortable: true, width: '27%' },
+        { title: '标签', key: 'tags', width: '24%' },
+        { title: '关联课程', key: 'course_code', sortable: true, width: '17%' },
+        { title: '下载量', key: 'download_count', sortable: true, align: 'center', width: '10%' },
+        { title: '更新时间', key: 'updated_at', width: '12%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '10%' }
+      ];
+      const submissionHeaders = [
+        { title: '名称', key: 'name', width: '34%' },
+        { title: '关联课程', key: 'course_code', width: '14%' },
+        { title: '提交人', key: 'submitted_by_name', width: '15%' },
+        { title: '大小', key: 'size_bytes', align: 'center', width: '9%' },
+        { title: '提交时间', key: 'created_at', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '14%' }
       ];
       const resourceHeaders = [
-        { title: '课程编号', key: 'code', sortable: true, width: '22%' },
-        { title: '课程名称', key: 'name', sortable: true, width: '34%' },
-        { title: '试卷数', key: 'resource_count', align: 'center', width: '14%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
+        { title: '课程编号', key: 'code', sortable: true, width: '20%' },
+        { title: '课程名称', key: 'name', sortable: true, width: '30%' },
+        { title: '试卷数', key: 'resource_count', align: 'center', width: '12%' },
+        { title: '下载量', key: 'resource_downloads', sortable: true, align: 'center', width: '12%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '26%' }
       ];
       const courseResourceHeaders = [
-        { title: '文件名', key: 'name', width: '55%' },
-        { title: '上传时间', key: 'created_at', width: '25%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '20%' }
+        { title: '文件名', key: 'name', width: '45%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '12%' },
+        { title: '上传时间', key: 'created_at', width: '22%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
       ];
       const courseHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '20%' },
@@ -961,6 +1007,39 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/textbooks?limit=' + textbookItemsPerPage.value + '&offset=' + offset + query + sortQuery(textbookSortBy.value));
         textbooks.value = out.items || []; textbookTotal.value = out.total || 0;
       };
+      // ── App upload review queue ──
+      const submissionBase = (kind) => '/api/v1/admin/' + kind + '-submissions';
+      const loadTextbookSubmissions = async () => {
+        const out = await api(submissionBase('textbook') + '?limit=200');
+        textbookSubmissions.value = out.items || []; textbookSubmissionTotal.value = out.total || 0;
+      };
+      const loadResourceSubmissions = async () => {
+        const out = await api(submissionBase('resource') + '?limit=200');
+        resourceSubmissions.value = out.items || []; resourceSubmissionTotal.value = out.total || 0;
+      };
+      const downloadSubmission = (kind, row) => call(async () => {
+        const item = rawItem(row);
+        await downloadFile(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
+        notify('已开始下载');
+      });
+      const approveSubmission = (kind, row) => call(async () => {
+        const item = rawItem(row);
+        await api(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/approve', { method: 'POST' });
+        notify(kind === 'textbook' ? '已通过审核，教材已加入书单' : '已通过审核，试卷已加入课程');
+        if (kind === 'textbook') {
+          await Promise.all([loadTextbookSubmissions(), loadTextbooks()]);
+        } else {
+          await Promise.all([loadResourceSubmissions(), loadCourses()]);
+          if (resourceDialog.value && resourceCourse.value.code === item.course_code) await loadCourseResources();
+        }
+      });
+      const rejectSubmission = (kind, row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定驳回并删除“' + (item.name || '该资料') + '”吗？')) return;
+        await api(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/reject', { method: 'POST' });
+        notify('已驳回');
+        if (kind === 'textbook') await loadTextbookSubmissions(); else await loadResourceSubmissions();
+      });
       const sortTextbooks = (sortBy) => call(async () => { textbookSortBy.value = Array.isArray(sortBy) ? sortBy : []; textbookPage.value = 1; await loadTextbooks(); });
       const searchTextbooks = () => call(async () => { textbookPage.value = 1; await loadTextbooks(); });
       const openNewTextbook = () => call(async () => {
@@ -1000,11 +1079,11 @@ import { template } from './template.js';
         notify('教材已删除');
         await loadTextbooks();
       });
-      const copyResourceUrl = (row) => call(async () => {
+      const downloadTextbook = (row) => call(async () => {
         const item = rawItem(row);
-        const out = await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + '/resource-url?kind=pdf');
-        await navigator.clipboard.writeText(out.url);
-        notify('已复制临时 CDN 地址（' + (out.expires_at || '') + '）');
+        await downloadFile('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
+        notify('已开始下载');
+        await loadTextbooks();
       });
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
@@ -1059,11 +1138,12 @@ import { template } from './template.js';
         await loadCourseResources();
         await loadCourses();
       });
-      const copyResourceLink = (row) => call(async () => {
+      const downloadResource = (row) => call(async () => {
         const item = rawItem(row);
-        const out = await api('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/resource-url');
-        await navigator.clipboard.writeText(out.url);
-        notify('已复制临时 CDN 地址（' + (out.expires_at || '') + '）');
+        await downloadFile('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
+        notify('已开始下载');
+        await loadCourseResources();
+        await loadCourses();
       });
 
       // ── Textbook PDF + cover (rendered in the browser with pdf.js) ──
@@ -1388,8 +1468,8 @@ import { template } from './template.js';
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
-          else if (view.value === 'textbooks') await loadTextbooks();
-          else if (view.value === 'resources') await loadCourses();
+          else if (view.value === 'textbooks') await Promise.all([loadTextbookSubmissions(), loadTextbooks()]);
+          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
@@ -1722,7 +1802,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开题库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
@@ -1741,6 +1821,7 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
+        textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
@@ -1749,8 +1830,8 @@ import { template } from './template.js';
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
-        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
-        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, copyResourceLink, onTextbookDrop,
+        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook,
+        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, onTextbookDrop,
         loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
         admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey
       };
