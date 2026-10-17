@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
     name TEXT NOT NULL DEFAULT '',
     permissions TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
+    key_ciphertext TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL,
     disabled_at INTEGER

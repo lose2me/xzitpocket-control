@@ -40,7 +40,7 @@ var currentSchemaTables = []struct {
 	{name: "library_cdks", columns: []string{"id", "code_hash", "question_bank_id", "bound_student_id_hash", "bound_student_id_ciphertext", "bound_user_id", "status", "created_at", "used_at"}},
 	{name: "risk_events", columns: []string{"id", "type", "user_id", "device_id", "observed_count", "window_start", "window_end", "detail_json", "created_at", "acknowledged_at"}},
 	{name: "audit_logs", columns: []string{"id", "actor_id", "action", "target_type", "target_id", "detail_json", "created_at"}},
-	{name: "admin_users", columns: []string{"id", "name", "permissions", "password_hash", "created_at", "last_login_at", "disabled_at"}},
+	{name: "admin_users", columns: []string{"id", "name", "permissions", "password_hash", "key_ciphertext", "created_at", "last_login_at", "disabled_at"}},
 	{name: "admin_sessions", columns: []string{"id", "admin_id", "token_hash", "expires_at", "created_at", "last_used_at", "revoked_at"}},
 	{name: "app_release_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
 	{name: "app_release_test_config", columns: []string{"id", "latest_version", "download_url", "changelog", "updated_at"}},
@@ -114,6 +114,7 @@ var additiveMigrations = []struct {
 	{"admin_users", "name", `ALTER TABLE admin_users ADD COLUMN name TEXT NOT NULL DEFAULT ''`},
 	{"admin_users", "permissions", `ALTER TABLE admin_users ADD COLUMN permissions TEXT NOT NULL DEFAULT ''`},
 	{"question_banks", "course_code", `ALTER TABLE question_banks ADD COLUMN course_code TEXT NOT NULL DEFAULT ''`},
+	{"admin_users", "key_ciphertext", `ALTER TABLE admin_users ADD COLUMN key_ciphertext TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {

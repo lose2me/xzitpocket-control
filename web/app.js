@@ -426,10 +426,11 @@ import { template } from './template.js';
         { title: '读写', value: 'rw' }
       ];
       const adminHeaders = [
-        { title: '页面权限', key: 'permissions', sortable: false, width: '55%' },
-        { title: '创建时间', key: 'created_at', sortable: false, width: '15%' },
+        { title: '密钥', key: 'key', sortable: false, width: '25%' },
+        { title: '页面权限', key: 'permissions', sortable: false, width: '35%' },
+        { title: '创建时间', key: 'created_at', sortable: false, width: '13%' },
         { title: '最近登录', key: 'last_login_at', sortable: false, width: '15%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '12%' }
       ];
       watch(mdAndUp, (desktop) => { if (!desktop) drawer.value = false; }, { immediate: true });
 

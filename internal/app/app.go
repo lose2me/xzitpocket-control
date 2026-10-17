@@ -102,7 +102,7 @@ func (a *App) ensureAdmins(ctx context.Context) error {
 					return fmt.Errorf("rename admin %q: %w", account.Name, err)
 				}
 			}
-			if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, perms); err != nil {
+			if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, perms, ""); err != nil {
 				return fmt.Errorf("update admin %q: %w", account.Name, err)
 			}
 		case errors.Is(err, sql.ErrNoRows):

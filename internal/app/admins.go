@@ -22,6 +22,7 @@ var adminNamePattern = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 type AdminSummaryView struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Key         string `json:"key"`
 	Permissions string `json:"permissions"`
 	Super       bool   `json:"super"`
 	CreatedAt   string `json:"created_at"`
@@ -36,11 +37,33 @@ type AdminWriteInput struct {
 	Permissions string `json:"permissions"`
 }
 
-func adminSummary(item sqlite.Admin) AdminSummaryView {
+func (a *App) adminSummary(item sqlite.Admin) AdminSummaryView {
 	return AdminSummaryView{
-		ID: item.ID, Name: item.Name, Permissions: item.Permissions, Super: item.IsSuperAdmin(),
+		ID: item.ID, Name: item.Name, Key: a.adminKey(item), Permissions: item.Permissions, Super: item.IsSuperAdmin(),
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), LastLoginAt: item.LastLoginAt.Format(time.RFC3339),
 	}
+}
+
+// adminKey returns the plaintext key for the super-admin-only account list.
+// .env accounts are read from config so the value always matches the running
+// configuration; console-created accounts are decrypted from the stored copy.
+func (a *App) adminKey(item sqlite.Admin) string {
+	for _, account := range a.Cfg.Admins {
+		if account.Name == item.Name {
+			return account.Key
+		}
+	}
+	if item.Name == superAdminName {
+		return strings.TrimSpace(a.Cfg.AdminKey)
+	}
+	if item.KeyCiphertext == "" {
+		return ""
+	}
+	key, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.KeyCiphertext)
+	if err != nil {
+		return ""
+	}
+	return key
 }
 
 func (a *App) ListAdminsForAdmin(ctx context.Context) ([]AdminSummaryView, error) {
@@ -50,7 +73,7 @@ func (a *App) ListAdminsForAdmin(ctx context.Context) ([]AdminSummaryView, error
 	}
 	views := make([]AdminSummaryView, 0, len(items))
 	for _, item := range items {
-		views = append(views, adminSummary(item))
+		views = append(views, a.adminSummary(item))
 	}
 	return views, nil
 }
@@ -90,6 +113,10 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	if err != nil {
 		return AdminSummaryView{}, err
 	}
+	ciphertext, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, key)
+	if err != nil {
+		return AdminSummaryView{}, err
+	}
 	id, err := controlcrypto.NewID("adm")
 	if err != nil {
 		return AdminSummaryView{}, err
@@ -100,13 +127,13 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	now := time.Now().UTC()
 	item := sqlite.Admin{
 		ID: id, Name: name, Permissions: adminPermsString(config.AdminAccount{Perms: perms}),
-		PasswordHash: hash, CreatedAt: now, LastLoginAt: now,
+		PasswordHash: hash, KeyCiphertext: ciphertext, CreatedAt: now, LastLoginAt: now,
 	}
 	if err := a.Store.CreateAdmin(ctx, item); err != nil {
 		return AdminSummaryView{}, err
 	}
 	_ = a.Store.AddAudit(ctx, actor, "admin_create", "admin", id, "{}", now)
-	return adminSummary(item), nil
+	return a.adminSummary(item), nil
 }
 
 func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteInput, actor string) (AdminSummaryView, error) {
@@ -128,6 +155,7 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 		return AdminSummaryView{}, Err("invalid_admin_permissions", "不能授予通配权限", http.StatusBadRequest)
 	}
 	hash := item.PasswordHash
+	ciphertext := ""
 	if key := strings.TrimSpace(in.Key); key != "" {
 		if len(key) < 8 || len(key) > 128 {
 			return AdminSummaryView{}, Err("invalid_admin_key", "管理密钥长度需为 8-128", http.StatusBadRequest)
@@ -136,9 +164,13 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 		if err != nil {
 			return AdminSummaryView{}, err
 		}
+		ciphertext, err = controlcrypto.Encrypt(a.Cfg.EncryptionKey, key)
+		if err != nil {
+			return AdminSummaryView{}, err
+		}
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateAdminAuth(ctx, item.ID, hash, adminPermsString(config.AdminAccount{Perms: perms})); err != nil {
+	if err := a.Store.UpdateAdminAuth(ctx, item.ID, hash, adminPermsString(config.AdminAccount{Perms: perms}), ciphertext); err != nil {
 		return AdminSummaryView{}, err
 	}
 	_ = a.Store.AddAudit(ctx, actor, "admin_update", "admin", item.ID, "{}", now)
@@ -146,7 +178,7 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 	if err != nil {
 		return AdminSummaryView{}, err
 	}
-	return adminSummary(updated), nil
+	return a.adminSummary(updated), nil
 }
 
 func (a *App) DeleteAdminForAdmin(ctx context.Context, id, actor string) error {

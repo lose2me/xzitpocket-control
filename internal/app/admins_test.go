@@ -45,6 +45,25 @@ func TestAdminManagement(t *testing.T) {
 	if _, _, err := a.AdminLogin(ctx, "nameless-key"); err != nil {
 		t.Fatalf("nameless admin should log in: %v", err)
 	}
+	listed, err := a.ListAdminsForAdmin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listed {
+		if item.ID == nameless.ID && item.Key != "nameless-key" {
+			t.Fatalf("nameless admin key = %q, want nameless-key", item.Key)
+		}
+		if item.Super && item.Key != "super-key" {
+			t.Fatalf("super admin key = %q, want super-key", item.Key)
+		}
+	}
+	rotated, err := a.UpdateAdminForAdmin(ctx, nameless.ID, AdminWriteInput{Key: "rotated-key-9", Permissions: "audit=r"}, "admin")
+	if err != nil || rotated.Key != "rotated-key-9" {
+		t.Fatalf("rotated admin = %#v, err = %v", rotated, err)
+	}
+	if _, _, err := a.AdminLogin(ctx, "rotated-key-9"); err != nil {
+		t.Fatalf("rotated key should log in: %v", err)
+	}
 	if _, err := a.CreateAdminForAdmin(ctx, AdminWriteInput{Name: "bad", Key: "bad-key-123", Permissions: "*"}, "admin"); err == nil {
 		t.Fatal("wildcard admin should be rejected")
 	}

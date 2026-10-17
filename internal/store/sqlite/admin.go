@@ -10,16 +10,17 @@ import (
 )
 
 type Admin struct {
-	ID           string
-	Name         string
-	Permissions  string
-	PasswordHash string
-	CreatedAt    time.Time
-	LastLoginAt  time.Time
-	DisabledAt   *time.Time
+	ID            string
+	Name          string
+	Permissions   string
+	PasswordHash  string
+	KeyCiphertext string
+	CreatedAt     time.Time
+	LastLoginAt   time.Time
+	DisabledAt    *time.Time
 }
 
-const adminColumns = "id, name, permissions, password_hash, created_at, last_login_at, disabled_at"
+const adminColumns = "id, name, permissions, password_hash, key_ciphertext, created_at, last_login_at, disabled_at"
 
 // IsSuperAdmin reports whether the admin has the wildcard permission.
 func (a Admin) IsSuperAdmin() bool {
@@ -95,10 +96,15 @@ func (s *Store) GetAdminByName(ctx context.Context, name string) (Admin, error) 
 	return scanAdmin(row)
 }
 
-func (s *Store) UpdateAdminAuth(ctx context.Context, id, passwordHash, permissions string) error {
+// UpdateAdminAuth replaces the key hash and permissions. An empty
+// keyCiphertext keeps the stored value, so config-managed accounts do not erase
+// the recoverable copy written when the key was last set in the console.
+func (s *Store) UpdateAdminAuth(ctx context.Context, id, passwordHash, permissions, keyCiphertext string) error {
 	_, err := s.DB.ExecContext(ctx,
-		"UPDATE admin_users SET password_hash = ?, permissions = ?, disabled_at = NULL WHERE id = ?",
-		passwordHash, permissions, id)
+		`UPDATE admin_users SET password_hash = ?, permissions = ?,
+			key_ciphertext = CASE WHEN ? = '' THEN key_ciphertext ELSE ? END,
+			disabled_at = NULL WHERE id = ?`,
+		passwordHash, permissions, keyCiphertext, keyCiphertext, id)
 	return err
 }
 
@@ -148,8 +154,8 @@ func (s *Store) CountAdmins(ctx context.Context) (int, error) {
 
 func (s *Store) CreateAdmin(ctx context.Context, admin Admin) error {
 	_, err := s.DB.ExecContext(ctx,
-		"INSERT INTO admin_users(id, name, permissions, password_hash, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)",
-		admin.ID, admin.Name, admin.Permissions, admin.PasswordHash, millis(admin.CreatedAt), millis(admin.LastLoginAt))
+		"INSERT INTO admin_users(id, name, permissions, password_hash, key_ciphertext, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		admin.ID, admin.Name, admin.Permissions, admin.PasswordHash, admin.KeyCiphertext, millis(admin.CreatedAt), millis(admin.LastLoginAt))
 	return err
 }
 
@@ -266,7 +272,7 @@ func scanAdmin(row rowScannerUser) (Admin, error) {
 	var admin Admin
 	var created, lastLogin int64
 	var disabled sql.NullInt64
-	if err := row.Scan(&admin.ID, &admin.Name, &admin.Permissions, &admin.PasswordHash, &created, &lastLogin, &disabled); err != nil {
+	if err := row.Scan(&admin.ID, &admin.Name, &admin.Permissions, &admin.PasswordHash, &admin.KeyCiphertext, &created, &lastLogin, &disabled); err != nil {
 		return Admin{}, err
 	}
 	admin.CreatedAt = fromMillis(created)
