@@ -65,7 +65,7 @@ func TestOpenDownloadsCountsAndNames(t *testing.T) {
 	}
 
 	courses, total, err := a.ListCoursesForAdmin(ctx, 50, 0, "", "", "")
-	if err != nil || total != 1 || len(courses) != 1 || courses[0].ResourceDownloads != 1 {
+	if err != nil || total != 1 || len(courses) != 1 || courses[0].ResourceCount != 1 {
 		t.Fatalf("courses = %#v, total = %d, err = %v", courses, total, err)
 	}
 }

@@ -604,11 +604,10 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '14%' }
       ];
       const resourceHeaders = [
-        { title: '课程编号', key: 'code', sortable: true, width: '20%' },
-        { title: '课程名称', key: 'name', sortable: true, width: '30%' },
-        { title: '试卷数', key: 'resource_count', align: 'center', width: '12%' },
-        { title: '下载量', key: 'resource_downloads', sortable: true, align: 'center', width: '12%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '26%' }
+        { title: '课程编号', key: 'code', sortable: true, width: '22%' },
+        { title: '课程名称', key: 'name', sortable: true, width: '34%' },
+        { title: '试卷数', key: 'resource_count', align: 'center', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
       ];
       const courseResourceHeaders = [
         { title: '文件名', key: 'name', width: '45%' },
@@ -1143,7 +1142,6 @@ import { template } from './template.js';
         await downloadFile('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
         notify('已开始下载');
         await loadCourseResources();
-        await loadCourses();
       });
 
       // ── Textbook PDF + cover (rendered in the browser with pdf.js) ──

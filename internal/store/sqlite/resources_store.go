@@ -196,36 +196,6 @@ func scanResource(row rowScannerResource) (Resource, error) {
 	return item, nil
 }
 
-// SumResourceDownloadsByCourse returns the total download count for each of
-// the given course codes. Codes without downloads are omitted.
-func (s *Store) SumResourceDownloadsByCourse(ctx context.Context, codes []string) (map[string]int64, error) {
-	sums := make(map[string]int64, len(codes))
-	if len(codes) == 0 {
-		return sums, nil
-	}
-	placeholders := make([]string, 0, len(codes))
-	args := make([]any, 0, len(codes))
-	for _, code := range codes {
-		placeholders = append(placeholders, "?")
-		args = append(args, code)
-	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT course_code, COALESCE(SUM(download_count), 0) FROM resources WHERE course_code IN ("+
-		strings.Join(placeholders, ",")+") GROUP BY course_code", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var code string
-		var count int64
-		if err := rows.Scan(&code, &count); err != nil {
-			return nil, err
-		}
-		sums[code] = count
-	}
-	return sums, rows.Err()
-}
-
 // IncrementResourceDownloads counts one PDF download without touching the
 // content's updated_at time.
 func (s *Store) IncrementResourceDownloads(ctx context.Context, id string) error {
