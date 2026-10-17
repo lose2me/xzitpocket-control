@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,12 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 	adminweb "xzitpocket-control/web"
 )
+
+func init() {
+	// Serve ES module workers (pdf.js) with the JavaScript MIME type so browsers
+	// execute them instead of downloading them.
+	_ = mime.AddExtensionType(".mjs", "text/javascript; charset=utf-8")
+}
 
 func staticAssets(cfg config.Config, logger *slog.Logger) fs.FS {
 	if cfg.WebDir != "" {

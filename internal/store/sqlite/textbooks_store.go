@@ -19,6 +19,8 @@ type Textbook struct {
 	Name       string    `json:"name"`
 	Tags       string    `json:"tags"`
 	CourseCode string    `json:"course_code"`
+	PdfKey     string    `json:"pdf_key"`
+	CoverKey   string    `json:"cover_key"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -29,7 +31,7 @@ type TextbookInput struct {
 	CourseCode string
 }
 
-const textbookColumns = "id, name, tags, course_code, created_at, updated_at"
+const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at"
 
 // UploadTextbooks inserts every unseen textbook. Existing rows are never
 // modified, so a stored course association survives later uploads.
@@ -47,8 +49,8 @@ func (s *Store) UploadTextbooks(ctx context.Context, inputs []TextbookInput, now
 		if strings.TrimSpace(input.Name) == "" {
 			continue
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`,
+		result, err := tx.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, '', '', ?, ?)`,
 			newStoreIDPrefix("tbx"), input.Name, input.Tags, input.CourseCode, millis(now), millis(now))
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -171,8 +173,8 @@ func (s *Store) GetTextbook(ctx context.Context, id string) (Textbook, error) {
 
 func (s *Store) CreateTextbook(ctx context.Context, input TextbookInput, now time.Time) (Textbook, error) {
 	id := newStoreIDPrefix("tbx")
-	result, err := s.DB.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+	result, err := s.DB.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, '', '', ?, ?)`,
 		id, input.Name, input.Tags, input.CourseCode, millis(now), millis(now))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -227,10 +229,38 @@ type rowScannerTextbook interface {
 func scanTextbook(row rowScannerTextbook) (Textbook, error) {
 	var item Textbook
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &created, &updated); err != nil {
 		return Textbook{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
 	return item, nil
+}
+
+// SetTextbookPdfKey records the COS key of the textbook's PDF.
+func (s *Store) SetTextbookPdfKey(ctx context.Context, id, key string, now time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET pdf_key = ?, updated_at = ? WHERE id = ?`, key, millis(now), id)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetTextbookCoverKey records the COS key of the textbook's WebP cover.
+func (s *Store) SetTextbookCoverKey(ctx context.Context, id, key string, now time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET cover_key = ?, updated_at = ? WHERE id = ?`, key, millis(now), id)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

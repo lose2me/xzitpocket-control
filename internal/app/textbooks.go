@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"xzitpocket-control/internal/cloud"
 	"xzitpocket-control/internal/store/sqlite"
 )
 
@@ -25,15 +28,33 @@ type TextbookView struct {
 	Name       string `json:"name"`
 	Tags       string `json:"tags"`
 	CourseCode string `json:"course_code"`
+	HasPdf     bool   `json:"has_pdf"`
+	HasCover   bool   `json:"has_cover"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 }
 
+// TextbookResourceView is a temporary, signed CDN URL for a textbook asset.
+type TextbookResourceView struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+const (
+	maxTextbookPdfBytes   = 80 << 20
+	maxTextbookCoverBytes = 2 << 20
+)
+
 func textbookView(item sqlite.Textbook) TextbookView {
 	return TextbookView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
+		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "",
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
+}
+
+func (a *App) cosClient() *cloud.COSClient {
+	return cloud.NewCOSClient(a.Cfg.COSSecretID, a.Cfg.COSSecretKey, a.Cfg.COSBucket, a.Cfg.COSRegion)
 }
 
 func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, search, sort, order string) ([]TextbookView, int, error) {
@@ -124,4 +145,113 @@ func (a *App) DeleteTextbookForAdmin(ctx context.Context, id, actor string) erro
 		return err
 	}
 	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", id, "{}", time.Now().UTC())
+}
+
+func (a *App) requireTextbook(ctx context.Context, id string) (sqlite.Textbook, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return sqlite.Textbook{}, Err("invalid_textbook_id", "教材标识无效", 400)
+	}
+	item, err := a.Store.GetTextbook(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sqlite.Textbook{}, ErrNotFound
+		}
+		return sqlite.Textbook{}, err
+	}
+	return item, nil
+}
+
+func (a *App) requireStorage() (*cloud.COSClient, error) {
+	client := a.cosClient()
+	if !client.Configured() {
+		return nil, Err("storage_unavailable", "对象存储未配置", 503)
+	}
+	return client, nil
+}
+
+// UploadTextbookPdf stores a textbook's PDF in object storage.
+func (a *App) UploadTextbookPdf(ctx context.Context, id string, data []byte, actor string) (TextbookView, error) {
+	item, err := a.requireTextbook(ctx, id)
+	if err != nil {
+		return TextbookView{}, err
+	}
+	if len(data) == 0 || len(data) > maxTextbookPdfBytes || !bytes.HasPrefix(data, []byte("%PDF")) {
+		return TextbookView{}, Err("invalid_pdf", "PDF 内容无效", 400)
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		return TextbookView{}, err
+	}
+	key := fmt.Sprintf("books/%s/original.pdf", item.ID)
+	if err := client.PutObject(ctx, key, "application/pdf", data); err != nil {
+		a.Logger.Error("upload textbook pdf failed", "error", err, "textbook", item.ID)
+		return TextbookView{}, Err("storage_error", "上传 PDF 失败", 502)
+	}
+	now := time.Now().UTC()
+	if err := a.Store.SetTextbookPdfKey(ctx, item.ID, key, now); err != nil {
+		return TextbookView{}, err
+	}
+	item.PdfKey = key
+	_ = a.Store.AddAudit(ctx, actor, "textbook_pdf", "textbook", item.ID, "{}", now)
+	return textbookView(item), nil
+}
+
+// UploadTextbookCover stores a browser-rendered WebP cover in object storage.
+func (a *App) UploadTextbookCover(ctx context.Context, id string, data []byte, actor string) (TextbookView, error) {
+	item, err := a.requireTextbook(ctx, id)
+	if err != nil {
+		return TextbookView{}, err
+	}
+	if len(data) == 0 || len(data) > maxTextbookCoverBytes {
+		return TextbookView{}, Err("invalid_cover", "封面内容无效", 400)
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		return TextbookView{}, err
+	}
+	key := fmt.Sprintf("books/%s/cover.webp", item.ID)
+	if err := client.PutObject(ctx, key, "image/webp", data); err != nil {
+		a.Logger.Error("upload textbook cover failed", "error", err, "textbook", item.ID)
+		return TextbookView{}, Err("storage_error", "上传封面失败", 502)
+	}
+	now := time.Now().UTC()
+	if err := a.Store.SetTextbookCoverKey(ctx, item.ID, key, now); err != nil {
+		return TextbookView{}, err
+	}
+	item.CoverKey = key
+	_ = a.Store.AddAudit(ctx, actor, "textbook_cover", "textbook", item.ID, "{}", now)
+	return textbookView(item), nil
+}
+
+// TextbookResourceURL returns a temporary signed CDN URL for a textbook asset.
+// kind is "pdf" or "cover".
+func (a *App) TextbookResourceURL(ctx context.Context, id, kind string, ttl time.Duration) (TextbookResourceView, error) {
+	item, err := a.requireTextbook(ctx, id)
+	if err != nil {
+		return TextbookResourceView{}, err
+	}
+	var key string
+	switch strings.TrimSpace(kind) {
+	case "", "pdf":
+		key = item.PdfKey
+	case "cover":
+		key = item.CoverKey
+	default:
+		return TextbookResourceView{}, Err("invalid_kind", "资源类型无效", 400)
+	}
+	if key == "" {
+		return TextbookResourceView{}, Err("resource_missing", "该教材没有对应资源", 404)
+	}
+	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
+		return TextbookResourceView{}, Err("cdn_unavailable", "CDN 未配置", 503)
+	}
+	if ttl <= 0 || ttl > 7*24*time.Hour {
+		ttl = a.Cfg.CDNURLTTL
+	}
+	url := cloud.CDNSignedURL(a.Cfg.CDNDomain, a.Cfg.CDNAuthKey, "/"+key, ttl)
+	return TextbookResourceView{
+		URL:       url,
+		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),
+	}, nil
 }

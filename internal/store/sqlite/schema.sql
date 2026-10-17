@@ -279,6 +279,8 @@ CREATE TABLE IF NOT EXISTS textbooks (
     name TEXT NOT NULL,
     tags TEXT NOT NULL DEFAULT '',
     course_code TEXT NOT NULL DEFAULT '',
+    pdf_key TEXT NOT NULL DEFAULT '',
+    cover_key TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(name, tags, course_code)

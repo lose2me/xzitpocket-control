@@ -29,6 +29,15 @@ type Config struct {
 	RiskLoginWindow      time.Duration
 	RiskLoginCount       int
 	RiskDeviceCount      int
+
+	// Object storage + CDN used for textbook PDFs and their covers.
+	COSRegion    string
+	COSBucket    string
+	COSSecretID  string
+	COSSecretKey string
+	CDNDomain    string
+	CDNAuthKey   string
+	CDNURLTTL    time.Duration
 }
 
 func Load() (Config, error) {
@@ -62,6 +71,13 @@ func Load() (Config, error) {
 		RiskLoginWindow:      durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
 		RiskLoginCount:       intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
 		RiskDeviceCount:      intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
+		COSRegion:            configValue(values, "CONTROL_COS_REGION", ""),
+		COSBucket:            configValue(values, "CONTROL_COS_BUCKET", ""),
+		COSSecretID:          configValue(values, "CONTROL_COS_SECRET_ID", ""),
+		COSSecretKey:         configValue(values, "CONTROL_COS_SECRET_KEY", ""),
+		CDNDomain:            strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
+		CDNAuthKey:           configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
+		CDNURLTTL:            durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
 	}
 	if cfg.EventRetentionDays < 1 {
 		cfg.EventRetentionDays = 90

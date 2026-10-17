@@ -47,7 +47,7 @@ var currentSchemaTables = []struct {
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
-	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "created_at", "updated_at"}},
+	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -108,6 +108,8 @@ var additiveMigrations = []struct {
 	{"app_release_config", "changelog", `ALTER TABLE app_release_config ADD COLUMN changelog TEXT NOT NULL DEFAULT ''`},
 	{"school_calendar_config", "slots_json", `ALTER TABLE school_calendar_config ADD COLUMN slots_json TEXT NOT NULL DEFAULT '[]'`},
 	{"users", "major_name", `ALTER TABLE users ADD COLUMN major_name TEXT NOT NULL DEFAULT ''`},
+	{"textbooks", "pdf_key", `ALTER TABLE textbooks ADD COLUMN pdf_key TEXT NOT NULL DEFAULT ''`},
+	{"textbooks", "cover_key", `ALTER TABLE textbooks ADD COLUMN cover_key TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {

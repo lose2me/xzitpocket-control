@@ -261,6 +261,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookUpdate(w, r, segment(path, 2))
 	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "textbooks"):
 		s.adminTextbookDelete(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "pdf", "admin", "textbooks"):
+		s.adminTextbookUploadPdf(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "cover", "admin", "textbooks"):
+		s.adminTextbookUploadCover(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "textbooks"):
+		s.adminTextbookResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/courses":
 		s.adminCourses(w, r)
 	case r.Method == http.MethodPost && path == "/admin/courses":

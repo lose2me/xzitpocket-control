@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	"xzitpocket-control/internal/app"
 )
@@ -69,4 +72,68 @@ func (s *Server) adminTextbookDelete(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (s *Server) adminTextbookUploadPdf(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, r, app.Err("invalid_upload", "上传内容无效", http.StatusBadRequest))
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, r, app.Err("invalid_upload", "缺少 PDF 文件", http.StatusBadRequest))
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, (80<<20)+1))
+	if err != nil {
+		writeError(w, r, app.Err("invalid_upload", "读取文件失败", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.UploadTextbookPdf(r.Context(), id, data, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminTextbookUploadCover(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+	if err != nil {
+		writeError(w, r, app.Err("invalid_upload", "读取封面失败", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.UploadTextbookCover(r.Context(), id, data, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminTextbookResourceURL(w http.ResponseWriter, r *http.Request, id string) {
+	if _, ok := s.authAdmin(w, r); !ok {
+		return
+	}
+	ttl := time.Duration(0)
+	if raw := r.URL.Query().Get("ttl"); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil {
+			ttl = time.Duration(seconds) * time.Second
+		}
+	}
+	out, err := s.App.TextbookResourceURL(r.Context(), id, r.URL.Query().Get("kind"), ttl)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
