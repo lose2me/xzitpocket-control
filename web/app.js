@@ -744,6 +744,7 @@ import { template } from './template.js';
         series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
         await nextTick(); drawChart();
         loadCDNStats();
+        if (cdnTab.value === '__host__') loadHostStats();
       };
       const loadBanks = async () => {
         const offset = (bankPage.value - 1) * bankItemsPerPage.value;
