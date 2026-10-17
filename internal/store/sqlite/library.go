@@ -11,7 +11,6 @@ import (
 )
 
 var questionBankListSorts = map[string]string{
-	"orderId":        "b.order_id",
 	"id":             "b.id",
 	"name":           "b.name",
 	"question_count": "COUNT(q.id)",
@@ -24,7 +23,7 @@ var questionBankListSorts = map[string]string{
 func questionBankOrderBy(sort, order string) string {
 	column, ok := questionBankListSorts[strings.TrimSpace(sort)]
 	if !ok {
-		return "b.order_id ASC, b.id"
+		return "b.name ASC, b.id"
 	}
 	direction := "ASC"
 	if strings.EqualFold(strings.TrimSpace(order), "desc") {
@@ -43,7 +42,7 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		offset = 0
 	}
 	args := []any{}
-	query := `SELECT b.id, b.order_id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
+	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id`
 	if status != "" {
 		query += " WHERE b.status = ?"
@@ -59,12 +58,11 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 	result := make([]QuestionBankSummary, 0)
 	for rows.Next() {
 		var item QuestionBankSummary
-		var orderID, requiresCDK int
+		var requiresCDK int
 		var created, updated int64
-		if err := rows.Scan(&item.ID, &orderID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
 			return nil, err
 		}
-		item.OrderID = orderID
 		item.RequiresCDK = requiresCDK != 0
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
 		result = append(result, item)
@@ -105,10 +103,10 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	if offset < 0 {
 		offset = 0
 	}
-	query := `SELECT b.id, b.order_id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
+	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id
 		WHERE b.status = 'active'
-		GROUP BY b.id ORDER BY b.order_id ASC, b.id LIMIT ? OFFSET ?`
+		GROUP BY b.id ORDER BY b.name ASC, b.id LIMIT ? OFFSET ?`
 	rows, err := s.DB.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -117,12 +115,11 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	items := make([]QuestionBankSummary, 0)
 	for rows.Next() {
 		var item QuestionBankSummary
-		var orderID, requiresCDK int
+		var requiresCDK int
 		var created, updated int64
-		if err := rows.Scan(&item.ID, &orderID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
 			return nil, 0, err
 		}
-		item.OrderID = orderID
 		item.RequiresCDK = requiresCDK != 0
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
 		items = append(items, item)
@@ -181,14 +178,13 @@ type questionBankQuerier interface {
 
 func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string) (QuestionBank, error) {
 	row := queryer.QueryRowContext(ctx,
-		"SELECT id, order_id, name, status, requires_cdk, course_code, created_at, updated_at FROM question_banks WHERE id = ?", id)
+		"SELECT id, name, status, requires_cdk, course_code, created_at, updated_at FROM question_banks WHERE id = ?", id)
 	var bank QuestionBank
-	var orderID, requiresCDK int
+	var requiresCDK int
 	var created, updated int64
-	if err := row.Scan(&bank.ID, &orderID, &bank.Name, &bank.Status, &requiresCDK, &bank.CourseCode, &created, &updated); err != nil {
+	if err := row.Scan(&bank.ID, &bank.Name, &bank.Status, &requiresCDK, &bank.CourseCode, &created, &updated); err != nil {
 		return QuestionBank{}, err
 	}
-	bank.OrderID = orderID
 	bank.RequiresCDK = requiresCDK != 0
 	bank.CreatedAt, bank.UpdatedAt = fromMillis(created), fromMillis(updated)
 	bank.Questions = make([]Question, 0)
@@ -248,18 +244,8 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if bank.OrderID <= 0 {
-		bank.OrderID, err = reserveQuestionBankOrderTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-	} else if err := ensureQuestionBankOrderAvailableTx(ctx, tx, bank.OrderID, ""); err != nil {
-		return err
-	} else if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, course_code, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 		return err
 	}
 	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
@@ -305,18 +291,8 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 			return QuestionBank{}, err
 		}
 		bank.ID = candidate
-		if bank.OrderID <= 0 {
-			bank.OrderID, err = reserveQuestionBankOrderTx(ctx, tx)
-			if err != nil {
-				return QuestionBank{}, err
-			}
-		} else if err := ensureQuestionBankOrderAvailableTx(ctx, tx, bank.OrderID, ""); err != nil {
-			return QuestionBank{}, err
-		} else if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
-			return QuestionBank{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, course_code, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 			return QuestionBank{}, err
 		}
 		if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
@@ -347,19 +323,8 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	} else if millis(bank.UpdatedAt) <= millis(existing.UpdatedAt) {
 		bank.UpdatedAt = existing.UpdatedAt.Add(time.Millisecond)
 	}
-	if bank.OrderID <= 0 {
-		if err := tx.QueryRowContext(ctx, "SELECT order_id FROM question_banks WHERE id = ?", bank.ID).Scan(&bank.OrderID); err != nil {
-			return err
-		}
-	}
-	if err := ensureQuestionBankOrderAvailableTx(ctx, tx, bank.OrderID, bank.ID); err != nil {
-		return err
-	}
-	if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE question_banks SET order_id = ?, name = ?, status = ?, requires_cdk = ?, course_code = ?, updated_at = ? WHERE id = ?`,
-		bank.OrderID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.UpdatedAt), bank.ID)
+	result, err := tx.ExecContext(ctx, `UPDATE question_banks SET name = ?, status = ?, requires_cdk = ?, course_code = ?, updated_at = ? WHERE id = ?`,
+		bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.UpdatedAt), bank.ID)
 	if err != nil {
 		return err
 	}
@@ -389,7 +354,7 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 }
 
 func sameQuestionBankContent(a, b QuestionBank) bool {
-	if a.OrderID != b.OrderID || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || a.CourseCode != b.CourseCode || !equalStringSlices(a.CourseCodes, b.CourseCodes) || len(a.Questions) != len(b.Questions) {
+	if a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || a.CourseCode != b.CourseCode || !equalStringSlices(a.CourseCodes, b.CourseCodes) || len(a.Questions) != len(b.Questions) {
 		return false
 	}
 	for i := range a.Questions {
@@ -497,71 +462,6 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// ErrQuestionBankOrderTaken is returned when an administrator attempts to
-// assign an order already used by another question bank.
-var ErrQuestionBankOrderTaken = errors.New("question bank order already used")
-
-// reserveQuestionBankOrderTx allocates the next monotonic order value. The
-// counter and the bank insert share one transaction, so a successful write
-// always leaves automatic allocation ahead of the assigned value.
-func reserveQuestionBankOrderTx(ctx context.Context, tx *sql.Tx) (int, error) {
-	var next int64
-	if err := tx.QueryRowContext(ctx, "SELECT next_number FROM question_bank_order_counter WHERE id = 1").Scan(&next); err != nil {
-		return 0, err
-	}
-	if next < 1 || next >= math.MaxInt64 {
-		return 0, errors.New("question bank order counter exhausted")
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE question_bank_order_counter SET next_number = ? WHERE id = 1", next+1); err != nil {
-		return 0, err
-	}
-	return int(next), nil
-}
-
-// ensureQuestionBankOrderAvailableTx checks uniqueness inside the same
-// transaction used for the bank write. excludeID is used while editing the
-// bank that already owns the requested order.
-func ensureQuestionBankOrderAvailableTx(ctx context.Context, tx *sql.Tx, orderID int, excludeID string) error {
-	if orderID <= 0 {
-		return errors.New("question bank order must be positive")
-	}
-	var exists int
-	query := "SELECT 1 FROM question_banks WHERE order_id = ?"
-	args := []any{orderID}
-	if excludeID != "" {
-		query += " AND id <> ?"
-		args = append(args, excludeID)
-	}
-	err := tx.QueryRowContext(ctx, query+" LIMIT 1", args...).Scan(&exists)
-	if err == nil {
-		return ErrQuestionBankOrderTaken
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	return err
-}
-
-// advanceQuestionBankOrderCounterTx keeps automatic allocation ahead of any
-// manually assigned order. It is intentionally idempotent for lower values.
-func advanceQuestionBankOrderCounterTx(ctx context.Context, tx *sql.Tx, orderID int) error {
-	if orderID <= 0 {
-		return errors.New("question bank order must be positive")
-	}
-	var next int64
-	if err := tx.QueryRowContext(ctx, "SELECT next_number FROM question_bank_order_counter WHERE id = 1").Scan(&next); err != nil {
-		return err
-	}
-	if int64(orderID) < next {
-		return nil
-	}
-	if int64(orderID) >= math.MaxInt64 {
-		return errors.New("question bank order counter exhausted")
-	}
-	_, err := tx.ExecContext(ctx, "UPDATE question_bank_order_counter SET next_number = ? WHERE id = 1", int64(orderID)+1)
-	return err
 }
 
 func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, now time.Time) error {

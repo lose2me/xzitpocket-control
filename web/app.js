@@ -540,7 +540,7 @@ import { template } from './template.js';
         { title: '最近活动', key: 'last_seen_at', width: '30%' }
       ];
       const bankHeaders = [
-        { title: '顺序 ID', key: 'orderId', align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', width: '13%' }, { title: '名称', key: 'name', width: '15%' },
+        { title: '题库 ID', key: 'id', width: '15%' }, { title: '名称', key: 'name', width: '20%' },
         { title: '关联课程', key: 'courseCode', sortable: true, width: '12%' },
         { title: '题目数', key: 'question_count', align: 'center', width: '8%' }, { title: '状态', key: 'status', width: '8%' },
         { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '9%' }, { title: '更新时间', key: 'updated_at', width: '8%' },
@@ -1493,7 +1493,6 @@ import { template } from './template.js';
         bankJSON.value = JSON.stringify({
           questionBank: {
             id: out.questionBank.id,
-            orderId: out.questionBank.orderId,
             name: out.questionBank.name,
             status: out.status || 'active',
             requiresCDK: !!out.questionBank.requiresCDK,

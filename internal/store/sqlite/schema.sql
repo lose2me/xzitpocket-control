@@ -101,7 +101,6 @@ CREATE TABLE IF NOT EXISTS error_report_ignored_students (
 
 CREATE TABLE IF NOT EXISTS question_banks (
     id TEXT PRIMARY KEY,
-    order_id INTEGER NOT NULL UNIQUE CHECK (order_id > 0),
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
     requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
@@ -127,12 +126,6 @@ CREATE TABLE IF NOT EXISTS question_bank_id_counter (
 
 INSERT OR IGNORE INTO question_bank_id_counter(id, next_number) VALUES (1, 1);
 
-CREATE TABLE IF NOT EXISTS question_bank_order_counter (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    next_number INTEGER NOT NULL CHECK (next_number > 0)
-);
-
-INSERT OR IGNORE INTO question_bank_order_counter(id, next_number) VALUES (1, 1);
 
 CREATE TABLE IF NOT EXISTS questions (
     id TEXT PRIMARY KEY,
@@ -269,7 +262,6 @@ CREATE INDEX IF NOT EXISTS idx_error_reports_user_time ON error_reports(user_id,
 CREATE INDEX IF NOT EXISTS idx_sessions_user_device ON sessions(user_id, device_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_risk_time_type ON risk_events(created_at, type);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_question_banks_order ON question_banks(order_id, id);
 CREATE INDEX IF NOT EXISTS idx_questions_bank_order ON questions(bank_id, question_number, sort_order);
 CREATE INDEX IF NOT EXISTS idx_question_options_question_order ON question_options(question_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bank_status ON library_cdks(question_bank_id, status);

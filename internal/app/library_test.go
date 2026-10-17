@@ -26,14 +26,14 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", OrderID: 4, Name: "基础测验", CourseCodes: []string{"3007B0001", " 3007B2106 "}, Questions: []QuestionInput{
+	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", Name: "基础测验", CourseCodes: []string{"3007B0001", " 3007B2106 "}, Questions: []QuestionInput{
 		{QuestionNumber: 2, Type: "多选题", Title: "第二题", QuestionText: "选择系统", Options: []OptionInput{{Label: "A", Text: "Windows"}, {Label: "B", Text: "Linux"}}, CorrectAnswer: "B,A"},
 		{QuestionNumber: 1, Type: "填空题", Title: "第一题", QuestionText: "1 GB 等于 ____ MB。", CorrectAnswer: "1024"},
 	}}, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.QuestionBank.OrderID != 4 || created.QuestionBank.Questions[0].QuestionNumber != 1 || created.QuestionBank.Questions[1].CorrectAnswer != "A,B" {
+	if created.QuestionBank.Questions[0].QuestionNumber != 1 || created.QuestionBank.Questions[1].CorrectAnswer != "A,B" {
 		t.Fatalf("unexpected normalized bank: %#v", created)
 	}
 	if created.QuestionBank.CourseCode != "3007B0001" || len(created.QuestionBank.CourseCodes) != 2 {

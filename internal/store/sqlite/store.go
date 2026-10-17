@@ -32,10 +32,9 @@ var currentSchemaTables = []struct {
 	{name: "activity_events", columns: []string{"id", "event_id", "user_id", "device_id", "type", "occurred_at", "received_at", "properties_json"}},
 	{name: "error_reports", columns: []string{"id", "event_id", "user_id", "device_id", "student_id_hash", "app_version", "platform", "title", "message", "error_text", "stack_trace", "occurred_at", "received_at"}},
 	{name: "error_report_ignored_students", columns: []string{"student_id_hash", "ignored_at"}},
-	{name: "question_banks", columns: []string{"id", "order_id", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
+	{name: "question_banks", columns: []string{"id", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
 	{name: "question_bank_courses", columns: []string{"question_bank_id", "course_code"}},
 	{name: "question_bank_id_counter", columns: []string{"id", "next_number"}},
-	{name: "question_bank_order_counter", columns: []string{"id", "next_number"}},
 	{name: "questions", columns: []string{"id", "bank_id", "question_number", "type", "title", "question_text", "correct_answer", "sort_order"}},
 	{name: "question_options", columns: []string{"id", "question_id", "label", "text", "sort_order"}},
 	{name: "library_cdks", columns: []string{"id", "code_hash", "question_bank_id", "bound_student_id_hash", "bound_student_id_ciphertext", "bound_user_id", "status", "created_at", "used_at"}},
@@ -162,15 +161,40 @@ func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
 // deployment. They are dropped before validation so an existing production
 // database keeps its other data instead of failing validation and being wiped.
 // A snapshot is written before the first change so an operator can recover.
+// removedTables lists obsolete tables dropped from the schema. They are
+// dropped before validation so an existing database is not rebuilt.
+var removedTables = []string{"question_bank_order_counter"}
+
 var removedColumns = []struct {
 	table  string
 	column string
 }{
 	{"courses", "books"},
 	{"question_banks", "is_new"},
+	{"question_banks", "order_id"},
 }
 
 func (s *Store) applyColumnRemovals(ctx context.Context) error {
+	for _, table := range removedTables {
+		var exists int
+		err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if s.lastMigrationBackup == "" {
+			backup, backupErr := s.backupIncompatibleDatabase(ctx)
+			if backupErr != nil {
+				return fmt.Errorf("snapshot before removing table %s: %w", table, backupErr)
+			}
+			s.lastMigrationBackup = backup
+		}
+		if _, err := s.DB.ExecContext(ctx, `DROP TABLE "`+table+`"`); err != nil {
+			return fmt.Errorf("remove table %s: %w", table, err)
+		}
+	}
 	for _, removal := range removedColumns {
 		found, err := s.tableHasColumn(ctx, removal.table, removal.column)
 		if err != nil {
@@ -471,7 +495,6 @@ type Challenge struct {
 // QuestionBank is the normalized question library aggregate.
 type QuestionBank struct {
 	ID          string
-	OrderID     int
 	Name        string
 	Status      string
 	RequiresCDK bool
@@ -504,7 +527,6 @@ type QuestionOption struct {
 
 type QuestionBankSummary struct {
 	ID            string
-	OrderID       int
 	Name          string
 	Status        string
 	RequiresCDK   bool

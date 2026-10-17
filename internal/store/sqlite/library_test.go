@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestQuestionBankOrderIDsAllocateSortAndRejectDuplicates(t *testing.T) {
+func TestQuestionBankCreateAndListSortsByName(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -20,49 +20,22 @@ func TestQuestionBankOrderIDsAllocateSortAndRejectDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	first, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "自动题库", Status: "active", CreatedAt: now, UpdatedAt: now})
+	first, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "beta", Status: "active", CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ID != "QB-001" || first.OrderID != 1 {
+	if first.ID != "QB-001" {
 		t.Fatalf("unexpected first bank allocation: %#v", first)
 	}
-	manual, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "手动题库", OrderID: 7, Status: "active", CreatedAt: now, UpdatedAt: now})
-	if err != nil {
+	if _, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "alpha", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
-	}
-	if manual.OrderID != 7 {
-		t.Fatalf("manual order was not retained: %#v", manual)
-	}
-	next, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "下一个题库", Status: "active", CreatedAt: now, UpdatedAt: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if next.OrderID != 8 {
-		t.Fatalf("automatic order did not advance past manual value: %#v", next)
-	}
-	_, err = store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "重复题库", OrderID: 7, Status: "active", CreatedAt: now, UpdatedAt: now})
-	if !errors.Is(err, ErrQuestionBankOrderTaken) {
-		t.Fatalf("duplicate order error = %v, want ErrQuestionBankOrderTaken", err)
 	}
 	items, err := store.ListQuestionBanks(ctx, 50, 0, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || items[0].OrderID != 1 || items[1].OrderID != 7 || items[2].OrderID != 8 {
-		t.Fatalf("banks were not sorted by order: %#v", items)
-	}
-	manual.OrderID = 2
-	manual.UpdatedAt = now.Add(time.Minute)
-	if err := store.UpdateQuestionBank(ctx, manual); err != nil {
-		t.Fatal(err)
-	}
-	items, err = store.ListQuestionBanks(ctx, 50, 0, "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 3 || items[0].OrderID != 1 || items[1].OrderID != 2 || items[2].OrderID != 8 {
-		t.Fatalf("updated order was not applied: %#v", items)
+	if len(items) != 2 || items[0].Name != "alpha" || items[1].Name != "beta" {
+		t.Fatalf("banks were not sorted by name: %#v", items)
 	}
 }
 

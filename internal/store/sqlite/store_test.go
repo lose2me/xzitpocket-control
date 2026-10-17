@@ -38,8 +38,8 @@ func TestMigrateAddsQuestionBankCourseCode(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, created_at, updated_at)
-		VALUES ('QB-001', 1, '旧题库', 'active', 0, 1, 1)`); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, created_at, updated_at)
+		VALUES ('QB-001', '旧题库', 'active', 0, 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate a database created before the course association existed.
@@ -366,8 +366,8 @@ func TestMigrateBackfillsCourseAssociations(t *testing.T) {
 		VALUES ('tbx_old', '旧教材', '', 'C9', '', '', 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, course_code, created_at, updated_at)
-		VALUES ('QB-900', 900, '旧题库', 'active', 0, 'C8', 1, 1)`); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES ('QB-900', '旧题库', 'active', 0, 'C8', 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Migrate(ctx); err != nil {
