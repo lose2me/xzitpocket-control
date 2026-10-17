@@ -18,6 +18,7 @@ var questionBankListSorts = map[string]string{
 	"status":         "b.status",
 	"new":            "b.is_new",
 	"requiresCDK":    "b.requires_cdk",
+	"courseCode":     "b.course_code",
 	"updated_at":     "b.updated_at",
 }
 
@@ -43,7 +44,7 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		offset = 0
 	}
 	args := []any{}
-	query := `SELECT b.id, b.order_id, b.is_new, b.name, b.status, b.requires_cdk, COUNT(q.id), b.created_at, b.updated_at
+	query := `SELECT b.id, b.order_id, b.is_new, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id`
 	if status != "" {
 		query += " WHERE b.status = ?"
@@ -61,7 +62,7 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		var item QuestionBankSummary
 		var orderID, isNew, requiresCDK int
 		var created, updated int64
-		if err := rows.Scan(&item.ID, &orderID, &isNew, &item.Name, &item.Status, &requiresCDK, &item.QuestionCount, &created, &updated); err != nil {
+		if err := rows.Scan(&item.ID, &orderID, &isNew, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
 			return nil, err
 		}
 		item.OrderID = orderID
@@ -97,7 +98,7 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	if offset < 0 {
 		offset = 0
 	}
-	query := `SELECT b.id, b.order_id, b.is_new, b.name, b.status, b.requires_cdk, COUNT(q.id), b.created_at, b.updated_at
+	query := `SELECT b.id, b.order_id, b.is_new, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id
 		WHERE b.status = 'active'
 		GROUP BY b.id ORDER BY b.order_id ASC, b.id LIMIT ? OFFSET ?`
@@ -111,7 +112,7 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 		var item QuestionBankSummary
 		var orderID, isNew, requiresCDK int
 		var created, updated int64
-		if err := rows.Scan(&item.ID, &orderID, &isNew, &item.Name, &item.Status, &requiresCDK, &item.QuestionCount, &created, &updated); err != nil {
+		if err := rows.Scan(&item.ID, &orderID, &isNew, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
 			return nil, 0, err
 		}
 		item.OrderID = orderID
@@ -170,11 +171,11 @@ type questionBankQuerier interface {
 
 func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string) (QuestionBank, error) {
 	row := queryer.QueryRowContext(ctx,
-		"SELECT id, order_id, is_new, name, status, requires_cdk, created_at, updated_at FROM question_banks WHERE id = ?", id)
+		"SELECT id, order_id, is_new, name, status, requires_cdk, course_code, created_at, updated_at FROM question_banks WHERE id = ?", id)
 	var bank QuestionBank
 	var orderID, isNew, requiresCDK int
 	var created, updated int64
-	if err := row.Scan(&bank.ID, &orderID, &isNew, &bank.Name, &bank.Status, &requiresCDK, &created, &updated); err != nil {
+	if err := row.Scan(&bank.ID, &orderID, &isNew, &bank.Name, &bank.Status, &requiresCDK, &bank.CourseCode, &created, &updated); err != nil {
 		return QuestionBank{}, err
 	}
 	bank.OrderID = orderID
@@ -239,8 +240,8 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 	} else if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 		return err
 	}
 	if err := insertQuestions(ctx, tx, bank); err != nil {
@@ -293,8 +294,8 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 		} else if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
 			return QuestionBank{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, course_code, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 			return QuestionBank{}, err
 		}
 		if err := insertQuestions(ctx, tx, bank); err != nil {
@@ -333,8 +334,8 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	if err := advanceQuestionBankOrderCounterTx(ctx, tx, bank.OrderID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE question_banks SET order_id = ?, is_new = ?, name = ?, status = ?, requires_cdk = ?, updated_at = ? WHERE id = ?`,
-		bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), millis(bank.UpdatedAt), bank.ID)
+	result, err := tx.ExecContext(ctx, `UPDATE question_banks SET order_id = ?, is_new = ?, name = ?, status = ?, requires_cdk = ?, course_code = ?, updated_at = ? WHERE id = ?`,
+		bank.OrderID, boolInt(bank.IsNew), bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.UpdatedAt), bank.ID)
 	if err != nil {
 		return err
 	}
@@ -358,7 +359,7 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 }
 
 func sameQuestionBankContent(a, b QuestionBank) bool {
-	if a.OrderID != b.OrderID || a.IsNew != b.IsNew || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || len(a.Questions) != len(b.Questions) {
+	if a.OrderID != b.OrderID || a.IsNew != b.IsNew || a.Name != b.Name || a.Status != b.Status || a.RequiresCDK != b.RequiresCDK || a.CourseCode != b.CourseCode || len(a.Questions) != len(b.Questions) {
 		return false
 	}
 	for i := range a.Questions {

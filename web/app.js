@@ -361,6 +361,7 @@ import { template } from './template.js';
       const bankDialog = ref(false);
       const bankEditing = ref(false);
       const bankJSON = ref('');
+      const bankCourseCode = ref('');
       const bankNewOptions = [{ title: '是', value: true }, { title: '否', value: false }];
       const bankCDKOptions = [{ title: '需要', value: true }, { title: '不需要', value: false }];
       const selectedUser = ref(null);
@@ -540,10 +541,11 @@ import { template } from './template.js';
         { title: '最近活动', key: 'last_seen_at', width: '30%' }
       ];
       const bankHeaders = [
-        { title: '顺序 ID', key: 'orderId', align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', width: '13%' }, { title: '名称', key: 'name', width: '17%' },
-        { title: '题目数', key: 'question_count', align: 'center', width: '9%' }, { title: '状态', key: 'status', width: '9%' },
-        { title: '新题库', key: 'new', align: 'center', width: '7%' }, { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '10%' }, { title: '更新时间', key: 'updated_at', width: '9%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '17%' }
+        { title: '顺序 ID', key: 'orderId', align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', width: '13%' }, { title: '名称', key: 'name', width: '15%' },
+        { title: '关联课程', key: 'courseCode', sortable: true, width: '12%' },
+        { title: '题目数', key: 'question_count', align: 'center', width: '8%' }, { title: '状态', key: 'status', width: '8%' },
+        { title: '新题库', key: 'new', align: 'center', width: '6%' }, { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '9%' }, { title: '更新时间', key: 'updated_at', width: '8%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '12%' }
       ];
       const cdkHeaders = [
         { title: 'CDK ID', key: 'id', width: '20%' },
@@ -596,6 +598,7 @@ import { template } from './template.js';
         bankDialog.value = false;
         bankEditing.value = false;
         bankJSON.value = '';
+        bankCourseCode.value = '';
       };
       const setBankDialog = (visible) => { if (visible) bankDialog.value = true; else closeBankEditor(); };
       const clearAdminSession = () => {
@@ -1473,14 +1476,18 @@ import { template } from './template.js';
           });
         }
       };
-      const openNewBank = () => {
+      const openNewBank = () => call(async () => {
         bankEditing.value = false;
+        bankCourseCode.value = '';
         bankJSON.value = JSON.stringify(emptyBankTemplate(), null, 2);
+        await loadCourseOptions();
         bankDialog.value = true;
-      };
+      });
       const editBank = (row) => call(async () => {
         const out = await api('/api/v1/admin/question-banks/' + encodeURIComponent(rawItem(row).id));
         bankEditing.value = true;
+        bankCourseCode.value = out.questionBank.courseCode || '';
+        await loadCourseOptions();
         bankJSON.value = JSON.stringify({
           questionBank: {
             id: out.questionBank.id,
@@ -1502,6 +1509,10 @@ import { template } from './template.js';
         if (!bank.name || !String(bank.name).trim()) throw new Error('请填写题库名称');
         const bankID = (bank.id || '').trim();
         if (bankEditing.value && !bankID) throw new Error('题库 ID 无效');
+        // The update endpoint takes the bank ID from the URL and rejects
+        // unknown JSON fields, so it must not be echoed in the payload.
+        delete bank.id;
+        bank.courseCode = (bankCourseCode.value || '').trim();
         const payload = { questionBank: bank };
         const path = '/api/v1/admin/question-banks' + (bankEditing.value ? '/' + encodeURIComponent(bankID) : '');
         const editing = bankEditing.value;
@@ -1725,7 +1736,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCode, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
         resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,

@@ -32,7 +32,7 @@ var currentSchemaTables = []struct {
 	{name: "activity_events", columns: []string{"id", "event_id", "user_id", "device_id", "type", "occurred_at", "received_at", "properties_json"}},
 	{name: "error_reports", columns: []string{"id", "event_id", "user_id", "device_id", "student_id_hash", "app_version", "platform", "title", "message", "error_text", "stack_trace", "occurred_at", "received_at"}},
 	{name: "error_report_ignored_students", columns: []string{"student_id_hash", "ignored_at"}},
-	{name: "question_banks", columns: []string{"id", "order_id", "is_new", "name", "status", "requires_cdk", "created_at", "updated_at"}},
+	{name: "question_banks", columns: []string{"id", "order_id", "is_new", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
 	{name: "question_bank_id_counter", columns: []string{"id", "next_number"}},
 	{name: "question_bank_order_counter", columns: []string{"id", "next_number"}},
 	{name: "questions", columns: []string{"id", "bank_id", "question_number", "type", "title", "question_text", "correct_answer", "sort_order"}},
@@ -113,6 +113,7 @@ var additiveMigrations = []struct {
 	{"textbooks", "cover_key", `ALTER TABLE textbooks ADD COLUMN cover_key TEXT NOT NULL DEFAULT ''`},
 	{"admin_users", "name", `ALTER TABLE admin_users ADD COLUMN name TEXT NOT NULL DEFAULT ''`},
 	{"admin_users", "permissions", `ALTER TABLE admin_users ADD COLUMN permissions TEXT NOT NULL DEFAULT ''`},
+	{"question_banks", "course_code", `ALTER TABLE question_banks ADD COLUMN course_code TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -453,6 +454,7 @@ type QuestionBank struct {
 	Name        string
 	Status      string
 	RequiresCDK bool
+	CourseCode  string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	Questions   []Question
@@ -485,6 +487,7 @@ type QuestionBankSummary struct {
 	Name          string
 	Status        string
 	RequiresCDK   bool
+	CourseCode    string
 	QuestionCount int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

@@ -73,7 +73,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 | 表 | 用途 |
 | --- | --- |
-| `question_banks` | 题库 ID、顺序 ID、名称、状态和 CDK 解锁开关 |
+| `question_banks` | 题库 ID、顺序 ID、名称、状态、关联课程编号和 CDK 解锁开关 |
 | `questions` | 题号、题型、题干和答案 |
 | `question_options` | 选择题选项 |
 | `question_bank_id_counter` | 事务内单调分配 `QB-001` 等 ID |
@@ -95,6 +95,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
     "new": true,
     "name": "计算机基础知识测验",
     "requiresCDK": false,
+    "courseCode": "3007B0001",
     "questions": [
       {
         "questionNumber": 1,

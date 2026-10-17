@@ -26,7 +26,7 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", OrderID: 4, New: true, Name: "基础测验", Questions: []QuestionInput{
+	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", OrderID: 4, New: true, Name: "基础测验", CourseCode: " 3007B0001 ", Questions: []QuestionInput{
 		{QuestionNumber: 2, Type: "多选题", Title: "第二题", QuestionText: "选择系统", Options: []OptionInput{{Label: "A", Text: "Windows"}, {Label: "B", Text: "Linux"}}, CorrectAnswer: "B,A"},
 		{QuestionNumber: 1, Type: "填空题", Title: "第一题", QuestionText: "1 GB 等于 ____ MB。", CorrectAnswer: "1024"},
 	}}, "admin")
@@ -36,12 +36,22 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if created.QuestionBank.OrderID != 4 || created.QuestionBank.Questions[0].QuestionNumber != 1 || created.QuestionBank.Questions[1].CorrectAnswer != "A,B" {
 		t.Fatalf("unexpected normalized bank: %#v", created)
 	}
+	if created.QuestionBank.CourseCode != "3007B0001" {
+		t.Fatalf("unexpected course code: %q", created.QuestionBank.CourseCode)
+	}
 	got, err := a.GetQuestionBank(context.Background(), "QB-001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.QuestionBank.ID != "QB-001" || len(got.QuestionBank.Questions) != 2 || got.QuestionBank.Questions[0].Options == nil || len(got.QuestionBank.Questions[1].Options) != 2 {
+	if got.QuestionBank.ID != "QB-001" || got.QuestionBank.CourseCode != "3007B0001" || len(got.QuestionBank.Questions) != 2 || got.QuestionBank.Questions[0].Options == nil || len(got.QuestionBank.Questions[1].Options) != 2 {
 		t.Fatalf("unexpected public bank: %#v", got)
+	}
+	listed, _, err := a.ListQuestionBanks(context.Background(), 10, 0, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].CourseCode != "3007B0001" {
+		t.Fatalf("unexpected listed bank: %#v", listed)
 	}
 	if err := a.SetQuestionBankStatus(context.Background(), "QB-001", "disabled", "admin"); err != nil {
 		t.Fatal(err)

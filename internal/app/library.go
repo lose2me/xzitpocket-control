@@ -25,6 +25,7 @@ type QuestionBankInput struct {
 	Name        string          `json:"name"`
 	Status      string          `json:"status,omitempty"`
 	RequiresCDK bool            `json:"requiresCDK"`
+	CourseCode  string          `json:"courseCode"`
 	Questions   []QuestionInput `json:"questions"`
 }
 
@@ -54,6 +55,7 @@ type QuestionBankView struct {
 	New         bool           `json:"new"`
 	Name        string         `json:"name"`
 	RequiresCDK bool           `json:"requiresCDK"`
+	CourseCode  string         `json:"courseCode,omitempty"`
 	Questions   []QuestionView `json:"questions"`
 }
 
@@ -78,6 +80,7 @@ type QuestionBankSummaryView struct {
 	Name          string `json:"name"`
 	Status        string `json:"status"`
 	RequiresCDK   bool   `json:"requiresCDK"`
+	CourseCode    string `json:"courseCode"`
 	QuestionCount int    `json:"question_count"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
@@ -121,6 +124,10 @@ func validateQuestionBankInput(in QuestionBankInput, requireID bool) (sqlite.Que
 	if in.Name == "" || len(in.Name) > 256 || strings.ContainsAny(in.Name, "\r\n\x00") {
 		return sqlite.QuestionBank{}, Err("invalid_question_bank", "题库名称无效", http.StatusBadRequest)
 	}
+	in.CourseCode = strings.TrimSpace(in.CourseCode)
+	if len(in.CourseCode) > 64 || strings.ContainsAny(in.CourseCode, "\r\n\x00") {
+		return sqlite.QuestionBank{}, Err("invalid_question_bank_course", "关联课程无效", http.StatusBadRequest)
+	}
 	status := strings.TrimSpace(in.Status)
 	if status == "" {
 		status = "active"
@@ -131,7 +138,7 @@ func validateQuestionBankInput(in QuestionBankInput, requireID bool) (sqlite.Que
 	if len(in.Questions) > 1000 {
 		return sqlite.QuestionBank{}, Err("too_many_questions", "题目数量不能超过 1000", http.StatusBadRequest)
 	}
-	bank := sqlite.QuestionBank{ID: in.ID, OrderID: in.OrderID, IsNew: in.New, Name: in.Name, Status: status, RequiresCDK: in.RequiresCDK, Questions: make([]sqlite.Question, 0, len(in.Questions))}
+	bank := sqlite.QuestionBank{ID: in.ID, OrderID: in.OrderID, IsNew: in.New, Name: in.Name, Status: status, RequiresCDK: in.RequiresCDK, CourseCode: in.CourseCode, Questions: make([]sqlite.Question, 0, len(in.Questions))}
 	seenNumbers := make(map[int]bool, len(in.Questions))
 	for index, input := range in.Questions {
 		if input.QuestionNumber < 1 || input.QuestionNumber > 100000 || seenNumbers[input.QuestionNumber] {
@@ -236,7 +243,7 @@ func validateCorrectAnswer(questionType string, options []sqlite.QuestionOption,
 }
 
 func questionBankView(bank sqlite.QuestionBank) QuestionBankView {
-	view := QuestionBankView{ID: bank.ID, OrderID: bank.OrderID, New: bank.IsNew, Name: bank.Name, RequiresCDK: bank.RequiresCDK, Questions: make([]QuestionView, 0, len(bank.Questions))}
+	view := QuestionBankView{ID: bank.ID, OrderID: bank.OrderID, New: bank.IsNew, Name: bank.Name, RequiresCDK: bank.RequiresCDK, CourseCode: bank.CourseCode, Questions: make([]QuestionView, 0, len(bank.Questions))}
 	questions := append([]sqlite.Question(nil), bank.Questions...)
 	sort.SliceStable(questions, func(i, j int) bool { return questions[i].QuestionNumber < questions[j].QuestionNumber })
 	for _, question := range questions {
@@ -284,7 +291,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, 
 	}
 	result := make([]QuestionBankSummaryView, 0, len(items))
 	for _, item := range items {
-		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }

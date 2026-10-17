@@ -28,6 +28,45 @@ func TestMigrateCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
+func TestMigrateAddsQuestionBankCourseCode(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, is_new, name, status, requires_cdk, created_at, updated_at)
+		VALUES ('QB-001', 1, 1, '旧题库', 'active', 0, 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a database created before the course association existed.
+	if _, err := store.DB.ExecContext(ctx, "ALTER TABLE question_banks DROP COLUMN course_code"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	hasCourseCode, err := store.tableHasColumn(ctx, "question_banks", "course_code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCourseCode {
+		t.Fatal("question_banks.course_code was not added")
+	}
+	var name, courseCode string
+	if err := store.DB.QueryRowContext(ctx, "SELECT name, course_code FROM question_banks WHERE id = 'QB-001'").Scan(&name, &courseCode); err != nil {
+		t.Fatal(err)
+	}
+	if name != "旧题库" || courseCode != "" {
+		t.Fatalf("unexpected migrated row: name=%q course_code=%q", name, courseCode)
+	}
+}
+
 func TestMigrateRebuildsIncompatibleSchema(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
