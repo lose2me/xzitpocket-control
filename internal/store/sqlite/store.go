@@ -23,7 +23,7 @@ var currentSchemaTables = []struct {
 	name    string
 	columns []string
 }{
-	{name: "users", columns: []string{"id", "status", "display_name", "college_name", "class_name", "major_name", "created_at", "last_login_at"}},
+	{name: "users", columns: []string{"id", "status", "display_name", "college_name", "class_name", "major_name", "created_at", "last_login_at", "contribution_count", "download_count"}},
 	{name: "identities", columns: []string{"id", "user_id", "provider", "student_id_hash", "student_alias", "student_id_ciphertext", "created_at", "updated_at"}},
 	{name: "devices", columns: []string{"id", "device_serial", "installation_id", "device_token_hash", "public_key", "platform", "app_version", "created_at", "last_seen_at", "revoked_at"}},
 	{name: "user_devices", columns: []string{"user_id", "device_id", "first_bound_at", "last_login_at", "unbound_at"}},
@@ -47,10 +47,10 @@ var currentSchemaTables = []struct {
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
-	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "created_at", "updated_at"}},
+	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
-	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "created_at", "updated_at"}},
-	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "created_at", "updated_at"}},
+	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
+	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -120,6 +120,11 @@ var additiveMigrations = []struct {
 	{"resource_submissions", "status", `ALTER TABLE resource_submissions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending_review'`},
 	{"textbooks", "download_count", `ALTER TABLE textbooks ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0`},
 	{"resources", "download_count", `ALTER TABLE resources ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0`},
+	{"users", "contribution_count", `ALTER TABLE users ADD COLUMN contribution_count INTEGER NOT NULL DEFAULT 0`},
+	{"users", "download_count", `ALTER TABLE users ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0`},
+	{"textbooks", "contributor_user_id", `ALTER TABLE textbooks ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
+	{"resources", "contributor_user_id", `ALTER TABLE resources ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "student_id_ciphertext", `ALTER TABLE resource_submissions ADD COLUMN student_id_ciphertext TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {

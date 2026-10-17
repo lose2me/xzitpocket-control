@@ -54,7 +54,7 @@ func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id stri
 		writeError(w, r, err)
 		return
 	}
-	s.App.RecordResourceDownload(r.Context(), id)
+	s.App.RecordResourceDownload(r.Context(), id, true)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -69,7 +69,20 @@ func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 	if kind == "" || kind == "pdf" {
-		s.App.RecordTextbookDownload(r.Context(), id)
+		s.App.RecordTextbookDownload(r.Context(), id, true)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) userUploadStats(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authSession(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.App.GetUploadStats(r.Context(), p)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

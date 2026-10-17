@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
     class_name TEXT NOT NULL DEFAULT '',
     major_name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
-    last_login_at INTEGER NOT NULL
+    last_login_at INTEGER NOT NULL,
+    contribution_count INTEGER NOT NULL DEFAULT 0,
+    download_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS identities (
@@ -287,6 +289,7 @@ CREATE TABLE IF NOT EXISTS textbooks (
     pdf_key TEXT NOT NULL DEFAULT '',
     cover_key TEXT NOT NULL DEFAULT '',
     download_count INTEGER NOT NULL DEFAULT 0,
+    contributor_user_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(name, tags, course_code)
@@ -315,6 +318,7 @@ CREATE TABLE IF NOT EXISTS resources (
     course_code TEXT NOT NULL DEFAULT '',
     pdf_key TEXT NOT NULL DEFAULT '',
     download_count INTEGER NOT NULL DEFAULT 0,
+    contributor_user_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(name, tags, course_code)
@@ -337,6 +341,7 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
     status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_upload', 'pending_review')),
     submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     submitted_by_name TEXT NOT NULL DEFAULT '',
+    student_id_ciphertext TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

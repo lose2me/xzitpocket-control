@@ -45,6 +45,7 @@ type SubmissionView struct {
 	HasPdf            bool   `json:"has_pdf"`
 	SubmittedByUserID string `json:"submitted_by_user_id,omitempty"`
 	SubmittedByName   string `json:"submitted_by_name"`
+	StudentID         string `json:"student_id,omitempty"`
 	CreatedAt         string `json:"created_at"`
 }
 
@@ -82,16 +83,31 @@ func submissionView(item sqlite.Submission) SubmissionView {
 	}
 }
 
-func (a *App) submissionSubmitterName(ctx context.Context, p SessionPrincipal) string {
-	if name := strings.TrimSpace(p.User.DisplayName); name != "" {
-		return name
-	}
+// submissionIdentity returns the display name and the encrypted student ID
+// that every upload is bound to. The plaintext ID never comes from the client.
+func (a *App) submissionIdentity(ctx context.Context, p SessionPrincipal) (name, studentIDCiphertext string) {
+	name = strings.TrimSpace(p.User.DisplayName)
 	if identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider); err == nil {
-		if alias := strings.TrimSpace(identity.StudentAlias); alias != "" {
-			return alias
+		if name == "" {
+			name = strings.TrimSpace(identity.StudentAlias)
+		}
+		studentIDCiphertext = identity.StudentIDCiphertext
+	}
+	if name == "" {
+		name = p.User.ID
+	}
+	return name, studentIDCiphertext
+}
+
+// submissionViewForAdmin decrypts the bound student ID for the review table.
+func (a *App) submissionViewForAdmin(item sqlite.Submission) SubmissionView {
+	view := submissionView(item)
+	if item.StudentIDCiphertext != "" {
+		if studentID, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.StudentIDCiphertext); err == nil {
+			view.StudentID = studentID
 		}
 	}
-	return p.User.ID
+	return view
 }
 
 // CreateSubmissionTicket validates metadata, reserves the COS object key and
@@ -146,10 +162,11 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	}
 
 	now := time.Now().UTC()
+	submitterName, studentIDCiphertext := a.submissionIdentity(ctx, p)
 	item, err := a.Store.CreateSubmission(ctx, sqlite.SubmissionInput{
 		Kind: kind, CourseCode: courseCode, Name: name, Tags: tags, SizeBytes: in.SizeBytes,
 		Status: "pending_upload", SubmittedByUserID: p.User.ID,
-		SubmittedByName: a.submissionSubmitterName(ctx, p),
+		SubmittedByName: submitterName, StudentIDCiphertext: studentIDCiphertext,
 	}, now)
 	if err != nil {
 		return ResourceUploadTicketView{}, err
@@ -218,7 +235,7 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	item.UpdatedAt = now
 	_ = a.Store.AddAudit(ctx, p.User.ID, item.Kind+"_submission_create", item.Kind+"_submission", item.ID,
 		controlcrypto.JSON(map[string]any{"course_code": item.CourseCode, "name": item.Name, "size_bytes": size}), now)
-	return submissionView(item), nil
+	return a.submissionViewForAdmin(item), nil
 }
 
 // AbortSubmission discards a direct-upload ticket after a failed client upload.
@@ -306,7 +323,7 @@ func (a *App) ListSubmissionsForAdmin(ctx context.Context, kind string, limit, o
 	}
 	views := make([]SubmissionView, 0, len(items))
 	for _, item := range items {
-		views = append(views, submissionView(item))
+		views = append(views, a.submissionViewForAdmin(item))
 	}
 	return views, total, nil
 }
@@ -323,6 +340,21 @@ func (a *App) requireSubmission(ctx context.Context, id, kind string) (sqlite.Su
 		return sqlite.Submission{}, ErrNotFound
 	}
 	return item, nil
+}
+
+// recordContribution links approved content to its contributor and increments
+// the profile counters shown on the app upload page. Both steps are
+// best-effort: the content has already been created.
+func (a *App) recordContribution(ctx context.Context, userID string, link func(string) error) {
+	if userID == "" {
+		return
+	}
+	if err := link(userID); err != nil {
+		a.Logger.Warn("link contribution failed", "error", err, "user", userID)
+	}
+	if err := a.Store.IncrementUserContribution(ctx, userID); err != nil {
+		a.Logger.Warn("increment contribution count failed", "error", err, "user", userID)
+	}
 }
 
 // ApproveSubmissionForAdmin creates the reviewed textbook or resource with the
@@ -357,6 +389,9 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 			_ = a.Store.DeleteTextbook(ctx, textbook.ID)
 			return nil, err
 		}
+		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
+			return a.Store.SetTextbookContributor(ctx, textbook.ID, userID)
+		})
 		textbook.PdfKey = item.PdfKey
 		textbook.UpdatedAt = now
 		view := textbookView(textbook)
@@ -378,6 +413,9 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 			_ = a.Store.DeleteResource(ctx, resource.ID)
 			return nil, err
 		}
+		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
+			return a.Store.SetResourceContributor(ctx, resource.ID, userID)
+		})
 		resource.PdfKey = item.PdfKey
 		resource.UpdatedAt = now
 		view := resourceView(resource)

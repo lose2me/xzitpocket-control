@@ -16,14 +16,15 @@ var ErrResourceExists = errors.New("resource already exists")
 // association is by course code and is edited manually in the console, so
 // changing the resource fields keeps it.
 type Resource struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Tags          string    `json:"tags"`
-	CourseCode    string    `json:"course_code"`
-	PdfKey        string    `json:"pdf_key"`
-	DownloadCount int64     `json:"download_count"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Tags              string    `json:"tags"`
+	CourseCode        string    `json:"course_code"`
+	PdfKey            string    `json:"pdf_key"`
+	DownloadCount     int64     `json:"download_count"`
+	ContributorUserID string    `json:"contributor_user_id"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type ResourceInput struct {
@@ -32,7 +33,7 @@ type ResourceInput struct {
 	CourseCode string
 }
 
-const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, created_at, updated_at"
+const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, contributor_user_id, created_at, updated_at"
 
 var resourceListSorts = map[string]string{
 	"name":           "r.name",
@@ -188,12 +189,27 @@ type rowScannerResource interface {
 func scanResource(row rowScannerResource) (Resource, error) {
 	var item Resource
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
 		return Resource{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
 	return item, nil
+}
+
+// SetResourceContributor links an approved upload to the student who
+// contributed it. Downloads of this exam count toward that user's stats.
+func (s *Store) SetResourceContributor(ctx context.Context, id, userID string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE resources SET contributor_user_id = ? WHERE id = ?", userID, id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // IncrementResourceDownloads counts one PDF download without touching the

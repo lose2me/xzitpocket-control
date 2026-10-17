@@ -254,3 +254,40 @@ func scanIdentity(row rowScannerUser) (Identity, error) {
 	identity.UpdatedAt = fromMillis(updated)
 	return identity, nil
 }
+
+// IncrementUserContribution counts one approved upload for a user.
+func (s *Store) IncrementUserContribution(ctx context.Context, userID string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE users SET contribution_count = contribution_count + 1 WHERE id = ?", userID)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// IncrementUserDownloads counts one download of a user's contributed content.
+func (s *Store) IncrementUserDownloads(ctx context.Context, userID string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE users SET download_count = download_count + 1 WHERE id = ?", userID)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// GetUserStats returns the contribution and download counters shown on the app
+// upload page.
+func (s *Store) GetUserStats(ctx context.Context, userID string) (contributionCount, downloadCount int64, err error) {
+	err = s.DB.QueryRowContext(ctx,
+		"SELECT contribution_count, download_count FROM users WHERE id = ?", userID).
+		Scan(&contributionCount, &downloadCount)
+	return contributionCount, downloadCount, err
+}

@@ -1,0 +1,85 @@
+package app
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	controlcrypto "xzitpocket-control/internal/crypto"
+	"xzitpocket-control/internal/store/sqlite"
+)
+
+func TestUploadStatsBindStudentAndContributor(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, "2023000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO identities(
+			id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"idn-test", "usr-upload", "xzit-oa", "hash-test", "alias-test", ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(
+		map[string]string{http.MethodGet: "%PDF-"},
+		map[string]int64{http.MethodHead: 12},
+	)
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "textbook", CourseCode: "C1", Name: "教材甲", SizeBytes: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := a.CompleteSubmission(ctx, p, ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.StudentID != "2023000001" {
+		t.Fatalf("complete student id = %q", view.StudentID)
+	}
+	items, _, err := a.ListSubmissionsForAdmin(ctx, "textbook", 50, 0)
+	if err != nil || len(items) != 1 || items[0].StudentID != "2023000001" {
+		t.Fatalf("review items = %#v, err = %v", items, err)
+	}
+	out, err := a.ApproveSubmissionForAdmin(ctx, ticket.ID, "textbook", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	textbook, ok := out["textbook"].(TextbookView)
+	if !ok {
+		t.Fatalf("approve = %#v", out)
+	}
+	stored, err := store.GetTextbook(ctx, textbook.ID)
+	if err != nil || stored.ContributorUserID != "usr-upload" {
+		t.Fatalf("stored = %#v, err = %v", stored, err)
+	}
+	contribution, downloads, err := store.GetUserStats(ctx, "usr-upload")
+	if err != nil || contribution != 1 || downloads != 0 {
+		t.Fatalf("stats = %d/%d, err = %v", contribution, downloads, err)
+	}
+
+	// Admin downloads update the content total but not the contributor profile.
+	a.RecordTextbookDownload(ctx, textbook.ID, false)
+	contribution, downloads, _ = store.GetUserStats(ctx, "usr-upload")
+	if contribution != 1 || downloads != 0 {
+		t.Fatalf("after admin download stats = %d/%d", contribution, downloads)
+	}
+	// App downloads count for the contributor.
+	a.RecordTextbookDownload(ctx, textbook.ID, true)
+	contribution, downloads, _ = store.GetUserStats(ctx, "usr-upload")
+	if contribution != 1 || downloads != 1 {
+		t.Fatalf("after app download stats = %d/%d", contribution, downloads)
+	}
+	stats, err := a.GetUploadStats(ctx, p)
+	if err != nil || stats.ContributionCount != 1 || stats.DownloadCount != 1 || stats.StudentID != "2023000001" {
+		t.Fatalf("upload stats = %#v, err = %v", stats, err)
+	}
+}

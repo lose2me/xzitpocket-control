@@ -12,33 +12,35 @@ import (
 // approved submission becomes a textbook or resource row that keeps PdfKey;
 // reviewed rows are removed from this queue.
 type Submission struct {
-	ID                string    `json:"id"`
-	Kind              string    `json:"kind"`
-	CourseCode        string    `json:"course_code"`
-	Name              string    `json:"name"`
-	Tags              string    `json:"tags"`
-	PdfKey            string    `json:"pdf_key"`
-	SizeBytes         int64     `json:"size_bytes"`
-	Status            string    `json:"status"`
-	SubmittedByUserID string    `json:"submitted_by_user_id"`
-	SubmittedByName   string    `json:"submitted_by_name"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Kind                string    `json:"kind"`
+	CourseCode          string    `json:"course_code"`
+	Name                string    `json:"name"`
+	Tags                string    `json:"tags"`
+	PdfKey              string    `json:"pdf_key"`
+	SizeBytes           int64     `json:"size_bytes"`
+	Status              string    `json:"status"`
+	SubmittedByUserID   string    `json:"submitted_by_user_id"`
+	SubmittedByName     string    `json:"submitted_by_name"`
+	StudentIDCiphertext string    `json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type SubmissionInput struct {
-	Kind              string
-	CourseCode        string
-	Name              string
-	Tags              string
-	PdfKey            string
-	SizeBytes         int64
-	Status            string
-	SubmittedByUserID string
-	SubmittedByName   string
+	Kind                string
+	CourseCode          string
+	Name                string
+	Tags                string
+	PdfKey              string
+	SizeBytes           int64
+	Status              string
+	SubmittedByUserID   string
+	SubmittedByName     string
+	StudentIDCiphertext string
 }
 
-const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, created_at, updated_at"
+const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, created_at, updated_at"
 
 func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now time.Time) (Submission, error) {
 	if strings.TrimSpace(input.Status) == "" {
@@ -46,10 +48,10 @@ func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now
 	}
 	id := newStoreIDPrefix("sub")
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO resource_submissions(
-			id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, input.Kind, input.CourseCode, input.Name, input.Tags, input.PdfKey, input.SizeBytes, input.Status,
-		input.SubmittedByUserID, input.SubmittedByName, millis(now), millis(now))
+		input.SubmittedByUserID, input.SubmittedByName, input.StudentIDCiphertext, millis(now), millis(now))
 	if err != nil {
 		return Submission{}, err
 	}
@@ -237,7 +239,7 @@ func scanSubmission(row rowScannerSubmission) (Submission, error) {
 	var userID sql.NullString
 	var created, updated int64
 	if err := row.Scan(&item.ID, &item.Kind, &item.CourseCode, &item.Name, &item.Tags, &item.PdfKey,
-		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &created, &updated); err != nil {
+		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &created, &updated); err != nil {
 		return Submission{}, err
 	}
 	item.SubmittedByUserID = userID.String

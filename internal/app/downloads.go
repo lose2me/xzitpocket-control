@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
 // OpenTextbookDownload counts the download and returns the stored PDF stream
@@ -20,7 +22,7 @@ func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordTextbookDownload(ctx, item.ID)
+	a.RecordTextbookDownload(ctx, item.ID, false)
 	return resp, pdfDownloadName(item.Name), nil
 }
 
@@ -37,7 +39,7 @@ func (a *App) OpenResourceDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordResourceDownload(ctx, item.ID)
+	a.RecordResourceDownload(ctx, item.ID, false)
 	return resp, pdfDownloadName(item.Name), nil
 }
 
@@ -75,19 +77,67 @@ func (a *App) openStoredPDF(ctx context.Context, key string) (*http.Response, er
 	return resp, nil
 }
 
+// UploadStatsView is the app upload page summary. StudentID is the account
+// every upload is bound to.
+type UploadStatsView struct {
+	ContributionCount int64  `json:"contribution_count"`
+	DownloadCount     int64  `json:"download_count"`
+	StudentID         string `json:"student_id"`
+}
+
+// GetUploadStats returns the signed-in user's contribution and download
+// counters plus the bound student ID.
+func (a *App) GetUploadStats(ctx context.Context, p SessionPrincipal) (UploadStatsView, error) {
+	contribution, downloads, err := a.Store.GetUserStats(ctx, p.User.ID)
+	if err != nil {
+		return UploadStatsView{}, err
+	}
+	view := UploadStatsView{ContributionCount: contribution, DownloadCount: downloads}
+	if identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider); err == nil {
+		if studentID, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext); err == nil {
+			view.StudentID = studentID
+		}
+	}
+	return view, nil
+}
+
 // RecordTextbookDownload is best-effort: a failed counter update must not
-// break the download.
-func (a *App) RecordTextbookDownload(ctx context.Context, id string) {
+// break the download. App downloads also count toward the contributor's
+// profile; admin downloads only update the textbook total.
+func (a *App) RecordTextbookDownload(ctx context.Context, id string, includeContributor bool) {
 	if err := a.Store.IncrementTextbookDownloads(ctx, id); err != nil {
 		a.Logger.Warn("record textbook download failed", "error", err, "textbook", id)
+		return
+	}
+	if !includeContributor {
+		return
+	}
+	item, err := a.Store.GetTextbook(ctx, id)
+	if err != nil || item.ContributorUserID == "" {
+		return
+	}
+	if err := a.Store.IncrementUserDownloads(ctx, item.ContributorUserID); err != nil {
+		a.Logger.Warn("increment contributor downloads failed", "error", err, "user", item.ContributorUserID)
 	}
 }
 
 // RecordResourceDownload is best-effort: a failed counter update must not
-// break the download.
-func (a *App) RecordResourceDownload(ctx context.Context, id string) {
+// break the download. App downloads also count toward the contributor's
+// profile; admin downloads only update the exam total.
+func (a *App) RecordResourceDownload(ctx context.Context, id string, includeContributor bool) {
 	if err := a.Store.IncrementResourceDownloads(ctx, id); err != nil {
 		a.Logger.Warn("record resource download failed", "error", err, "resource", id)
+		return
+	}
+	if !includeContributor {
+		return
+	}
+	item, err := a.Store.GetResource(ctx, id)
+	if err != nil || item.ContributorUserID == "" {
+		return
+	}
+	if err := a.Store.IncrementUserDownloads(ctx, item.ContributorUserID); err != nil {
+		a.Logger.Warn("increment contributor downloads failed", "error", err, "user", item.ContributorUserID)
 	}
 }
 

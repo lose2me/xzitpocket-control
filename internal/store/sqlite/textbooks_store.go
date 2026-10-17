@@ -15,16 +15,17 @@ var ErrTextbookExists = errors.New("textbook already exists")
 // Textbook is one book a course uses. CourseCode keeps the first association
 // for sorting and older clients; CourseCodes holds every associated course.
 type Textbook struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Tags          string    `json:"tags"`
-	CourseCode    string    `json:"course_code"`
-	CourseCodes   []string  `json:"course_codes"`
-	PdfKey        string    `json:"pdf_key"`
-	CoverKey      string    `json:"cover_key"`
-	DownloadCount int64     `json:"download_count"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Tags              string    `json:"tags"`
+	CourseCode        string    `json:"course_code"`
+	CourseCodes       []string  `json:"course_codes"`
+	PdfKey            string    `json:"pdf_key"`
+	CoverKey          string    `json:"cover_key"`
+	DownloadCount     int64     `json:"download_count"`
+	ContributorUserID string    `json:"contributor_user_id"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TextbookInput struct {
@@ -54,7 +55,7 @@ func textbookInputCodes(input TextbookInput) []string {
 	return codes
 }
 
-const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, download_count, created_at, updated_at"
+const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, download_count, contributor_user_id, created_at, updated_at"
 
 // UploadTextbooks inserts every unseen textbook. Existing rows are never
 // modified, so a stored course association survives later uploads.
@@ -189,7 +190,7 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 		placeholders = append(placeholders, "?")
 		args = append(args, code)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.download_count, t.created_at, t.updated_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.download_count, t.contributor_user_id, t.created_at, t.updated_at
 		FROM textbook_courses tc JOIN textbooks t ON t.id = tc.textbook_id
 		WHERE tc.course_code IN (`+strings.Join(placeholders, ",")+") ORDER BY t.name ASC, t.id ASC", args...)
 	if err != nil {
@@ -200,7 +201,7 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 		var code string
 		var item Textbook
 		var created, updated int64
-		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &created, &updated); err != nil {
+		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
@@ -366,7 +367,7 @@ type rowScannerTextbook interface {
 func scanTextbook(row rowScannerTextbook) (Textbook, error) {
 	var item Textbook
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
 		return Textbook{}, err
 	}
 	item.CreatedAt = fromMillis(created)
@@ -392,6 +393,21 @@ func (s *Store) SetTextbookPdfKey(ctx context.Context, id, key string, now time.
 // content's updated_at time.
 func (s *Store) IncrementTextbookDownloads(ctx context.Context, id string) error {
 	result, err := s.DB.ExecContext(ctx, "UPDATE textbooks SET download_count = download_count + 1 WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetTextbookContributor links an approved upload to the student who
+// contributed it. Downloads of this textbook count toward that user's stats.
+func (s *Store) SetTextbookContributor(ctx context.Context, id, userID string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE textbooks SET contributor_user_id = ? WHERE id = ?", userID, id)
 	if err != nil {
 		return err
 	}
