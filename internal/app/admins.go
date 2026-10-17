@@ -92,8 +92,8 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 		}
 	}
 	key := strings.TrimSpace(in.Key)
-	if len(key) < 8 || len(key) > 128 {
-		return AdminSummaryView{}, Err("invalid_admin_key", "管理密钥长度需为 8-128", http.StatusBadRequest)
+	if len(key) < 10 || len(key) > 128 {
+		return AdminSummaryView{}, Err("invalid_admin_key", "管理密钥长度需为 10-128", http.StatusBadRequest)
 	}
 	perms, err := config.ParseAdminPerms(in.Permissions)
 	if err != nil {
@@ -157,8 +157,8 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 	hash := item.PasswordHash
 	ciphertext := ""
 	if key := strings.TrimSpace(in.Key); key != "" {
-		if len(key) < 8 || len(key) > 128 {
-			return AdminSummaryView{}, Err("invalid_admin_key", "管理密钥长度需为 8-128", http.StatusBadRequest)
+		if len(key) < 10 || len(key) > 128 {
+			return AdminSummaryView{}, Err("invalid_admin_key", "管理密钥长度需为 10-128", http.StatusBadRequest)
 		}
 		hash, err = controlcrypto.Argon2idHash(key)
 		if err != nil {

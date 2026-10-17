@@ -1341,7 +1341,9 @@ import { template } from './template.js';
       const saveAdmin = () => call(async () => {
         const form = adminForm.value;
         const editing = !!adminEditingId.value;
-        if (!editing && String(form.key || '').length < 8) throw new Error('管理密钥至少 8 位');
+        const key = String(form.key || '');
+        if (key && key.length < 10) throw new Error('管理密钥至少 10 位');
+        if (!editing && !key) throw new Error('请填写管理密钥');
         const parts = [];
         adminPageKeys.forEach((page) => {
           const access = adminPermsForm.value[page];

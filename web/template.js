@@ -249,7 +249,7 @@ export const template = `
             <v-card-text>
               <v-form @submit.prevent="saveAdmin">
                 <div class="d-flex align-center ga-2">
-                  <v-text-field v-model="adminForm.key" :label="adminEditingId ? '管理密钥（留空则不修改）' : '管理密钥（至少 8 位）'" variant="outlined" density="comfortable" hide-details="auto" />
+                  <v-text-field v-model="adminForm.key" :label="adminEditingId ? '管理密钥（留空则不修改）' : '管理密钥（至少 10 位）'" variant="outlined" density="comfortable" hide-details="auto" />
                   <v-btn variant="tonal" color="primary" @click="randomAdminKey">随机生成</v-btn>
                 </div>
                 <div class="text-subtitle-2 font-weight-bold mt-4 mb-2">页面权限</div>
