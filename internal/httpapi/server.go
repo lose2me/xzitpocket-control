@@ -195,6 +195,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminLogout(w, r)
 	case r.Method == http.MethodGet && path == "/admin/me":
 		s.adminMe(w, r)
+	case r.Method == http.MethodGet && path == "/admin/admins":
+		s.adminAdmins(w, r)
+	case r.Method == http.MethodPost && path == "/admin/admins":
+		s.adminAdminCreate(w, r)
+	case r.Method == http.MethodPut && pathMatchesID(path, "admin", "admins"):
+		s.adminAdminUpdate(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "admins"):
+		s.adminAdminDelete(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/metrics/overview":
 		s.adminMetricsOverview(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/series":
@@ -557,6 +565,8 @@ func adminPageFor(path, method string) (string, bool) {
 		return "config", write
 	case path == "/admin/audit":
 		return "audit", write
+	case path == "/admin/admins" || strings.HasPrefix(path, "/admin/admins/"):
+		return "admins", write
 	}
 	return "", false
 }

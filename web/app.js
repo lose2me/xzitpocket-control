@@ -199,8 +199,13 @@ import { template } from './template.js';
       const logged = ref(!!localStorage.getItem('control_admin'));
       const adminName = ref(localStorage.getItem('control_admin_name') || '');
       const adminPerms = ref(parseAdminPerms(localStorage.getItem('control_admin_perms')));
+      const admins = ref([]);
+      const adminDialog = ref(false);
+      const adminEditingId = ref('');
+      const adminForm = ref({ name: '', key: '' });
+      const adminPermsForm = ref({});
       const drawer = ref(false);
-      const VIEW_ROUTES = ['overview', 'users', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'config', 'audit'];
+      const VIEW_ROUTES = ['overview', 'users', 'admins', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'config', 'audit'];
       const viewForPath = (pathname) => {
         const name = String(pathname || '').replace(/^\/+|\/+$/g, '');
         return VIEW_ROUTES.includes(name) ? name : 'overview';
@@ -377,6 +382,7 @@ import { template } from './template.js';
       const nav = [
         { key: 'overview', label: '总览', icon: 'mdi-chart-line' },
         { key: 'users', label: '用户', icon: 'mdi-account-group-outline' },
+        { key: 'admins', label: '管理员', icon: 'mdi-account-cog-outline' },
         { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
         { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
@@ -398,6 +404,33 @@ import { template } from './template.js';
       const canRead = (page) => canAccess(page, false);
       const canWrite = (page) => canAccess(page, true);
       const visibleNav = computed(() => nav.filter(item => canRead(item.key)));
+      const adminPageOptions = [
+        { key: 'overview', label: '总览' },
+        { key: 'users', label: '用户' },
+        { key: 'devices', label: '设备' },
+        { key: 'risk', label: '风控' },
+        { key: 'error-reports', label: '错误' },
+        { key: 'library', label: '文库' },
+        { key: 'textbooks', label: '书单' },
+        { key: 'resources', label: '试卷' },
+        { key: 'courses', label: '课程' },
+        { key: 'share-codes', label: '分享码' },
+        { key: 'config', label: '配置' },
+        { key: 'audit', label: '审计' }
+      ];
+      const adminPageKeys = adminPageOptions.map((page) => page.key);
+      const adminPermOptions = [
+        { title: '无', value: '' },
+        { title: '只读', value: 'r' },
+        { title: '读写', value: 'rw' }
+      ];
+      const adminHeaders = [
+        { title: '管理员', key: 'name', sortable: false, width: '22%' },
+        { title: '页面权限', key: 'permissions', sortable: false, width: '43%' },
+        { title: '创建时间', key: 'created_at', sortable: false, width: '13%' },
+        { title: '最近登录', key: 'last_login_at', sortable: false, width: '13%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '9%' }
+      ];
       watch(mdAndUp, (desktop) => { if (!desktop) drawer.value = false; }, { immediate: true });
 
       // 总览显示比例（百分比，100=原始值，200=2 倍）。由后端保存在 data/.env。
@@ -580,6 +613,7 @@ import { template } from './template.js';
         cdkRevealDialog.value = false;
         createdCDKs.value = [];
         textbookDialog.value = false;
+        adminDialog.value = false;
         resourceDialog.value = false;
         courseDialog.value = false;
       };
@@ -1280,12 +1314,74 @@ import { template } from './template.js';
         localStorage.setItem('control_admin_perms', out.permissions || '');
         ensureViewAllowed();
       };
+      const loadAdmins = async () => {
+        const out = await api('/api/v1/admin/admins');
+        admins.value = out.items || [];
+      };
+      const resetAdminForm = (item) => {
+        adminEditingId.value = item ? (item.id || '') : '';
+        adminForm.value = { name: item ? (item.name || '') : '', key: '' };
+        const parsed = parseAdminPerms(item && item.permissions);
+        const perms = {};
+        adminPageKeys.forEach((page) => { perms[page] = parsed[page] || ''; });
+        adminPermsForm.value = perms;
+      };
+      const openNewAdmin = () => { resetAdminForm(null); adminDialog.value = true; };
+      const editAdmin = (row) => { resetAdminForm(rawItem(row)); adminDialog.value = true; };
+      const randomAdminKey = () => {
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        adminForm.value = Object.assign({}, adminForm.value, {
+          key: Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
+        });
+      };
+      const saveAdmin = () => call(async () => {
+        const form = adminForm.value;
+        const editing = !!adminEditingId.value;
+        const name = String(form.name || '').trim().toLowerCase();
+        if (!editing && !name) throw new Error('请填写管理员名称');
+        if (!editing && String(form.key || '').length < 8) throw new Error('管理密钥至少 8 位');
+        const parts = [];
+        adminPageKeys.forEach((page) => {
+          const access = adminPermsForm.value[page];
+          if (access) parts.push(page + '=' + access);
+        });
+        if (!parts.length) throw new Error('请至少授予一个页面的读权限');
+        const body = editing
+          ? { key: form.key || '', permissions: parts.join(',') }
+          : { name, key: form.key, permissions: parts.join(',') };
+        const path = '/api/v1/admin/admins' + (editing ? '/' + encodeURIComponent(adminEditingId.value) : '');
+        await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        adminDialog.value = false;
+        notify(editing ? '管理员已更新' : '管理员已创建');
+        await loadAdmins();
+      });
+      const deleteAdmin = (row) => call(async () => {
+        const item = rawItem(row);
+        if (item.super) return;
+        if (!window.confirm('确定删除管理员“' + item.name + '”吗？')) return;
+        await api('/api/v1/admin/admins/' + encodeURIComponent(item.id), { method: 'DELETE' });
+        notify('管理员已删除');
+        await loadAdmins();
+      });
+      const adminPermSummary = (row) => {
+        if (!row) return '-';
+        if (row.super) return '全部页面（读写）';
+        const parsed = parseAdminPerms(row.permissions);
+        const parts = [];
+        adminPageOptions.forEach((page) => {
+          const access = parsed[page.key];
+          if (access) parts.push(page.label + (access === 'rw' ? '（读写）' : '（只读）'));
+        });
+        return parts.length ? parts.join('、') : '无权限';
+      };
       const load = async () => {
         if (!logged.value) return;
         ensureViewAllowed();
         await call(async () => {
           if (view.value === 'overview') await loadOverview();
           else if (view.value === 'users') { await loadOverviewScale(); await loadUsers(); }
+          else if (view.value === 'admins') await loadAdmins();
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
@@ -1613,7 +1709,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
@@ -1642,7 +1738,8 @@ import { template } from './template.js';
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
         openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, copyResourceLink, onTextbookDrop,
-        loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
+        loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
+        admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey
       };
     },
     template,

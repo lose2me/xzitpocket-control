@@ -169,7 +169,7 @@ func parseAdminAccounts(values map[string]string) ([]AdminAccount, error) {
 		if keyValue == "" {
 			return nil, fmt.Errorf("admin %q has an empty key", name)
 		}
-		perms, err := parseAdminPerms(values["CONTROL_ADMIN_"+strings.ToUpper(name)+"_PERMS"])
+		perms, err := ParseAdminPerms(values["CONTROL_ADMIN_"+strings.ToUpper(name)+"_PERMS"])
 		if err != nil {
 			return nil, fmt.Errorf("admin %q: %w", name, err)
 		}
@@ -183,7 +183,7 @@ func parseAdminAccounts(values map[string]string) ([]AdminAccount, error) {
 	return accounts, nil
 }
 
-func parseAdminPerms(raw string) (map[string]string, error) {
+func ParseAdminPerms(raw string) (map[string]string, error) {
 	perms := make(map[string]string)
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

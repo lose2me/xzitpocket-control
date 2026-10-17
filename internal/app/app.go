@@ -61,17 +61,27 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 	return a, nil
 }
 
-// ensureAdmins creates or refreshes the administrator accounts configured in
-// .env and disables accounts that were removed from the configuration.
+// ensureAdmins keeps the .env super administrator in sync. Additional admins
+// are managed in the console: the database is authoritative once any exist, so
+// deleting an admin in the console is never undone by a restart. .env accounts
+// are only seeded into a fresh database.
 func (a *App) ensureAdmins(ctx context.Context) error {
-	accounts := a.Cfg.Admins
-	if len(accounts) == 0 && strings.TrimSpace(a.Cfg.AdminKey) != "" {
-		// Directly constructed configs (tests, embedded callers) may only set
-		// AdminKey; treat it as the legacy super admin.
-		accounts = []config.AdminAccount{{Name: "admin", Key: a.Cfg.AdminKey, All: true}}
-	}
 	now := time.Now().UTC()
-	names := make([]string, 0, len(accounts))
+	accounts := make([]config.AdminAccount, 0, len(a.Cfg.Admins)+1)
+	if key := strings.TrimSpace(a.Cfg.AdminKey); key != "" {
+		accounts = append(accounts, config.AdminAccount{Name: "admin", Key: key, All: true})
+	}
+	count, err := a.Store.CountAdmins(ctx)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		for _, account := range a.Cfg.Admins {
+			if account.Name != "admin" {
+				accounts = append(accounts, account)
+			}
+		}
+	}
 	for _, account := range accounts {
 		hash, err := controlcrypto.Argon2idHash(account.Key)
 		if err != nil {
@@ -108,10 +118,6 @@ func (a *App) ensureAdmins(ctx context.Context) error {
 		default:
 			return err
 		}
-		names = append(names, account.Name)
-	}
-	if err := a.Store.DisableAdminsNotIn(ctx, names, now); err != nil {
-		return fmt.Errorf("disable removed admins: %w", err)
 	}
 	if len(accounts) == 0 {
 		a.Logger.Warn("no admin accounts configured; the console has no super admin")

@@ -21,6 +21,11 @@ type Admin struct {
 
 const adminColumns = "id, name, permissions, password_hash, created_at, last_login_at, disabled_at"
 
+// IsSuperAdmin reports whether the admin has the wildcard permission.
+func (a Admin) IsSuperAdmin() bool {
+	return strings.TrimSpace(a.Permissions) == "*=rw"
+}
+
 // Allows reports whether the admin may read (write=false) or write the page.
 func (a Admin) Allows(page string, write bool) bool {
 	if page == "" {
@@ -100,6 +105,21 @@ func (s *Store) UpdateAdminAuth(ctx context.Context, id, passwordHash, permissio
 func (s *Store) SetAdminName(ctx context.Context, id, name string) error {
 	_, err := s.DB.ExecContext(ctx, "UPDATE admin_users SET name = ? WHERE id = ?", name, id)
 	return err
+}
+
+func (s *Store) DeleteAdmin(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM admin_users WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // DisableAdminsNotIn disables named administrators that are no longer configured.

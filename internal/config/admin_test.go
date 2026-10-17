@@ -34,8 +34,8 @@ func TestParseAdminAccounts(t *testing.T) {
 
 func TestParseAdminPermsRejectsInvalid(t *testing.T) {
 	for _, raw := range []string{"overview=x", "nope=r", "overview", "*=r"} {
-		if _, err := parseAdminPerms(raw); err == nil {
-			t.Fatalf("parseAdminPerms(%q) should fail", raw)
+		if _, err := ParseAdminPerms(raw); err == nil {
+			t.Fatalf("ParseAdminPerms(%q) should fail", raw)
 		}
 	}
 }

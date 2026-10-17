@@ -18,6 +18,8 @@ func TestAdminPageFor(t *testing.T) {
 		{"/admin/app/release-test", http.MethodPut, "config", true},
 		{"/admin/share-codes/abc", http.MethodDelete, "share-codes", true},
 		{"/admin/me", http.MethodGet, "", false},
+		{"/admin/admins", http.MethodGet, "admins", false},
+		{"/admin/admins/abc", http.MethodDelete, "admins", true},
 	}
 	for _, tc := range cases {
 		page, write := adminPageFor(tc.path, tc.method)
