@@ -44,7 +44,7 @@ export const template = `
                 <v-card variant="elevated" border class="mb-4">
                   <v-card-title class="d-flex align-center flex-wrap ga-2">
                     <v-icon icon="mdi-rocket-launch-outline" color="primary" />
-                    <span>CDN 统计</span>
+                    <span>资源统计</span>
                     <v-spacer />
                     <span v-if="activePackage" class="cdn-meta text-medium-emphasis">
                       流量包剩余 {{ activePackage.remaining }} / {{ activePackage.total }}<template v-if="activePackage.expire">（{{ activePackage.count > 1 ? '共 ' + activePackage.count + ' 个，最近到期 ' : '到期 ' }}{{ activePackage.expire }}）</template>
@@ -54,7 +54,7 @@ export const template = `
                   <v-divider />
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
                     <v-tab v-for="domain in cdnDomains" :key="domain.domain" :value="domain.domain">{{ domain.domain }}</v-tab>
-                    <v-tab value="__host__">本机</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__host__">本机</v-tab>
                   </v-tabs>
                   <v-divider />
                   <v-card-text>

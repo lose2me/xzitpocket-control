@@ -214,6 +214,8 @@ import { template } from './template.js';
       let cdnChart = null;
       let cdnPollTimer = null;
       let cdnPollAttempts = 0;
+      let cdnTabInitialized = false;
+      let statsTimer = null;
       const users = ref([]);
       const devices = ref([]);
       const risks = ref([]);
@@ -690,9 +692,8 @@ import { template } from './template.js';
           series: [{ name: '出带宽', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: 0.12 }, data: points.map(point => point.value), itemStyle: { color: '#287ca8' }, lineStyle: { width: 3 } }]
         });
       };
-      const loadHostStats = async (refresh) => {
-        hostLoading.value = true;
-        hostError.value = '';
+      const loadHostStats = async (refresh, silent) => {
+        if (!silent) { hostLoading.value = true; hostError.value = ''; }
         try {
           const out = await api('/api/v1/admin/host/stats?days=30' + (refresh ? '&refresh=1' : ''));
           hostStats.value = out;
@@ -700,9 +701,9 @@ import { template } from './template.js';
           drawHostChart();
         } catch (e) {
           if (e && e.status === 401) { clearAdminSession(); return; }
-          hostError.value = (e && e.message) || '主机统计加载失败';
+          if (!silent) hostError.value = (e && e.message) || '主机统计加载失败';
         } finally {
-          hostLoading.value = false;
+          if (!silent) hostLoading.value = false;
         }
       };
       const refreshActiveStats = () => (cdnTab.value === '__host__' ? loadHostStats(true) : loadCDNStats(true));
@@ -713,7 +714,10 @@ import { template } from './template.js';
           if (!out || !out.stale) cdnPollAttempts = 0;
           cdnStats.value = out;
           const domains = (out && out.domains) || [];
-          if (cdnTab.value !== '__host__' && !domains.some(item => item.domain === cdnTab.value)) {
+          if (!cdnTabInitialized && domains.length) {
+            cdnTab.value = domains[0].domain;
+            cdnTabInitialized = true;
+          } else if (cdnTabInitialized && cdnTab.value !== '__host__' && !domains.some(item => item.domain === cdnTab.value)) {
             cdnTab.value = domains[0] ? domains[0].domain : '';
           }
           await nextTick();
@@ -735,6 +739,12 @@ import { template } from './template.js';
           drawCDNChart();
         }
       });
+      // Refresh the overview statistics silently every 10 minutes.
+      const refreshStatsSilently = () => {
+        if (!logged.value) return;
+        loadCDNStats(false, true);
+        if (hostStats.value) loadHostStats(false, true);
+      };
       const loadOverview = async () => {
         overview.value = await api('/api/v1/admin/metrics/overview');
         breakdown.value = await api('/api/v1/admin/metrics/breakdown');
@@ -1489,8 +1499,9 @@ import { template } from './template.js';
         if (logged.value) load();
         window.addEventListener('resize', handleResize);
         window.addEventListener('popstate', handlePopState);
+        statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
