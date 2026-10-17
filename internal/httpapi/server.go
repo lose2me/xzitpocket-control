@@ -187,6 +187,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminMetricsSeries(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/breakdown":
 		s.adminMetricsBreakdown(w, r)
+	case r.Method == http.MethodGet && path == "/admin/cdn/stats":
+		s.adminCDNStats(w, r)
 	case r.Method == http.MethodGet && path == "/admin/overview-display":
 		s.adminOverviewDisplay(w, r)
 	case r.Method == http.MethodPut && path == "/admin/overview-display":

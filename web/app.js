@@ -201,6 +201,10 @@ import { template } from './template.js';
       const overview = ref({});
       const breakdown = ref({ platforms: {}, versions: {} });
       const series = ref([]);
+      const cdnStats = ref(null);
+      const cdnTab = ref('');
+      const cdnChartEl = ref(null);
+      let cdnChart = null;
       const users = ref([]);
       const devices = ref([]);
       const risks = ref([]);
@@ -567,6 +571,64 @@ import { template } from './template.js';
         const percent = Number(display && display.scalePercent);
         if (Number.isFinite(percent)) { overviewScalePercent.value = percent; overviewScaleInput.value = percent; }
       };
+      const formatBytes = (value) => {
+        const n = Number(value) || 0;
+        if (n < 1024) return n + ' B';
+        const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+        let v = n / 1024, i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+        return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + ' ' + units[i];
+      };
+      const formatBitrate = (value) => {
+        const n = Number(value) || 0;
+        if (n < 1000) return n + ' bps';
+        const units = ['Kbps', 'Mbps', 'Gbps', 'Tbps'];
+        let v = n / 1000, i = 0;
+        while (v >= 1000 && i < units.length - 1) { v /= 1000; i += 1; }
+        return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + ' ' + units[i];
+      };
+      const formatPercent = (value) => ((Number(value) || 0) * 100).toFixed(1) + '%';
+      const cdnDomains = computed(() => (cdnStats.value && cdnStats.value.domains) || []);
+      const cdnDomain = computed(() => cdnDomains.value.find(item => item.domain === cdnTab.value) || cdnDomains.value[0] || null);
+      const cdnCards = computed(() => {
+        const item = cdnDomain.value;
+        if (!item) return [];
+        const days = (cdnStats.value && cdnStats.value.days) || 30;
+        return [
+          { label: '今日流量', value: formatBytes(item.today_flux) },
+          { label: '今日请求', value: Number(item.today_requests || 0).toLocaleString() },
+          { label: '今日回源', value: formatBytes(item.today_origin_flux) },
+          { label: '缓存命中率', value: formatPercent(item.hit_rate) },
+          { label: '近 ' + days + ' 天流量', value: formatBytes(item.flux) },
+          { label: '峰值带宽', value: formatBitrate(item.bandwidth_peak) }
+        ];
+      });
+      const drawCDNChart = () => {
+        if (cdnChart) { cdnChart.dispose(); cdnChart = null; }
+        const item = cdnDomain.value;
+        if (!window.echarts || !cdnChartEl.value || !item) return;
+        cdnChart = window.echarts.init(cdnChartEl.value);
+        const points = item.flux_series || [];
+        cdnChart.setOption({
+          animationDuration: 350,
+          tooltip: { trigger: 'axis', valueFormatter: (value) => formatBytes(value) },
+          grid: { left: 6, right: 18, top: 20, bottom: 30, containLabel: true },
+          xAxis: { type: 'category', data: points.map(point => point.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
+          yAxis: { type: 'value', axisLabel: { color: '#697984', formatter: (value) => formatBytes(value) }, splitLine: { lineStyle: { color: '#edf1f3' } } },
+          series: [{ name: '流量', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: 0.12 }, data: points.map(point => point.value), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } }]
+        });
+      };
+      const loadCDNStats = async () => {
+        const out = await api('/api/v1/admin/cdn/stats?days=30');
+        cdnStats.value = out;
+        const domains = (out && out.domains) || [];
+        if (!domains.some(item => item.domain === cdnTab.value)) {
+          cdnTab.value = domains[0] ? domains[0].domain : '';
+        }
+        await nextTick();
+        drawCDNChart();
+      };
+      watch(cdnTab, async () => { await nextTick(); drawCDNChart(); });
       const loadOverview = async () => {
         overview.value = await api('/api/v1/admin/metrics/overview');
         breakdown.value = await api('/api/v1/admin/metrics/breakdown');
@@ -575,6 +637,7 @@ import { template } from './template.js';
         const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
         series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
         await nextTick(); drawChart();
+        await loadCDNStats();
       };
       const loadBanks = async () => {
         const offset = (bankPage.value - 1) * bankItemsPerPage.value;
@@ -1313,14 +1376,14 @@ import { template } from './template.js';
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
       const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传资源', resource_delete: '删除资源', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
-      const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); };
+      const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); };
       onMounted(() => {
         if (window.location.pathname !== '/' + view.value) window.history.replaceState({ view: view.value }, '', '/' + view.value);
         if (logged.value) load();
         window.addEventListener('resize', handleResize);
         window.addEventListener('popstate', handlePopState);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
@@ -1331,7 +1394,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, loadCDNStats, formatBytes, formatBitrate, formatPercent, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
