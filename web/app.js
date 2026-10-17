@@ -216,6 +216,7 @@ import { template } from './template.js';
       const bucketError = ref('');
       const bucketChartEl = ref(null);
       let bucketChart = null;
+      let bucketPollTimer = null;
       let cdnChart = null;
       let cdnPollTimer = null;
       let cdnPollAttempts = 0;
@@ -758,6 +759,10 @@ import { template } from './template.js';
           bucketStats.value = out;
           await nextTick();
           drawBucketChart();
+          if (out && out.stale) {
+            if (bucketPollTimer) clearTimeout(bucketPollTimer);
+            bucketPollTimer = setTimeout(() => { bucketPollTimer = null; loadBucketStats(false, true); }, 4000);
+          }
         } catch (e) {
           if (e && e.status === 401) { clearAdminSession(); return; }
           if (!silent) bucketError.value = (e && e.message) || '存储桶统计加载失败';
@@ -1568,7 +1573,7 @@ import { template } from './template.js';
         window.addEventListener('popstate', handlePopState);
         statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (bucketPollTimer) clearTimeout(bucketPollTimer); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,

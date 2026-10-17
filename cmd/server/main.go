@@ -127,6 +127,21 @@ func main() {
 		}
 	}()
 	go func() {
+		// Warm the overview caches on startup and keep them fresh every 10
+		// minutes so the console reads a warm cache.
+		application.RefreshStatsOnce(cleanupCtx)
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				application.RefreshStatsOnce(cleanupCtx)
+			case <-cleanupCtx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
 		logger.Info("control server listening", "addr", cfg.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server stopped", "error", err)
