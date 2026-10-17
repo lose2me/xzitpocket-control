@@ -54,9 +54,9 @@ export const template = `
                   <v-divider />
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
                     <v-tab v-for="domain in cdnDomains" :key="domain.domain" :value="domain.domain">{{ domain.domain }}</v-tab>
-                    <v-tab v-if="cdnDomains.length" value="__host__">本机</v-tab>
-                    <v-tab v-if="cdnDomains.length" value="__bucket_assets__">资源桶</v-tab>
-                    <v-tab v-if="cdnDomains.length" value="__bucket_website__">网站桶</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__host__">local</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__bucket_assets__">xzitpocket-assets</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__bucket_website__">xuda-website</v-tab>
                   </v-tabs>
                   <v-divider />
                   <v-card-text>

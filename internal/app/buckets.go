@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"xzitpocket-control/internal/cloud"
@@ -26,13 +27,21 @@ type bucketTarget struct {
 	bucket string
 }
 
+// bucketLabel drops the trailing "-<appid>" so tabs show a readable name.
+func bucketLabel(bucket string) string {
+	if index := strings.LastIndex(bucket, "-"); index > 0 {
+		return bucket[:index]
+	}
+	return bucket
+}
+
 func (a *App) bucketTargets() []bucketTarget {
 	targets := make([]bucketTarget, 0, 2)
 	if a.Cfg.COSBucket != "" {
-		targets = append(targets, bucketTarget{key: "assets", label: "资源桶", bucket: a.Cfg.COSBucket})
+		targets = append(targets, bucketTarget{key: "assets", label: bucketLabel(a.Cfg.COSBucket), bucket: a.Cfg.COSBucket})
 	}
 	if a.Cfg.COSWebsiteBucket != "" {
-		targets = append(targets, bucketTarget{key: "website", label: "网站桶", bucket: a.Cfg.COSWebsiteBucket})
+		targets = append(targets, bucketTarget{key: "website", label: bucketLabel(a.Cfg.COSWebsiteBucket), bucket: a.Cfg.COSWebsiteBucket})
 	}
 	return targets
 }
