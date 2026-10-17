@@ -43,30 +43,51 @@ func newStubCOSClient(methodBodies map[string]string, sizes map[string]int64) *c
 }
 
 func TestCreateSubmissionTicketValidation(t *testing.T) {
-	a, _ := newCourseApp(t)
+	a, store := newCourseApp(t)
 	ctx := context.Background()
 	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
 	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C2", Name: "课程二"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCode: "C2"}, now)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "other", CourseCode: "C1", Name: "x", SizeBytes: 10}); err == nil {
 		t.Fatal("unknown kind should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "missing", Name: "x", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "missing", Name: "x", SizeBytes: 10}); err == nil {
 		t.Fatal("unknown course should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", SizeBytes: 10}); err == nil {
-		t.Fatal("empty name should be rejected")
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", SizeBytes: 10}); err == nil {
+		t.Fatal("textbook without a target should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", SizeBytes: 0}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: "missing", SizeBytes: 10}); err == nil {
+		t.Fatal("missing target textbook should be rejected")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: other.ID, SizeBytes: 10}); err == nil {
+		t.Fatal("textbook from another course should be rejected")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", TargetID: target.ID, SizeBytes: 10}); err == nil {
+		t.Fatal("missing object storage should be reported")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", SizeBytes: 10}); err == nil {
+		t.Fatal("empty resource name should be rejected")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", SizeBytes: 0}); err == nil {
 		t.Fatal("empty file should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", SizeBytes: maxSubmissionBytes + 1}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", SizeBytes: maxSubmissionBytes + 1}); err == nil {
 		t.Fatal("oversized file should be rejected")
-	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", SizeBytes: 10}); err == nil {
-		t.Fatal("missing object storage should be reported")
 	}
 }
 
@@ -80,14 +101,14 @@ func TestCreateSubmissionTicketLimits(t *testing.T) {
 	now := time.Now().UTC()
 	for i := 0; i < maxPendingSubmissionsPerUser; i++ {
 		if _, err := store.CreateSubmission(ctx, sqlite.SubmissionInput{
-			Kind: "textbook", CourseCode: "C1", Name: "教材", PdfKey: "submissions/x/original.pdf",
+			Kind: "resource", CourseCode: "C1", Name: "试卷", PdfKey: "submissions/x/original.pdf",
 			Status: "pending_review", SubmittedByUserID: p.User.ID, SubmittedByName: "张三",
 		}, now); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "textbook", CourseCode: "C1", Name: "新教材", SizeBytes: 10,
+		Kind: "resource", CourseCode: "C1", Name: "新试卷", SizeBytes: 10,
 	}); err == nil {
 		t.Fatal("a full review queue should reject new tickets")
 	}
@@ -125,7 +146,7 @@ func TestCompleteSubmissionVerifiesUpload(t *testing.T) {
 	)
 
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "textbook", CourseCode: "C1", Name: "教材甲", SizeBytes: 12,
+		Kind: "resource", CourseCode: "C1", Name: "试卷甲", SizeBytes: 12,
 	})
 	if err != nil {
 		t.Fatal(err)

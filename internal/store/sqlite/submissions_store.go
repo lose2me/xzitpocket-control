@@ -23,6 +23,7 @@ type Submission struct {
 	SubmittedByUserID   string    `json:"submitted_by_user_id"`
 	SubmittedByName     string    `json:"submitted_by_name"`
 	StudentIDCiphertext string    `json:"-"`
+	TargetID            string    `json:"target_id"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -38,9 +39,10 @@ type SubmissionInput struct {
 	SubmittedByUserID   string
 	SubmittedByName     string
 	StudentIDCiphertext string
+	TargetID            string
 }
 
-const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, created_at, updated_at"
+const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at"
 
 func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now time.Time) (Submission, error) {
 	if strings.TrimSpace(input.Status) == "" {
@@ -48,10 +50,10 @@ func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now
 	}
 	id := newStoreIDPrefix("sub")
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO resource_submissions(
-			id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, input.Kind, input.CourseCode, input.Name, input.Tags, input.PdfKey, input.SizeBytes, input.Status,
-		input.SubmittedByUserID, input.SubmittedByName, input.StudentIDCiphertext, millis(now), millis(now))
+		input.SubmittedByUserID, input.SubmittedByName, input.StudentIDCiphertext, input.TargetID, millis(now), millis(now))
 	if err != nil {
 		return Submission{}, err
 	}
@@ -239,7 +241,7 @@ func scanSubmission(row rowScannerSubmission) (Submission, error) {
 	var userID sql.NullString
 	var created, updated int64
 	if err := row.Scan(&item.ID, &item.Kind, &item.CourseCode, &item.Name, &item.Tags, &item.PdfKey,
-		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &created, &updated); err != nil {
+		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &item.TargetID, &created, &updated); err != nil {
 		return Submission{}, err
 	}
 	item.SubmittedByUserID = userID.String

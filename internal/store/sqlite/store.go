@@ -50,7 +50,7 @@ var currentSchemaTables = []struct {
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
-	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "created_at", "updated_at"}},
+	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -125,6 +125,7 @@ var additiveMigrations = []struct {
 	{"textbooks", "contributor_user_id", `ALTER TABLE textbooks ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
 	{"resources", "contributor_user_id", `ALTER TABLE resources ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "student_id_ciphertext", `ALTER TABLE resource_submissions ADD COLUMN student_id_ciphertext TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "target_id", `ALTER TABLE resource_submissions ADD COLUMN target_id TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {

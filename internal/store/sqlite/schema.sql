@@ -342,6 +342,7 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
     submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     submitted_by_name TEXT NOT NULL DEFAULT '',
     student_id_ciphertext TEXT NOT NULL DEFAULT '',
+    target_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

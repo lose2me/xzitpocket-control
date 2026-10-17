@@ -27,13 +27,17 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 		"idn-test", "usr-upload", "xzit-oa", "hash-test", "alias-test", ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
+	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	a.cosClientOverride = newStubCOSClient(
 		map[string]string{http.MethodGet: "%PDF-"},
 		map[string]int64{http.MethodHead: 12},
 	)
 	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "textbook", CourseCode: "C1", Name: "教材甲", SizeBytes: 12,
+		Kind: "textbook", CourseCode: "C1", Name: "教材甲", TargetID: target.ID, SizeBytes: 12,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,8 +61,11 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 	if !ok {
 		t.Fatalf("approve = %#v", out)
 	}
-	stored, err := store.GetTextbook(ctx, textbook.ID)
-	if err != nil || stored.ContributorUserID != "usr-upload" {
+	if textbook.ID != target.ID {
+		t.Fatalf("approved textbook = %q, want target %q", textbook.ID, target.ID)
+	}
+	stored, err := store.GetTextbook(ctx, target.ID)
+	if err != nil || stored.ContributorUserID != "usr-upload" || stored.PdfKey == "" {
 		t.Fatalf("stored = %#v, err = %v", stored, err)
 	}
 	contribution, downloads, err := store.GetUserStats(ctx, "usr-upload")

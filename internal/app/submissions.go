@@ -22,6 +22,7 @@ type ResourceSubmissionTicketInput struct {
 	CourseCode string `json:"course_code"`
 	Name       string `json:"name"`
 	Tags       string `json:"tags"`
+	TargetID   string `json:"target_id"`
 	SizeBytes  int64  `json:"size_bytes"`
 }
 
@@ -46,6 +47,7 @@ type SubmissionView struct {
 	SubmittedByUserID string `json:"submitted_by_user_id,omitempty"`
 	SubmittedByName   string `json:"submitted_by_name"`
 	StudentID         string `json:"student_id,omitempty"`
+	TargetID          string `json:"target_id,omitempty"`
 	CreatedAt         string `json:"created_at"`
 }
 
@@ -79,7 +81,7 @@ func submissionView(item sqlite.Submission) SubmissionView {
 		ID: item.ID, Kind: item.Kind, CourseCode: item.CourseCode, Name: item.Name, Tags: item.Tags,
 		SizeBytes: item.SizeBytes, Status: item.Status, HasPdf: item.PdfKey != "",
 		SubmittedByUserID: item.SubmittedByUserID, SubmittedByName: item.SubmittedByName,
-		CreatedAt: item.CreatedAt.Format(time.RFC3339),
+		TargetID: item.TargetID, CreatedAt: item.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -130,10 +132,36 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		return ResourceUploadTicketView{}, Err("invalid_course_code", "该课程不存在", 400)
 	}
 	name := strings.TrimSpace(in.Name)
+	tags := strings.TrimSpace(in.Tags)
+	targetID := ""
+	if kind == "textbook" {
+		targetID = strings.TrimSpace(in.TargetID)
+		if targetID == "" {
+			return ResourceUploadTicketView{}, Err("textbook_required", "请选择教材", 400)
+		}
+		textbook, err := a.Store.GetTextbook(ctx, targetID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ResourceUploadTicketView{}, Err("textbook_missing", "教材不存在", 400)
+		}
+		if err != nil {
+			return ResourceUploadTicketView{}, err
+		}
+		associated := textbook.CourseCode == courseCode
+		for _, code := range textbook.CourseCodes {
+			if code == courseCode {
+				associated = true
+				break
+			}
+		}
+		if !associated {
+			return ResourceUploadTicketView{}, Err("textbook_course_mismatch", "教材不属于该课程", 400)
+		}
+		name = textbook.Name
+		tags = textbook.Tags
+	}
 	if name == "" || len(name) > 256 || strings.ContainsAny(name, "\r\n\x00") {
 		return ResourceUploadTicketView{}, Err("invalid_name", "资料名称无效", 400)
 	}
-	tags := strings.TrimSpace(in.Tags)
 	if len(tags) > 1024 || strings.ContainsAny(tags, "\r\n\x00") {
 		return ResourceUploadTicketView{}, Err("invalid_tags", "标签无效", 400)
 	}
@@ -164,7 +192,7 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	now := time.Now().UTC()
 	submitterName, studentIDCiphertext := a.submissionIdentity(ctx, p)
 	item, err := a.Store.CreateSubmission(ctx, sqlite.SubmissionInput{
-		Kind: kind, CourseCode: courseCode, Name: name, Tags: tags, SizeBytes: in.SizeBytes,
+		Kind: kind, CourseCode: courseCode, Name: name, Tags: tags, SizeBytes: in.SizeBytes, TargetID: targetID,
 		Status: "pending_upload", SubmittedByUserID: p.User.ID,
 		SubmittedByName: submitterName, StudentIDCiphertext: studentIDCiphertext,
 	}, now)
@@ -376,29 +404,54 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 	var result map[string]any
 	switch kind {
 	case "textbook":
-		textbook, err := a.Store.CreateTextbook(ctx, sqlite.TextbookInput{
-			Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: []string{item.CourseCode},
-		}, now)
-		if errors.Is(err, sqlite.ErrTextbookExists) {
-			return nil, Err("textbook_exists", "同名教材已存在，请驳回该提交", 409)
-		}
-		if err != nil {
-			return nil, err
+		var textbook sqlite.Textbook
+		created := false
+		if item.TargetID != "" {
+			existing, err := a.Store.GetTextbook(ctx, item.TargetID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, Err("textbook_missing", "教材不存在，请驳回该提交", 409)
+			}
+			if err != nil {
+				return nil, err
+			}
+			textbook = existing
+		} else {
+			createdTextbook, err := a.Store.CreateTextbook(ctx, sqlite.TextbookInput{
+				Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: []string{item.CourseCode},
+			}, now)
+			if errors.Is(err, sqlite.ErrTextbookExists) {
+				return nil, Err("textbook_exists", "同名教材已存在，请驳回该提交", 409)
+			}
+			if err != nil {
+				return nil, err
+			}
+			textbook = createdTextbook
+			created = true
 		}
 		if err := a.Store.SetTextbookPdfKey(ctx, textbook.ID, item.PdfKey, now); err != nil {
-			_ = a.Store.DeleteTextbook(ctx, textbook.ID)
+			if created {
+				_ = a.Store.DeleteTextbook(ctx, textbook.ID)
+			}
 			return nil, err
 		}
-		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
-			return a.Store.SetTextbookContributor(ctx, textbook.ID, userID)
-		})
+		if item.SubmittedByUserID != "" {
+			// The latest PDF contributor owns future download attribution.
+			if err := a.Store.SetTextbookContributor(ctx, textbook.ID, item.SubmittedByUserID); err != nil {
+				a.Logger.Warn("link contribution failed", "error", err, "textbook", textbook.ID)
+			} else {
+				textbook.ContributorUserID = item.SubmittedByUserID
+			}
+			if err := a.Store.IncrementUserContribution(ctx, item.SubmittedByUserID); err != nil {
+				a.Logger.Warn("increment contribution count failed", "error", err, "user", item.SubmittedByUserID)
+			}
+		}
 		textbook.PdfKey = item.PdfKey
 		textbook.UpdatedAt = now
 		view := textbookView(textbook)
 		view.SizeBytes = item.SizeBytes
 		result = map[string]any{"kind": kind, "textbook": view}
 		_ = a.Store.AddAudit(ctx, actor, "textbook_submission_approve", "textbook_submission", item.ID,
-			controlcrypto.JSON(map[string]any{"textbook_id": textbook.ID}), now)
+			controlcrypto.JSON(map[string]any{"textbook_id": textbook.ID, "targeted": item.TargetID != ""}), now)
 	case "resource":
 		resource, err := a.Store.CreateResource(ctx, sqlite.ResourceInput{
 			Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
