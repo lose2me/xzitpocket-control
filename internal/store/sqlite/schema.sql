@@ -289,3 +289,20 @@ CREATE TABLE IF NOT EXISTS textbooks (
 CREATE INDEX IF NOT EXISTS idx_courses_name ON courses(name);
 CREATE INDEX IF NOT EXISTS idx_textbooks_name ON textbooks(name);
 CREATE INDEX IF NOT EXISTS idx_textbooks_course ON textbooks(course_code);
+
+-- Resources uploaded with courses. One row per (name, tags) per course; the
+-- course association is by course code and is edited manually in the console.
+-- Unlike textbooks a resource has no cover, only its PDF.
+CREATE TABLE IF NOT EXISTS resources (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '',
+    course_code TEXT NOT NULL DEFAULT '',
+    pdf_key TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(name, tags, course_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resources_name ON resources(name);
+CREATE INDEX IF NOT EXISTS idx_resources_course ON resources(course_code);

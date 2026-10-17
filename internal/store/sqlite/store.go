@@ -48,6 +48,7 @@ var currentSchemaTables = []struct {
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "created_at", "updated_at"}},
+	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "created_at", "updated_at"}},
 }
 
 type Store struct {
