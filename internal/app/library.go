@@ -21,7 +21,6 @@ var questionBankIDPattern = regexp.MustCompile(`^QB-[0-9]{3,}$`)
 type QuestionBankInput struct {
 	ID          string          `json:"-"`
 	OrderID     int             `json:"orderId,omitempty"`
-	New         bool            `json:"new"`
 	Name        string          `json:"name"`
 	Status      string          `json:"status,omitempty"`
 	RequiresCDK bool            `json:"requiresCDK"`
@@ -53,7 +52,6 @@ type QuestionBankResponse struct {
 type QuestionBankView struct {
 	ID          string         `json:"id"`
 	OrderID     int            `json:"orderId"`
-	New         bool           `json:"new"`
 	Name        string         `json:"name"`
 	RequiresCDK bool           `json:"requiresCDK"`
 	CourseCode  string         `json:"courseCode,omitempty"`
@@ -145,7 +143,7 @@ func validateQuestionBankInput(in QuestionBankInput, requireID bool) (sqlite.Que
 	if len(in.Questions) > 1000 {
 		return sqlite.QuestionBank{}, Err("too_many_questions", "题目数量不能超过 1000", http.StatusBadRequest)
 	}
-	bank := sqlite.QuestionBank{ID: in.ID, OrderID: in.OrderID, IsNew: in.New, Name: in.Name, Status: status, RequiresCDK: in.RequiresCDK, CourseCode: primary, CourseCodes: codes, Questions: make([]sqlite.Question, 0, len(in.Questions))}
+	bank := sqlite.QuestionBank{ID: in.ID, OrderID: in.OrderID, Name: in.Name, Status: status, RequiresCDK: in.RequiresCDK, CourseCode: primary, CourseCodes: codes, Questions: make([]sqlite.Question, 0, len(in.Questions))}
 	seenNumbers := make(map[int]bool, len(in.Questions))
 	for index, input := range in.Questions {
 		if input.QuestionNumber < 1 || input.QuestionNumber > 100000 || seenNumbers[input.QuestionNumber] {
@@ -254,7 +252,7 @@ func questionBankView(bank sqlite.QuestionBank) QuestionBankView {
 	if codes == nil {
 		codes = []string{}
 	}
-	view := QuestionBankView{ID: bank.ID, OrderID: bank.OrderID, New: bank.IsNew, Name: bank.Name, RequiresCDK: bank.RequiresCDK, CourseCode: bank.CourseCode, CourseCodes: codes, Questions: make([]QuestionView, 0, len(bank.Questions))}
+	view := QuestionBankView{ID: bank.ID, OrderID: bank.OrderID, Name: bank.Name, RequiresCDK: bank.RequiresCDK, CourseCode: bank.CourseCode, CourseCodes: codes, Questions: make([]QuestionView, 0, len(bank.Questions))}
 	questions := append([]sqlite.Question(nil), bank.Questions...)
 	sort.SliceStable(questions, func(i, j int) bool { return questions[i].QuestionNumber < questions[j].QuestionNumber })
 	for _, question := range questions {
@@ -306,7 +304,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, 
 		if codes == nil {
 			codes = []string{}
 		}
-		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }

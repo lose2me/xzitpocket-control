@@ -54,7 +54,7 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	admin := requestWithHeaders(t, ts.URL+"/api/v1/admin/session", http.MethodPost, map[string]string{"key": "test-password"}, nil)
 	adminHeaders := map[string]string{"Authorization": "Bearer " + admin["access_token"].(string)}
 	bank := requestWithHeaders(t, ts.URL+"/api/v1/admin/question-banks", http.MethodPost, map[string]any{"questionBank": map[string]any{
-		"new": true, "requiresCDK": true, "name": "受保护题库", "questions": []any{map[string]any{"questionNumber": 1, "type": "填空题", "title": "第1题", "questionText": "答案", "options": []any{}, "correctAnswer": "答案"}},
+		"requiresCDK": true, "name": "受保护题库", "questions": []any{map[string]any{"questionNumber": 1, "type": "填空题", "title": "第1题", "questionText": "答案", "options": []any{}, "correctAnswer": "答案"}},
 	}}, adminHeaders)
 	bankID := bank["questionBank"].(map[string]any)["id"].(string)
 	if bankID != "QB-001" {

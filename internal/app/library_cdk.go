@@ -250,7 +250,7 @@ func (a *App) ListQuestionBanksForUser(ctx context.Context, limit, offset int, u
 		if codes == nil {
 			codes = []string{}
 		}
-		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, New: item.IsNew, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, OrderID: item.OrderID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }

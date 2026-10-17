@@ -543,7 +543,7 @@ import { template } from './template.js';
         { title: '顺序 ID', key: 'orderId', align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', width: '13%' }, { title: '名称', key: 'name', width: '15%' },
         { title: '关联课程', key: 'courseCode', sortable: true, width: '12%' },
         { title: '题目数', key: 'question_count', align: 'center', width: '8%' }, { title: '状态', key: 'status', width: '8%' },
-        { title: '新题库', key: 'new', align: 'center', width: '6%' }, { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '9%' }, { title: '更新时间', key: 'updated_at', width: '8%' },
+        { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '9%' }, { title: '更新时间', key: 'updated_at', width: '8%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '12%' }
       ];
       const cdkHeaders = [
@@ -1494,7 +1494,6 @@ import { template } from './template.js';
           questionBank: {
             id: out.questionBank.id,
             orderId: out.questionBank.orderId,
-            new: !!out.questionBank.new,
             name: out.questionBank.name,
             status: out.status || 'active',
             requiresCDK: !!out.questionBank.requiresCDK,

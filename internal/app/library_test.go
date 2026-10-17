@@ -26,7 +26,7 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", OrderID: 4, New: true, Name: "基础测验", CourseCodes: []string{"3007B0001", " 3007B2106 "}, Questions: []QuestionInput{
+	created, err := a.CreateQuestionBank(context.Background(), QuestionBankInput{ID: "QB-001", OrderID: 4, Name: "基础测验", CourseCodes: []string{"3007B0001", " 3007B2106 "}, Questions: []QuestionInput{
 		{QuestionNumber: 2, Type: "多选题", Title: "第二题", QuestionText: "选择系统", Options: []OptionInput{{Label: "A", Text: "Windows"}, {Label: "B", Text: "Linux"}}, CorrectAnswer: "B,A"},
 		{QuestionNumber: 1, Type: "填空题", Title: "第一题", QuestionText: "1 GB 等于 ____ MB。", CorrectAnswer: "1024"},
 	}}, "admin")
@@ -75,14 +75,14 @@ func TestLibraryCDKUnlocksQuestionBankForStudent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := a.CreateQuestionBank(ctx, QuestionBankInput{New: true, RequiresCDK: true, Name: "受限题库", Questions: []QuestionInput{{QuestionNumber: 1, Type: "填空题", Title: "题", QuestionText: "题干", CorrectAnswer: "答案"}}}, "admin")
+	created, err := a.CreateQuestionBank(ctx, QuestionBankInput{RequiresCDK: true, Name: "受限题库", Questions: []QuestionInput{{QuestionNumber: 1, Type: "填空题", Title: "题", QuestionText: "题干", CorrectAnswer: "答案"}}}, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.GetQuestionBankForUser(ctx, created.QuestionBank.ID, "missing-user"); err == nil {
 		t.Fatal("protected bank should remain locked without a student identity")
 	}
-	second, err := a.CreateQuestionBank(ctx, QuestionBankInput{New: false, RequiresCDK: true, Name: "另一受限题库", Questions: []QuestionInput{{QuestionNumber: 1, Type: "填空题", Title: "题", QuestionText: "题干", CorrectAnswer: "答案"}}}, "admin")
+	second, err := a.CreateQuestionBank(ctx, QuestionBankInput{RequiresCDK: true, Name: "另一受限题库", Questions: []QuestionInput{{QuestionNumber: 1, Type: "填空题", Title: "题", QuestionText: "题干", CorrectAnswer: "答案"}}}, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

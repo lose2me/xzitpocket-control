@@ -32,7 +32,7 @@ var currentSchemaTables = []struct {
 	{name: "activity_events", columns: []string{"id", "event_id", "user_id", "device_id", "type", "occurred_at", "received_at", "properties_json"}},
 	{name: "error_reports", columns: []string{"id", "event_id", "user_id", "device_id", "student_id_hash", "app_version", "platform", "title", "message", "error_text", "stack_trace", "occurred_at", "received_at"}},
 	{name: "error_report_ignored_students", columns: []string{"student_id_hash", "ignored_at"}},
-	{name: "question_banks", columns: []string{"id", "order_id", "is_new", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
+	{name: "question_banks", columns: []string{"id", "order_id", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
 	{name: "question_bank_courses", columns: []string{"question_bank_id", "course_code"}},
 	{name: "question_bank_id_counter", columns: []string{"id", "next_number"}},
 	{name: "question_bank_order_counter", columns: []string{"id", "next_number"}},
@@ -167,6 +167,7 @@ var removedColumns = []struct {
 	column string
 }{
 	{"courses", "books"},
+	{"question_banks", "is_new"},
 }
 
 func (s *Store) applyColumnRemovals(ctx context.Context) error {
@@ -471,7 +472,6 @@ type Challenge struct {
 type QuestionBank struct {
 	ID          string
 	OrderID     int
-	IsNew       bool
 	Name        string
 	Status      string
 	RequiresCDK bool
@@ -505,7 +505,6 @@ type QuestionOption struct {
 type QuestionBankSummary struct {
 	ID            string
 	OrderID       int
-	IsNew         bool
 	Name          string
 	Status        string
 	RequiresCDK   bool

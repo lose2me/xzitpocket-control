@@ -95,7 +95,7 @@ func TestControlFlow(t *testing.T) {
 		t.Fatalf("control connection did not update device time: %v, %v", connectedDevice.LastSeenAt, err)
 	}
 
-	questionBank := map[string]any{"questionBank": map[string]any{"new": true, "name": "计算机基础知识测验", "questions": []any{
+	questionBank := map[string]any{"questionBank": map[string]any{"name": "计算机基础知识测验", "questions": []any{
 		map[string]any{"questionNumber": 1, "type": "单选题", "title": "第1题", "questionText": "以下哪个是计算机的核心部件？", "options": []any{map[string]any{"label": "A", "text": "显示器"}, map[string]any{"label": "B", "text": "CPU"}}, "correctAnswer": "B"},
 	}}}
 	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android", "app_version": "2.0.4"}}}, map[string]string{"Authorization": "Bearer " + access})

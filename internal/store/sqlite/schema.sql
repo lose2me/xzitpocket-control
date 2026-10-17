@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS error_report_ignored_students (
 CREATE TABLE IF NOT EXISTS question_banks (
     id TEXT PRIMARY KEY,
     order_id INTEGER NOT NULL UNIQUE CHECK (order_id > 0),
-    is_new INTEGER NOT NULL DEFAULT 1 CHECK (is_new IN (0, 1)),
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
     requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),

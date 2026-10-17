@@ -77,7 +77,7 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	bank := QuestionBank{ID: "QB-001", IsNew: true, Name: "测试", Status: "active", CreatedAt: now, UpdatedAt: now, Questions: []Question{{ID: "q-1", QuestionNumber: 1, Type: "单选题", Title: "题目", QuestionText: "题干", CorrectAnswer: "A", SortOrder: 0, Options: []QuestionOption{{ID: "o-1", Label: "A", Text: "答案", SortOrder: 0}}}}}
+	bank := QuestionBank{ID: "QB-001", Name: "测试", Status: "active", CreatedAt: now, UpdatedAt: now, Questions: []Question{{ID: "q-1", QuestionNumber: 1, Type: "单选题", Title: "题目", QuestionText: "题干", CorrectAnswer: "A", SortOrder: 0, Options: []QuestionOption{{ID: "o-1", Label: "A", Text: "答案", SortOrder: 0}}}}}
 	if err := store.CreateQuestionBank(ctx, bank); err != nil {
 		t.Fatal(err)
 	}
