@@ -106,6 +106,33 @@ import { template } from './template.js';
     return responseBody;
   }
 
+  // uploadWithProgress posts a FormData body with XMLHttpRequest so the console
+  // can show real upload progress (fetch has no upload-progress event).
+  function uploadWithProgress(path, body, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', path);
+      const access = localStorage.getItem('control_admin');
+      if (access) xhr.setRequestHeader('Authorization', 'Bearer ' + access);
+      const csrf = document.cookie.match(/(?:^|; )control_csrf=([^;]+)/);
+      if (csrf) xhr.setRequestHeader('X-CSRF-Token', decodeURIComponent(csrf[1]));
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) onProgress(event.loaded, event.total);
+      };
+      xhr.onload = () => {
+        let responseBody = {};
+        try { responseBody = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(responseBody); return; }
+        const error = new Error((responseBody.error && responseBody.error.message) || '请求失败');
+        error.status = xhr.status;
+        error.code = responseBody.error && responseBody.error.code;
+        reject(error);
+      };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.send(body);
+    });
+  }
+
   const padDatePart = (value) => String(value).padStart(2, '0');
   const formatDateTime = (value) => {
     if (value === undefined || value === null || value === '') return '-';
@@ -210,6 +237,8 @@ import { template } from './template.js';
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
       const resourceFiles = ref([]);
+      const uploading = ref(false);
+      const uploadProgress = ref(0);
       const courseOptions = ref([]);
       const pdfCanvasEl = ref(null);
       const pdfFile = ref(null);
@@ -402,49 +431,49 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
       ];
       const deviceHeaders = [
-        { title: '设备码', key: 'device_serial', sortable: false, width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
-        { title: '版本', key: 'app_version', width: '14%' }, { title: '安装标识', key: 'installation_id', sortable: false, width: '24%' },
-        { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', sortable: false, width: '10%' }
+        { title: '设备码', key: 'device_serial', width: '20%' }, { title: '平台', key: 'platform', width: '14%' },
+        { title: '版本', key: 'app_version', width: '14%' }, { title: '安装标识', key: 'installation_id', width: '24%' },
+        { title: '最近活动', key: 'last_seen_at', width: '18%' }, { title: '状态', key: 'status', width: '10%' }
       ];
       const riskHeaders = [
-        { title: '类型', key: 'type', width: '16%' }, { title: '班级', key: 'class_name', sortable: false, width: '18%' },
-        { title: '显示名', key: 'display_name', sortable: false, width: '16%' }, { title: '版本号', key: 'app_version', sortable: false, width: '12%' },
+        { title: '类型', key: 'type', width: '16%' }, { title: '班级', key: 'class_name', width: '18%' },
+        { title: '显示名', key: 'display_name', width: '16%' }, { title: '版本号', key: 'app_version', width: '12%' },
         { title: '次数', key: 'observed_count', align: 'center', width: '10%' }, { title: '时间', key: 'created_at', width: '14%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '10%' }
       ];
       const auditHeaders = [
         { title: '时间', key: 'created_at', width: '18%' }, { title: '动作', key: 'action', width: '18%' },
-        { title: '操作者', key: 'actor_id', sortable: false, width: '16%' }, { title: '目标', key: 'target', sortable: false, width: '22%' },
-        { title: '详情', key: 'detail', sortable: false, width: '26%' }
+        { title: '操作者', key: 'actor_id', width: '16%' }, { title: '目标', key: 'target_text', width: '22%' },
+        { title: '详情', key: 'detail', width: '26%' }
       ];
       const errorReportHeaders = [
         { title: '时间', key: 'occurred_at', width: '15%' },
-        { title: '学号', key: 'student_id', sortable: false, width: '13%' },
+        { title: '学号', key: 'student_id', width: '13%' },
         { title: '标题', key: 'title', width: '17%' },
-        { title: '错误摘要', key: 'message', sortable: false, width: '22%' },
+        { title: '错误摘要', key: 'message', width: '22%' },
         { title: '版本', key: 'app_version', width: '9%' },
         { title: '平台', key: 'platform', width: '9%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' },
       ];
       const userDeviceHeaders = [
-        { title: '设备码', key: 'device_serial', sortable: false, width: '52%' }, { title: '平台', key: 'platform', width: '18%' },
+        { title: '设备码', key: 'device_serial', width: '52%' }, { title: '平台', key: 'platform', width: '18%' },
         { title: '最近活动', key: 'last_seen_at', width: '30%' }
       ];
       const bankHeaders = [
-        { title: '顺序 ID', key: 'orderId', sortable: false, align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', sortable: false, width: '13%' }, { title: '名称', key: 'name', width: '17%' },
+        { title: '顺序 ID', key: 'orderId', align: 'center', width: '9%' }, { title: '题库 ID', key: 'id', width: '13%' }, { title: '名称', key: 'name', width: '17%' },
         { title: '题目数', key: 'question_count', align: 'center', width: '9%' }, { title: '状态', key: 'status', width: '9%' },
-        { title: '新题库', key: 'new', sortable: false, align: 'center', width: '7%' }, { title: 'CDK 解锁', key: 'requiresCDK', sortable: false, align: 'center', width: '10%' }, { title: '更新时间', key: 'updated_at', width: '9%' },
+        { title: '新题库', key: 'new', align: 'center', width: '7%' }, { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '10%' }, { title: '更新时间', key: 'updated_at', width: '9%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '17%' }
       ];
       const cdkHeaders = [
-        { title: 'CDK ID', key: 'id', sortable: false, width: '20%' },
-        { title: '题库', key: 'question_bank_id', sortable: false, width: '14%' },
-        { title: '状态', key: 'status', width: '13%' }, { title: '绑定学号', key: 'bound_student_id', sortable: false, width: '16%' },
+        { title: 'CDK ID', key: 'id', width: '20%' },
+        { title: '题库', key: 'question_bank_id', width: '14%' },
+        { title: '状态', key: 'status', width: '13%' }, { title: '绑定学号', key: 'bound_student_id', width: '16%' },
         { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
       const textbookHeaders = [
         { title: '教材名称', key: 'name', sortable: true, width: '30%' },
-        { title: '标签', key: 'tags', sortable: false, width: '28%' },
+        { title: '标签', key: 'tags', width: '28%' },
         { title: '关联课程', key: 'course_code', sortable: true, width: '20%' },
         { title: '更新时间', key: 'updated_at', width: '14%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
@@ -452,7 +481,7 @@ import { template } from './template.js';
       const resourceHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '22%' },
         { title: '课程名称', key: 'name', sortable: true, width: '34%' },
-        { title: '资源数', key: 'resource_count', sortable: false, align: 'center', width: '14%' },
+        { title: '资源数', key: 'resource_count', align: 'center', width: '14%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
       ];
       const courseResourceHeaders = [
@@ -463,7 +492,7 @@ import { template } from './template.js';
       const courseHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '20%' },
         { title: '课程名称', key: 'name', sortable: true, width: '30%' },
-        { title: '关联书籍', key: 'books', sortable: false, width: '33%' },
+        { title: '关联书籍', key: 'books_text', width: '33%' },
         { title: '更新时间', key: 'updated_at', width: '11%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '6%' }
       ];
@@ -557,7 +586,8 @@ import { template } from './template.js';
         const search = (courseSearch.value || '').trim();
         const query = search ? '&q=' + encodeURIComponent(search) : '';
         const out = await api('/api/v1/admin/courses?limit=' + courseItemsPerPage.value + '&offset=' + offset + query);
-        courses.value = out.items || []; courseTotal.value = out.total || 0;
+        courses.value = (out.items || []).map(item => Object.assign({}, item, { books_text: booksLabel(item.books) }));
+        courseTotal.value = out.total || 0;
       };
       const searchCourses = () => call(async () => { coursePage.value = 1; await loadCourses(); });
       const openNewCourse = () => {
@@ -656,13 +686,28 @@ import { template } from './template.js';
         await loadCourseResources();
         resourceDialog.value = true;
       });
+      const onResourceDrop = (event) => {
+        const dropped = Array.from(event.dataTransfer ? event.dataTransfer.files : []);
+        const pdfs = dropped.filter((file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+        if (!pdfs.length) return;
+        const current = Array.isArray(resourceFiles.value) ? resourceFiles.value.slice() : (resourceFiles.value ? [resourceFiles.value] : []);
+        resourceFiles.value = current.concat(pdfs);
+      };
       const uploadResources = () => call(async () => {
         const files = Array.isArray(resourceFiles.value) ? resourceFiles.value : (resourceFiles.value ? [resourceFiles.value] : []);
         if (!files.length) throw new Error('请选择至少一个 PDF 文件');
         const data = new FormData();
         data.append('course_code', (resourceCourse.value && resourceCourse.value.code) || '');
         files.forEach((file) => data.append('files', file, file.name || 'resource.pdf'));
-        const out = await api('/api/v1/admin/resources/upload', { method: 'POST', body: data });
+        uploading.value = true; uploadProgress.value = 0;
+        let out;
+        try {
+          out = await uploadWithProgress('/api/v1/admin/resources/upload', data, (loaded, total) => {
+            uploadProgress.value = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          });
+        } finally {
+          uploading.value = false;
+        }
         const created = out && out.items ? out.items.length : 0;
         const failed = out && out.failed ? out.failed : [];
         resourceFiles.value = [];
@@ -744,6 +789,11 @@ import { template } from './template.js';
         pdfPage.value = page;
         await renderPdfPage(page);
       });
+      const onTextbookDrop = (event) => {
+        const dropped = Array.from(event.dataTransfer ? event.dataTransfer.files : []);
+        const file = dropped.find((item) => item.type === 'application/pdf' || /\.pdf$/i.test(item.name || ''));
+        if (file) onPdfSelected([file]);
+      };
       const generateCover = () => call(async () => {
         if (!pdfDoc) throw new Error('请先选择 PDF');
         const page = Math.min(Math.max(1, parseInt(pdfPage.value, 10) || 1), pdfDoc.numPages);
@@ -764,7 +814,14 @@ import { template } from './template.js';
         if (pdfFile.value) {
           const data = new FormData();
           data.append('file', pdfFile.value, pdfFile.value.name || 'original.pdf');
-          await api('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/pdf', { method: 'POST', body: data });
+          uploading.value = true; uploadProgress.value = 0;
+          try {
+            await uploadWithProgress('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/pdf', data, (loaded, total) => {
+              uploadProgress.value = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            });
+          } finally {
+            uploading.value = false;
+          }
         }
         if (coverBlob.value) {
           await api('/api/v1/admin/textbooks/' + encodeURIComponent(id) + '/cover', {
@@ -924,7 +981,7 @@ import { template } from './template.js';
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
-          else if (view.value === 'audit') audit.value = (await api('/api/v1/admin/audit?limit=100')).items || [];
+          else if (view.value === 'audit') audit.value = ((await api('/api/v1/admin/audit?limit=100')).items || []).map(item => Object.assign({}, item, { target_text: [item.target_type, item.target_id].filter(Boolean).join(' ') }));
         });
       };
       const switchView = (name) => {
@@ -1254,7 +1311,7 @@ import { template } from './template.js';
         banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
-        resourceDialog, resourceCourse, courseResources, resourceFiles, resourceHeaders, courseResourceHeaders,
+        resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
@@ -1263,7 +1320,7 @@ import { template } from './template.js';
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
-        openResourceDialog, loadCourseResources, uploadResources, deleteResource, copyResourceLink,
+        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, copyResourceLink, onTextbookDrop,
         loadCourses, searchCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
       };
     },

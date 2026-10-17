@@ -398,3 +398,15 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
 }
+
+/* Drag-and-drop PDF upload zone */
+.upload-drop {
+  border: 1px dashed #c2ccd1;
+  border-radius: 8px;
+  padding: 4px;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.upload-drop:hover {
+  border-color: #176b4d;
+  background: rgba(23, 107, 77, 0.03);
+}
