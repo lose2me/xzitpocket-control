@@ -182,6 +182,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS admin_users (
     id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    permissions TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL,

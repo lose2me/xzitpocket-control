@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -54,36 +55,83 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 		logger = slog.Default()
 	}
 	a := &App{Cfg: cfg, Store: store, Logger: logger}
-	if err := a.ensureAdmin(context.Background()); err != nil {
+	if err := a.ensureAdmins(context.Background()); err != nil {
 		return nil, err
 	}
 	return a, nil
 }
 
-func (a *App) ensureAdmin(ctx context.Context) error {
-	count, err := a.Store.CountAdmins(ctx)
-	if err != nil {
-		return err
-	}
-	if count != 0 {
-		return nil
-	}
-	hash, err := controlcrypto.Argon2idHash(a.Cfg.AdminKey)
-	if err != nil {
-		return fmt.Errorf("hash administrator key: %w", err)
+// ensureAdmins creates or refreshes the administrator accounts configured in
+// .env and disables accounts that were removed from the configuration.
+func (a *App) ensureAdmins(ctx context.Context) error {
+	accounts := a.Cfg.Admins
+	if len(accounts) == 0 && strings.TrimSpace(a.Cfg.AdminKey) != "" {
+		// Directly constructed configs (tests, embedded callers) may only set
+		// AdminKey; treat it as the legacy super admin.
+		accounts = []config.AdminAccount{{Name: "admin", Key: a.Cfg.AdminKey, All: true}}
 	}
 	now := time.Now().UTC()
-	id, err := controlcrypto.NewID("adm")
-	if err != nil {
-		return err
+	names := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		hash, err := controlcrypto.Argon2idHash(account.Key)
+		if err != nil {
+			return fmt.Errorf("hash admin %q: %w", account.Name, err)
+		}
+		perms := adminPermsString(account)
+		existing, err := a.Store.GetAdminByName(ctx, account.Name)
+		if errors.Is(err, sql.ErrNoRows) && account.Name == "admin" {
+			// Adopt the legacy administrator row created before names existed.
+			if first, firstErr := a.Store.GetAdmin(ctx); firstErr == nil && first.Name == "" {
+				existing, err = first, nil
+			}
+		}
+		switch {
+		case err == nil:
+			if existing.Name != account.Name {
+				if err := a.Store.SetAdminName(ctx, existing.ID, account.Name); err != nil {
+					return fmt.Errorf("rename admin %q: %w", account.Name, err)
+				}
+			}
+			if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, perms); err != nil {
+				return fmt.Errorf("update admin %q: %w", account.Name, err)
+			}
+		case errors.Is(err, sql.ErrNoRows):
+			id, idErr := controlcrypto.NewID("adm")
+			if idErr != nil {
+				return idErr
+			}
+			if createErr := a.Store.CreateAdmin(ctx, sqlite.Admin{
+				ID: id, Name: account.Name, Permissions: perms, PasswordHash: hash, CreatedAt: now, LastLoginAt: now,
+			}); createErr != nil {
+				return fmt.Errorf("create admin %q: %w", account.Name, createErr)
+			}
+		default:
+			return err
+		}
+		names = append(names, account.Name)
 	}
-	if err := a.Store.CreateAdmin(ctx, sqlite.Admin{ID: id, PasswordHash: hash, CreatedAt: now, LastLoginAt: now}); err != nil {
-		return fmt.Errorf("create administrator: %w", err)
+	if err := a.Store.DisableAdminsNotIn(ctx, names, now); err != nil {
+		return fmt.Errorf("disable removed admins: %w", err)
+	}
+	if len(accounts) == 0 {
+		a.Logger.Warn("no admin accounts configured; the console has no super admin")
 	}
 	if a.Cfg.AdminKey == "change-me" {
 		a.Logger.Warn("using default admin management key; edit data/.env")
 	}
 	return nil
+}
+
+func adminPermsString(account config.AdminAccount) string {
+	if account.All {
+		return "*=rw"
+	}
+	parts := make([]string, 0, len(account.Perms))
+	for page, access := range account.Perms {
+		parts = append(parts, page+"="+access)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 type DevicePrincipal struct {

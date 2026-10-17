@@ -12,20 +12,27 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-// AdminLogin authenticates the sole local administrator with the management key.
+// AdminLogin authenticates any configured administrator key.
 func (a *App) AdminLogin(ctx context.Context, key string) (string, AdminPrincipal, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", AdminPrincipal{}, Err("invalid_credentials", "管理密钥错误", http.StatusUnauthorized)
 	}
-	admin, err := a.Store.GetAdmin(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", AdminPrincipal{}, Err("invalid_credentials", "管理密钥错误", http.StatusUnauthorized)
-	}
+	admins, err := a.Store.ListAdmins(ctx)
 	if err != nil {
 		return "", AdminPrincipal{}, err
 	}
-	if admin.DisabledAt != nil || !controlcrypto.Argon2idVerify(admin.PasswordHash, key) {
+	var admin sqlite.Admin
+	for _, candidate := range admins {
+		if candidate.DisabledAt != nil {
+			continue
+		}
+		if controlcrypto.Argon2idVerify(candidate.PasswordHash, key) {
+			admin = candidate
+			break
+		}
+	}
+	if admin.ID == "" {
 		return "", AdminPrincipal{}, Err("invalid_credentials", "管理密钥错误", http.StatusUnauthorized)
 	}
 	token, err := controlcrypto.NewToken(32)
@@ -41,6 +48,16 @@ func (a *App) AdminLogin(ctx context.Context, key string) (string, AdminPrincipa
 	_ = a.Store.AddAudit(ctx, admin.ID, "admin_login", "admin", admin.ID, "{}", now)
 	admin.LastLoginAt = now
 	return token, AdminPrincipal{Admin: admin, Token: token}, nil
+}
+
+// AdminView is the current administrator's identity and permissions.
+type AdminView struct {
+	Name        string `json:"name"`
+	Permissions string `json:"permissions"`
+}
+
+func (a *App) AdminMe(p AdminPrincipal) AdminView {
+	return AdminView{Name: p.Admin.Name, Permissions: p.Admin.Permissions}
 }
 
 func (a *App) RevokeAdmin(ctx context.Context, p AdminPrincipal) error {

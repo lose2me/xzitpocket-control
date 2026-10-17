@@ -96,6 +96,18 @@ func newRequestID() string {
 
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, apiPrefix)
+	if strings.HasPrefix(path, "/admin/") && path != "/admin/session" {
+		principal, ok := s.authAdmin(w, r)
+		if !ok {
+			return
+		}
+		page, write := adminPageFor(path, r.Method)
+		if page != "" && !principal.Admin.Allows(page, write) {
+			writeError(w, r, app.Err("forbidden", "无权访问", http.StatusForbidden))
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), adminPrincipalKey{}, principal))
+	}
 	switch {
 	case r.Method == http.MethodPost && path == "/devices/register":
 		if !s.allow(r, "device-register", 1000, time.Hour) {
@@ -181,6 +193,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminLogin(w, r)
 	case r.Method == http.MethodDelete && path == "/admin/session":
 		s.adminLogout(w, r)
+	case r.Method == http.MethodGet && path == "/admin/me":
+		s.adminMe(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/overview":
 		s.adminMetricsOverview(w, r)
 	case r.Method == http.MethodGet && path == "/admin/metrics/series":
@@ -496,13 +510,55 @@ func (s *Server) authSession(w http.ResponseWriter, r *http.Request) (app.Sessio
 	}
 	return p, true
 }
+type adminPrincipalKey struct{}
+
 func (s *Server) authAdmin(w http.ResponseWriter, r *http.Request) (app.AdminPrincipal, bool) {
+	if p, ok := r.Context().Value(adminPrincipalKey{}).(app.AdminPrincipal); ok {
+		return p, true
+	}
 	p, err := s.App.AuthenticateAdmin(r.Context(), adminToken(r))
 	if err != nil {
 		writeError(w, r, err)
 		return p, false
 	}
 	return p, true
+}
+
+// adminPageFor maps an administrator API path to its console page and whether
+// the request mutates data. An empty page means any authenticated admin may
+// call it (for example /admin/me).
+func adminPageFor(path, method string) (string, bool) {
+	write := method != http.MethodGet && method != http.MethodHead
+	switch {
+	case path == "/admin/metrics/overview" || path == "/admin/metrics/series" ||
+		path == "/admin/metrics/breakdown" || path == "/admin/overview-display" ||
+		path == "/admin/cdn/stats" || path == "/admin/host/stats" || path == "/admin/buckets/stats":
+		return "overview", write
+	case path == "/admin/users" || strings.HasPrefix(path, "/admin/users/"):
+		return "users", write
+	case path == "/admin/devices" || strings.HasPrefix(path, "/admin/devices/"):
+		return "devices", write
+	case path == "/admin/risk-events" || strings.HasPrefix(path, "/admin/risk-events/"):
+		return "risk", write
+	case path == "/admin/error-reports" || strings.HasPrefix(path, "/admin/error-reports/"):
+		return "error-reports", write
+	case path == "/admin/question-banks" || strings.HasPrefix(path, "/admin/question-banks/") ||
+		path == "/admin/library-cdks" || strings.HasPrefix(path, "/admin/library-cdks/"):
+		return "library", write
+	case path == "/admin/textbooks" || strings.HasPrefix(path, "/admin/textbooks/"):
+		return "textbooks", write
+	case path == "/admin/resources" || strings.HasPrefix(path, "/admin/resources/"):
+		return "resources", write
+	case path == "/admin/courses" || strings.HasPrefix(path, "/admin/courses/"):
+		return "courses", write
+	case path == "/admin/share-codes" || strings.HasPrefix(path, "/admin/share-codes/"):
+		return "share-codes", write
+	case path == "/admin/app/release" || path == "/admin/app/release-test" || path == "/admin/school-calendar":
+		return "config", write
+	case path == "/admin/audit":
+		return "audit", write
+	}
+	return "", false
 }
 
 func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
@@ -680,7 +736,7 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	token, _, err := s.App.AdminLogin(r.Context(), in.Key)
+	token, principal, err := s.App.AdminLogin(r.Context(), in.Key)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -689,7 +745,18 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	secure := strings.HasPrefix(strings.ToLower(s.App.Cfg.PublicBaseURL), "https://")
 	http.SetCookie(w, &http.Cookie{Name: "control_admin", Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 12 * 3600})
 	http.SetCookie(w, &http.Cookie{Name: "control_csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 12 * 3600})
-	writeJSON(w, http.StatusOK, map[string]any{"access_token": token, "expires_in": 43200, "csrf_token": csrf})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token": token, "expires_in": 43200, "csrf_token": csrf,
+		"name": principal.Admin.Name, "permissions": principal.Admin.Permissions,
+	})
+}
+
+func (s *Server) adminMe(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.App.AdminMe(p))
 }
 func (s *Server) adminLogout(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authAdmin(w, r)

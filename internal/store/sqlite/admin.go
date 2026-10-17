@@ -5,29 +5,119 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"strings"
 	"time"
 )
 
 type Admin struct {
 	ID           string
+	Name         string
+	Permissions  string
 	PasswordHash string
 	CreatedAt    time.Time
 	LastLoginAt  time.Time
 	DisabledAt   *time.Time
 }
 
-// GetAdmin returns the single local administrator.
+const adminColumns = "id, name, permissions, password_hash, created_at, last_login_at, disabled_at"
+
+// Allows reports whether the admin may read (write=false) or write the page.
+func (a Admin) Allows(page string, write bool) bool {
+	if page == "" {
+		return true
+	}
+	raw := strings.TrimSpace(a.Permissions)
+	if raw == "" {
+		return false
+	}
+	for _, part := range strings.Split(raw, ",") {
+		pieces := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(pieces) != 2 {
+			continue
+		}
+		candidate := strings.ToLower(strings.TrimSpace(pieces[0]))
+		access := strings.ToLower(strings.TrimSpace(pieces[1]))
+		if candidate == "*" && access == "rw" {
+			return true
+		}
+		if candidate != page {
+			continue
+		}
+		if access == "rw" {
+			return true
+		}
+		if access == "r" && !write {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAdmin returns the first local administrator.
 func (s *Store) GetAdmin(ctx context.Context) (Admin, error) {
 	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, password_hash, created_at, last_login_at, disabled_at FROM admin_users ORDER BY created_at, id LIMIT 1")
+		"SELECT "+adminColumns+" FROM admin_users ORDER BY created_at, id LIMIT 1")
 	return scanAdmin(row)
 }
 
 func (s *Store) GetAdminByID(ctx context.Context, id string) (Admin, error) {
 	row := s.DB.QueryRowContext(ctx,
-		"SELECT id, password_hash, created_at, last_login_at, disabled_at FROM admin_users WHERE id = ?",
-		id)
+		"SELECT "+adminColumns+" FROM admin_users WHERE id = ?", id)
 	return scanAdmin(row)
+}
+
+func (s *Store) ListAdmins(ctx context.Context) ([]Admin, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		"SELECT "+adminColumns+" FROM admin_users ORDER BY created_at, id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Admin, 0)
+	for rows.Next() {
+		item, scanErr := scanAdmin(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetAdminByName(ctx context.Context, name string) (Admin, error) {
+	row := s.DB.QueryRowContext(ctx,
+		"SELECT "+adminColumns+" FROM admin_users WHERE name = ? ORDER BY created_at, id LIMIT 1", name)
+	return scanAdmin(row)
+}
+
+func (s *Store) UpdateAdminAuth(ctx context.Context, id, passwordHash, permissions string) error {
+	_, err := s.DB.ExecContext(ctx,
+		"UPDATE admin_users SET password_hash = ?, permissions = ?, disabled_at = NULL WHERE id = ?",
+		passwordHash, permissions, id)
+	return err
+}
+
+func (s *Store) SetAdminName(ctx context.Context, id, name string) error {
+	_, err := s.DB.ExecContext(ctx, "UPDATE admin_users SET name = ? WHERE id = ?", name, id)
+	return err
+}
+
+// DisableAdminsNotIn disables named administrators that are no longer configured.
+func (s *Store) DisableAdminsNotIn(ctx context.Context, names []string, now time.Time) error {
+	if len(names) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(names))
+	args := make([]any, 0, len(names)+1)
+	args = append(args, millis(now))
+	for _, name := range names {
+		placeholders = append(placeholders, "?")
+		args = append(args, name)
+	}
+	_, err := s.DB.ExecContext(ctx,
+		"UPDATE admin_users SET disabled_at = ? WHERE name <> '' AND name NOT IN ("+strings.Join(placeholders, ",")+") AND disabled_at IS NULL",
+		args...)
+	return err
 }
 
 func (s *Store) CountAdmins(ctx context.Context) (int, error) {
@@ -38,8 +128,8 @@ func (s *Store) CountAdmins(ctx context.Context) (int, error) {
 
 func (s *Store) CreateAdmin(ctx context.Context, admin Admin) error {
 	_, err := s.DB.ExecContext(ctx,
-		"INSERT INTO admin_users(id, password_hash, created_at, last_login_at) VALUES (?, ?, ?, ?)",
-		admin.ID, admin.PasswordHash, millis(admin.CreatedAt), millis(admin.LastLoginAt))
+		"INSERT INTO admin_users(id, name, permissions, password_hash, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)",
+		admin.ID, admin.Name, admin.Permissions, admin.PasswordHash, millis(admin.CreatedAt), millis(admin.LastLoginAt))
 	return err
 }
 
@@ -156,7 +246,7 @@ func scanAdmin(row rowScannerUser) (Admin, error) {
 	var admin Admin
 	var created, lastLogin int64
 	var disabled sql.NullInt64
-	if err := row.Scan(&admin.ID, &admin.PasswordHash, &created, &lastLogin, &disabled); err != nil {
+	if err := row.Scan(&admin.ID, &admin.Name, &admin.Permissions, &admin.PasswordHash, &created, &lastLogin, &disabled); err != nil {
 		return Admin{}, err
 	}
 	admin.CreatedAt = fromMillis(created)

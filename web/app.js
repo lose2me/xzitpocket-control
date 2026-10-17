@@ -188,7 +188,17 @@ import { template } from './template.js';
   createApp({
     setup() {
       const { mdAndUp } = useDisplay();
+      const parseAdminPerms = (raw) => {
+        const perms = {};
+        String(raw || '').split(',').forEach((part) => {
+          const pieces = part.split('=');
+          if (pieces.length === 2 && pieces[0].trim()) perms[pieces[0].trim()] = pieces[1].trim();
+        });
+        return perms;
+      };
       const logged = ref(!!localStorage.getItem('control_admin'));
+      const adminName = ref(localStorage.getItem('control_admin_name') || '');
+      const adminPerms = ref(parseAdminPerms(localStorage.getItem('control_admin_perms')));
       const drawer = ref(false);
       const VIEW_ROUTES = ['overview', 'users', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'config', 'audit'];
       const viewForPath = (pathname) => {
@@ -378,6 +388,16 @@ import { template } from './template.js';
         { key: 'audit', label: '审计', icon: 'mdi-history' }
       ];
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
+      const canAccess = (page, write) => {
+        const perms = adminPerms.value || {};
+        if (perms['*'] === 'rw') return true;
+        const access = perms[page];
+        if (!access) return false;
+        return access === 'rw' || (!write && access === 'r');
+      };
+      const canRead = (page) => canAccess(page, false);
+      const canWrite = (page) => canAccess(page, true);
+      const visibleNav = computed(() => nav.filter(item => canRead(item.key)));
       watch(mdAndUp, (desktop) => { if (!desktop) drawer.value = false; }, { immediate: true });
 
       // 总览显示比例（百分比，100=原始值，200=2 倍）。由后端保存在 data/.env。
@@ -547,6 +567,10 @@ import { template } from './template.js';
       const setBankDialog = (visible) => { if (visible) bankDialog.value = true; else closeBankEditor(); };
       const clearAdminSession = () => {
         localStorage.removeItem('control_admin');
+        localStorage.removeItem('control_admin_name');
+        localStorage.removeItem('control_admin_perms');
+        adminName.value = '';
+        adminPerms.value = {};
         logged.value = false;
         drawer.value = false;
         selectedUser.value = null;
@@ -577,7 +601,12 @@ import { template } from './template.js';
       };
       const login = () => call(async () => {
         const out = await api('/api/v1/admin/session', { method: 'POST', body: JSON.stringify(loginForm.value) });
-        localStorage.setItem('control_admin', out.access_token); logged.value = true; notify('登录成功'); await load();
+        localStorage.setItem('control_admin', out.access_token);
+        localStorage.setItem('control_admin_name', out.name || '');
+        localStorage.setItem('control_admin_perms', out.permissions || '');
+        adminName.value = out.name || '';
+        adminPerms.value = parseAdminPerms(out.permissions || '');
+        logged.value = true; notify('登录成功'); ensureViewAllowed(); await load();
       });
       const logout = () => call(async () => {
         await api('/api/v1/admin/session', { method: 'DELETE' });
@@ -1236,8 +1265,24 @@ import { template } from './template.js';
         userPage.value = 1;
         await loadUsers();
       });
+      const ensureViewAllowed = () => {
+        if (canRead(view.value)) return;
+        const first = visibleNav.value[0];
+        if (!first) return;
+        view.value = first.key;
+        if (window.location.pathname !== '/' + first.key) window.history.replaceState({ view: first.key }, '', '/' + first.key);
+      };
+      const refreshAdminIdentity = async () => {
+        const out = await api('/api/v1/admin/me');
+        adminName.value = out.name || '';
+        adminPerms.value = parseAdminPerms(out.permissions || '');
+        localStorage.setItem('control_admin_name', adminName.value);
+        localStorage.setItem('control_admin_perms', out.permissions || '');
+        ensureViewAllowed();
+      };
       const load = async () => {
         if (!logged.value) return;
+        ensureViewAllowed();
         await call(async () => {
           if (view.value === 'overview') await loadOverview();
           else if (view.value === 'users') { await loadOverviewScale(); await loadUsers(); }
@@ -1253,12 +1298,17 @@ import { template } from './template.js';
         });
       };
       const switchView = (name) => {
+        if (!canRead(name)) {
+          const first = visibleNav.value[0];
+          if (!first) return;
+          name = first.key;
+        }
         view.value = name;
         if (window.location.pathname !== '/' + name) window.history.pushState({ view: name }, '', '/' + name);
         if (!mdAndUp.value) drawer.value = false;
         load();
       };
-      const handlePopState = () => { view.value = viewForPath(window.location.pathname); load(); };
+      const handlePopState = () => { view.value = viewForPath(window.location.pathname); ensureViewAllowed(); load(); };
       const drawChart = () => {
         if (!window.echarts || view.value !== 'overview') return;
         if (chart) {
@@ -1568,7 +1618,9 @@ import { template } from './template.js';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
         if (window.location.pathname !== '/' + view.value) window.history.replaceState({ view: view.value }, '', '/' + view.value);
-        if (logged.value) load();
+        if (logged.value) {
+          call(async () => { await refreshAdminIdentity(); await load(); });
+        }
         window.addEventListener('resize', handleResize);
         window.addEventListener('popstate', handlePopState);
         statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
@@ -1584,7 +1636,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, visibleNav, title, statCards, adminName, canRead, canWrite,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
