@@ -44,6 +44,9 @@ type App struct {
 
 	hostMu    sync.Mutex
 	hostCache hostStatsCache
+
+	bucketMu    sync.Mutex
+	bucketCache bucketStatsCache
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {

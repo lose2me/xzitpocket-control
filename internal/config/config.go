@@ -35,9 +35,11 @@ type Config struct {
 	COSBucket    string
 	COSSecretID  string
 	COSSecretKey string
-	CDNDomain    string
-	CDNAuthKey   string
-	CDNURLTTL    time.Duration
+	// COSWebsiteBucket is the website/APK bucket shown next to the assets bucket.
+	COSWebsiteBucket string
+	CDNDomain        string
+	CDNAuthKey       string
+	CDNURLTTL        time.Duration
 
 	// Tencent Cloud credentials for this host's Lighthouse monitoring.
 	MonitorSecretID  string
@@ -79,6 +81,7 @@ func Load() (Config, error) {
 		COSBucket:            configValue(values, "CONTROL_COS_BUCKET", ""),
 		COSSecretID:          configValue(values, "CONTROL_COS_SECRET_ID", ""),
 		COSSecretKey:         configValue(values, "CONTROL_COS_SECRET_KEY", ""),
+		COSWebsiteBucket:     configValue(values, "CONTROL_COS_WEBSITE_BUCKET", ""),
 		CDNDomain:            strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
 		CDNAuthKey:           configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
 		CDNURLTTL:            durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),

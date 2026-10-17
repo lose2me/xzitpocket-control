@@ -43,7 +43,7 @@ export const template = `
                 <v-row dense class="mb-4"><v-col v-for="stat in statCards" :key="stat.label" cols="12" sm="6" md="4" lg="2"><v-card variant="elevated" border class="stat-card h-100"><v-card-text class="d-flex align-center ga-3"><v-avatar :color="stat.color" variant="tonal" size="42"><v-icon :icon="stat.icon" /></v-avatar><div class="min-w-0"><div class="text-caption text-medium-emphasis">{{ stat.label }}</div><div class="text-h5 font-weight-bold mt-1">{{ stat.value }}</div></div></v-card-text></v-card></v-col></v-row>
                 <v-card variant="elevated" border class="mb-4">
                   <v-card-title class="d-flex align-center flex-wrap ga-2">
-                    <v-icon icon="mdi-rocket-launch-outline" color="primary" />
+                    <v-icon icon="mdi-chart-box-outline" color="primary" />
                     <span>资源统计</span>
                     <v-spacer />
                     <span v-if="activePackage" class="cdn-meta text-medium-emphasis">
@@ -55,6 +55,8 @@ export const template = `
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
                     <v-tab v-for="domain in cdnDomains" :key="domain.domain" :value="domain.domain">{{ domain.domain }}</v-tab>
                     <v-tab v-if="cdnDomains.length" value="__host__">本机</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__bucket_assets__">资源桶</v-tab>
+                    <v-tab v-if="cdnDomains.length" value="__bucket_website__">网站桶</v-tab>
                   </v-tabs>
                   <v-divider />
                   <v-card-text>
@@ -75,6 +77,30 @@ export const template = `
                         </v-row>
                         <div ref="hostChartEl" class="chart" aria-label="本机外网出带宽趋势" />
                         <div class="cdn-meta text-medium-emphasis mt-2">{{ hostStats.instance_name }} · {{ hostStats.instance_id }} · {{ hostStats.region }} · 带宽上限 {{ hostStats.bandwidth_cap }} Mbps</div>
+                      </template>
+                    </template>
+                    <template v-else-if="activeBucketKey">
+                      <v-progress-linear v-if="bucketLoading" indeterminate color="primary" class="mb-3" />
+                      <div v-if="bucketError" class="empty-state">{{ bucketError }}</div>
+                      <div v-else-if="!activeBucket" class="empty-state">{{ bucketLoading ? '加载中…' : '暂无数据' }}</div>
+                      <template v-else>
+                        <v-row dense class="mb-3">
+                          <v-col v-for="card in bucketCards" :key="card.label" cols="6" sm="4" md="2">
+                            <v-card variant="tonal" class="stat-card h-100">
+                              <v-card-text>
+                                <div class="text-caption text-medium-emphasis">{{ card.label }}</div>
+                                <div class="text-h6 font-weight-bold mt-1">{{ card.value }}</div>
+                              </v-card-text>
+                            </v-card>
+                          </v-col>
+                        </v-row>
+                        <div ref="bucketChartEl" class="chart" aria-label="存储桶回源流量趋势" />
+                        <div class="d-flex align-center flex-wrap ga-2 mt-3">
+                          <v-chip size="small" color="success" variant="tonal">2xx {{ activeBucket.status_2xx }}</v-chip>
+                          <v-chip size="small" color="warning" variant="tonal">4xx {{ activeBucket.status_4xx }}</v-chip>
+                          <v-chip size="small" color="error" variant="tonal">5xx {{ activeBucket.status_5xx }}</v-chip>
+                          <span class="cdn-meta text-medium-emphasis">{{ activeBucket.label }} · {{ activeBucket.bucket }}</span>
+                        </div>
                       </template>
                     </template>
                     <template v-else>

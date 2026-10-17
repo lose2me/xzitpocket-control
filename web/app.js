@@ -211,6 +211,11 @@ import { template } from './template.js';
       const hostError = ref('');
       const hostChartEl = ref(null);
       let hostChart = null;
+      const bucketStats = ref(null);
+      const bucketLoading = ref(false);
+      const bucketError = ref('');
+      const bucketChartEl = ref(null);
+      let bucketChart = null;
       let cdnChart = null;
       let cdnPollTimer = null;
       let cdnPollAttempts = 0;
@@ -657,6 +662,30 @@ import { template } from './template.js';
           { label: '磁盘', value: (Number(item.disk) || 0).toFixed(1) + '%' }
         ];
       });
+      const activeBucketKey = computed(() => cdnTab.value.indexOf('__bucket_') === 0 ? cdnTab.value.slice('__bucket_'.length).replace(/__$/, '') : '');
+      const activeBucket = computed(() => {
+        if (!activeBucketKey.value) return null;
+        const list = (bucketStats.value && bucketStats.value.buckets) || [];
+        return list.find(item => item.key === activeBucketKey.value) || null;
+      });
+      const formatStorageMB = (value) => {
+        const mb = Number(value) || 0;
+        if (mb < 1024) return mb.toFixed(mb >= 10 ? 0 : 1) + ' MB';
+        return (mb / 1024).toFixed(2) + ' GB';
+      };
+      const bucketCards = computed(() => {
+        const item = activeBucket.value;
+        if (!item) return [];
+        const days = (bucketStats.value && bucketStats.value.days) || 30;
+        return [
+          { label: '标准存储', value: formatStorageMB(item.std_storage_mb) },
+          { label: '对象数', value: Number(item.object_number || 0).toLocaleString() },
+          { label: '请求数（近 ' + days + ' 天）', value: Number(item.total_requests || 0).toLocaleString() },
+          { label: 'CDN 回源（近 ' + days + ' 天）', value: formatBytes(item.cdn_origin_traffic) },
+          { label: '上传流量（近 ' + days + ' 天）', value: formatBytes(item.inbound_traffic) },
+          { label: '外网下行（近 ' + days + ' 天）', value: formatBytes(item.internet_traffic) }
+        ];
+      });
       const drawCDNChart = () => {
         if (cdnChart) { cdnChart.dispose(); cdnChart = null; }
         const item = cdnDomain.value;
@@ -706,7 +735,40 @@ import { template } from './template.js';
           if (!silent) hostLoading.value = false;
         }
       };
-      const refreshActiveStats = () => (cdnTab.value === '__host__' ? loadHostStats(true) : loadCDNStats(true));
+      const drawBucketChart = () => {
+        if (bucketChart) { bucketChart.dispose(); bucketChart = null; }
+        const item = activeBucket.value;
+        if (!window.echarts || !bucketChartEl.value || !item) return;
+        bucketChart = window.echarts.init(bucketChartEl.value);
+        const points = item.origin_series || [];
+        bucketChart.setOption({
+          animationDuration: 350,
+          tooltip: { trigger: 'axis', valueFormatter: (value) => formatBytes(value) },
+          grid: { left: 6, right: 18, top: 20, bottom: 30, containLabel: true },
+          xAxis: { type: 'category', data: points.map(point => point.day), axisLabel: { color: '#697984' }, axisLine: { lineStyle: { color: '#d8e0e4' } } },
+          yAxis: { type: 'value', axisLabel: { color: '#697984', formatter: (value) => formatBytes(value) }, splitLine: { lineStyle: { color: '#edf1f3' } } },
+          series: [{ name: '回源流量', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: 0.12 }, data: points.map(point => point.value), itemStyle: { color: '#805ad5' }, lineStyle: { width: 3 } }]
+        });
+      };
+      const loadBucketStats = async (refresh, silent) => {
+        if (!silent) { bucketLoading.value = true; bucketError.value = ''; }
+        try {
+          const out = await api('/api/v1/admin/buckets/stats?days=30' + (refresh ? '&refresh=1' : ''));
+          bucketStats.value = out;
+          await nextTick();
+          drawBucketChart();
+        } catch (e) {
+          if (e && e.status === 401) { clearAdminSession(); return; }
+          if (!silent) bucketError.value = (e && e.message) || '存储桶统计加载失败';
+        } finally {
+          if (!silent) bucketLoading.value = false;
+        }
+      };
+      const refreshActiveStats = () => {
+        if (cdnTab.value === '__host__') return loadHostStats(true);
+        if (activeBucketKey.value) return loadBucketStats(true);
+        return loadCDNStats(true);
+      };
       const loadCDNStats = async (refresh, silent) => {
         if (!silent) { cdnLoading.value = true; cdnError.value = ''; }
         try {
@@ -717,7 +779,7 @@ import { template } from './template.js';
           if (!cdnTabInitialized && domains.length) {
             cdnTab.value = domains[0].domain;
             cdnTabInitialized = true;
-          } else if (cdnTabInitialized && cdnTab.value !== '__host__' && !domains.some(item => item.domain === cdnTab.value)) {
+          } else if (cdnTabInitialized && !cdnTab.value.startsWith('__') && !domains.some(item => item.domain === cdnTab.value)) {
             cdnTab.value = domains[0] ? domains[0].domain : '';
           }
           await nextTick();
@@ -735,6 +797,9 @@ import { template } from './template.js';
         if (cdnTab.value === '__host__') {
           if (!hostStats.value && !hostLoading.value) loadHostStats();
           else drawHostChart();
+        } else if (activeBucketKey.value) {
+          if (!bucketStats.value && !bucketLoading.value) loadBucketStats();
+          else drawBucketChart();
         } else {
           drawCDNChart();
         }
@@ -744,6 +809,7 @@ import { template } from './template.js';
         if (!logged.value) return;
         loadCDNStats(false, true);
         if (hostStats.value) loadHostStats(false, true);
+        if (bucketStats.value) loadBucketStats(false, true);
       };
       const loadOverview = async () => {
         overview.value = await api('/api/v1/admin/metrics/overview');
@@ -1493,7 +1559,7 @@ import { template } from './template.js';
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
       const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传资源', resource_delete: '删除资源', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
-      const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); };
+      const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
         if (window.location.pathname !== '/' + view.value) window.history.replaceState({ view: view.value }, '', '/' + view.value);
         if (logged.value) load();
@@ -1501,7 +1567,7 @@ import { template } from './template.js';
         window.addEventListener('popstate', handlePopState);
         statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
@@ -1512,7 +1578,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
