@@ -59,7 +59,7 @@ export const template = `
                   <v-card-text>
                     <v-progress-linear v-if="cdnLoading" indeterminate color="primary" class="mb-3" />
                     <div v-if="cdnError" class="empty-state">{{ cdnError }}</div>
-                    <div v-else-if="!cdnStats" class="empty-state">{{ cdnLoading ? '加载中…' : '暂无 CDN 数据' }}</div>
+                    <div v-else-if="!cdnStats || !cdnDomains.length" class="empty-state">{{ cdnLoading ? '加载中…' : '暂无 CDN 数据' }}</div>
                     <template v-else-if="cdnDomain">
                       <v-row dense class="mb-3">
                         <v-col v-for="card in cdnCards" :key="card.label" cols="6" sm="4" md="2">

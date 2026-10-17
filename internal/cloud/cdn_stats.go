@@ -57,6 +57,7 @@ type CDNTrafficPackage struct {
 type CDNStats struct {
 	GeneratedAt    string             `json:"generated_at"`
 	Days           int                `json:"days"`
+	Stale          bool               `json:"stale,omitempty"`
 	PayType        string             `json:"pay_type"`
 	TrafficPackage *CDNTrafficPackage `json:"traffic_package,omitempty"`
 	Status         CDNStatusCounts    `json:"status"`

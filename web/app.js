@@ -207,6 +207,8 @@ import { template } from './template.js';
       const cdnLoading = ref(false);
       const cdnError = ref('');
       let cdnChart = null;
+      let cdnPollTimer = null;
+      let cdnPollAttempts = 0;
       const users = ref([]);
       const devices = ref([]);
       const risks = ref([]);
@@ -630,11 +632,17 @@ import { template } from './template.js';
           series: [{ name: '流量', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: 0.12 }, data: points.map(point => point.value), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } }]
         });
       };
-      const loadCDNStats = async (refresh) => {
-        cdnLoading.value = true;
-        cdnError.value = '';
+      const scheduleCDNRefreshPoll = () => {
+        if (cdnPollAttempts >= 3) return;
+        cdnPollAttempts += 1;
+        if (cdnPollTimer) clearTimeout(cdnPollTimer);
+        cdnPollTimer = setTimeout(() => { cdnPollTimer = null; loadCDNStats(false, true); }, 4000);
+      };
+      const loadCDNStats = async (refresh, silent) => {
+        if (!silent) { cdnLoading.value = true; cdnError.value = ''; }
         try {
           const out = await api('/api/v1/admin/cdn/stats?days=30' + (refresh ? '&refresh=1' : ''));
+          if (!out || !out.stale) cdnPollAttempts = 0;
           cdnStats.value = out;
           const domains = (out && out.domains) || [];
           if (!domains.some(item => item.domain === cdnTab.value)) {
@@ -642,11 +650,12 @@ import { template } from './template.js';
           }
           await nextTick();
           drawCDNChart();
+          if (out && out.stale) scheduleCDNRefreshPoll();
         } catch (e) {
           if (e && e.status === 401) { clearAdminSession(); return; }
-          cdnError.value = (e && e.message) || 'CDN 统计加载失败';
+          if (!silent) cdnError.value = (e && e.message) || 'CDN 统计加载失败';
         } finally {
-          cdnLoading.value = false;
+          if (!silent) cdnLoading.value = false;
         }
       };
       watch(cdnTab, async () => { await nextTick(); drawCDNChart(); });
@@ -1404,7 +1413,7 @@ import { template } from './template.js';
         window.addEventListener('resize', handleResize);
         window.addEventListener('popstate', handlePopState);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (cdnPollTimer) clearTimeout(cdnPollTimer); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
