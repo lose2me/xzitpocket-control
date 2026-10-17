@@ -410,3 +410,9 @@ body {
   border-color: #176b4d;
   background: rgba(23, 107, 77, 0.03);
 }
+
+/* Smaller meta text used on the overview CDN card. */
+.cdn-meta {
+  font-size: 11px;
+  line-height: 1.3;
+}

@@ -46,6 +46,7 @@ type CDNStatusCounts struct {
 // CDNTrafficPackage summarises the enabled traffic packages.
 type CDNTrafficPackage struct {
 	Type       string `json:"type"`
+	Count      int    `json:"count"`
 	Total      int64  `json:"total"`
 	Used       int64  `json:"used"`
 	Remaining  int64  `json:"remaining"`
@@ -276,14 +277,17 @@ func cdnTrafficPackage(ctx context.Context, secretID, secretKey string) (*CDNTra
 			continue
 		}
 		found = true
-		pkg.Type = item.Type
+		pkg.Count++
 		pkg.Total += item.Bytes
 		pkg.Used += item.BytesUsed
-		if pkg.ExpireTime == "" {
-			pkg.ExpireTime = item.TrueExpireTime
-			if pkg.ExpireTime == "" {
-				pkg.ExpireTime = item.ExpireTime
-			}
+		expire := item.TrueExpireTime
+		if expire == "" {
+			expire = item.ExpireTime
+		}
+		// Multiple packages can be active; the soonest expiry is the one that
+		// matters, so show it as the package expiry.
+		if expire != "" && (pkg.ExpireTime == "" || expire < pkg.ExpireTime) {
+			pkg.ExpireTime = expire
 		}
 	}
 	if !found {

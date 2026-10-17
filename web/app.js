@@ -573,10 +573,10 @@ import { template } from './template.js';
       };
       const formatBytes = (value) => {
         const n = Number(value) || 0;
-        if (n < 1024) return n + ' B';
+        if (n < 1000) return n + ' B';
         const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
-        let v = n / 1024, i = 0;
-        while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+        let v = n / 1000, i = 0;
+        while (v >= 1000 && i < units.length - 1) { v /= 1000; i += 1; }
         return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + ' ' + units[i];
       };
       const formatBitrate = (value) => {
@@ -602,6 +602,16 @@ import { template } from './template.js';
           { label: '近 ' + days + ' 天流量', value: formatBytes(item.flux) },
           { label: '峰值带宽', value: formatBitrate(item.bandwidth_peak) }
         ];
+      });
+      const cdnPackage = computed(() => {
+        const pkg = cdnStats.value && cdnStats.value.traffic_package;
+        if (!pkg) return null;
+        return {
+          remaining: formatBytes(pkg.remaining),
+          total: formatBytes(pkg.total),
+          expire: pkg.expire_time ? pkg.expire_time.slice(0, 10) : '',
+          count: pkg.count || 1
+        };
       });
       const drawCDNChart = () => {
         if (cdnChart) { cdnChart.dispose(); cdnChart = null; }
@@ -1394,7 +1404,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, loadCDNStats, formatBytes, formatBitrate, formatPercent, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, loadCDNStats, formatBytes, formatBitrate, formatPercent, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,

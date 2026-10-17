@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,9 +27,14 @@ func TestFetchCDNStatsAssemblesDomains(t *testing.T) {
 	defer func() { cdnAPIClient = original }()
 
 	entry := func(resource, metric, key string, points map[string]int64, summaryName string, summary int64) map[string]any {
-		details := make([]any, 0, len(points))
-		for day, value := range points {
-			details = append(details, map[string]any{"Time": day + " 00:00:00", "Value": value})
+		days := make([]string, 0, len(points))
+		for day := range points {
+			days = append(days, day)
+		}
+		sort.Strings(days)
+		details := make([]any, 0, len(days))
+		for _, day := range days {
+			details = append(details, map[string]any{"Time": day + " 00:00:00", "Value": points[day]})
 		}
 		return map[string]any{
 			"Resource": resource,
