@@ -41,13 +41,14 @@ type CourseBookView struct {
 // they are managed from the textbook (book list) page. Resources are counted so
 // the resource page can list one row per course.
 type CourseView struct {
-	ID            string           `json:"id"`
-	Code          string           `json:"code"`
-	Name          string           `json:"name"`
-	Books         []CourseBookView `json:"books"`
-	ResourceCount int              `json:"resource_count"`
-	CreatedAt     string           `json:"created_at"`
-	UpdatedAt     string           `json:"updated_at"`
+	ID                string           `json:"id"`
+	Code              string           `json:"code"`
+	Name              string           `json:"name"`
+	Books             []CourseBookView `json:"books"`
+	ResourceCount     int              `json:"resource_count"`
+	ResourceDownloads int64            `json:"resource_downloads"`
+	CreatedAt         string           `json:"created_at"`
+	UpdatedAt         string           `json:"updated_at"`
 }
 
 // CourseWriteInput is the administrator create/update payload.
@@ -119,14 +120,15 @@ func (a *App) UploadCourses(ctx context.Context, p SessionPrincipal, in CourseUp
 	return map[string]any{"accepted": accepted, "accepted_books": acceptedBooks}, nil
 }
 
-func courseView(item sqlite.Course, books []sqlite.Textbook, resourceCount int) CourseView {
+func courseView(item sqlite.Course, books []sqlite.Textbook, resourceCount int, resourceDownloads int64) CourseView {
 	views := make([]CourseBookView, 0, len(books))
 	for _, book := range books {
 		views = append(views, CourseBookView{Name: book.Name, Tags: book.Tags})
 	}
 	return CourseView{
 		ID: item.ID, Code: item.Code, Name: item.Name, Books: views, ResourceCount: resourceCount,
-		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
+		ResourceDownloads: resourceDownloads,
+		CreatedAt:         item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
 
@@ -151,9 +153,13 @@ func (a *App) ListCoursesForAdmin(ctx context.Context, limit, offset int, search
 	if err != nil {
 		return nil, 0, err
 	}
+	downloadsByCode, err := a.Store.SumResourceDownloadsByCourse(ctx, codes)
+	if err != nil {
+		return nil, 0, err
+	}
 	views := make([]CourseView, 0, len(items))
 	for _, item := range items {
-		views = append(views, courseView(item, booksByCode[item.Code], resourcesByCode[item.Code]))
+		views = append(views, courseView(item, booksByCode[item.Code], resourcesByCode[item.Code], downloadsByCode[item.Code]))
 	}
 	return views, total, nil
 }
@@ -184,7 +190,7 @@ func (a *App) CreateCourseForAdmin(ctx context.Context, in CourseWriteInput, act
 		return CourseView{}, err
 	}
 	_ = a.Store.AddAudit(ctx, actor, "course_create", "course", item.ID, "{}", now)
-	return courseView(item, nil, 0), nil
+	return courseView(item, nil, 0, 0), nil
 }
 
 func (a *App) UpdateCourseForAdmin(ctx context.Context, id string, in CourseWriteInput, actor string) (CourseView, error) {
@@ -219,7 +225,11 @@ func (a *App) UpdateCourseForAdmin(ctx context.Context, id string, in CourseWrit
 	if err != nil {
 		return CourseView{}, err
 	}
-	return courseView(item, booksByCode[item.Code], resourcesByCode[item.Code]), nil
+	downloadsByCode, err := a.Store.SumResourceDownloadsByCourse(ctx, []string{item.Code})
+	if err != nil {
+		return CourseView{}, err
+	}
+	return courseView(item, booksByCode[item.Code], resourcesByCode[item.Code], downloadsByCode[item.Code]), nil
 }
 
 func (a *App) DeleteCourseForAdmin(ctx context.Context, id, actor string) error {

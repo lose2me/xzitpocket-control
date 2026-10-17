@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"xzitpocket-control/internal/cloud"
 	"xzitpocket-control/internal/config"
 	controlcrypto "xzitpocket-control/internal/crypto"
 	"xzitpocket-control/internal/store/sqlite"
@@ -39,6 +40,10 @@ type App struct {
 	Cfg    config.Config
 	Store  *sqlite.Store
 	Logger *slog.Logger
+
+	// cosClientOverride lets tests point object-storage calls at a stub while
+	// production always builds a client from Cfg.
+	cosClientOverride *cloud.COSClient
 
 	cdnMu    sync.Mutex
 	cdnCache cdnStatsCache

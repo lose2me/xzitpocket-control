@@ -15,14 +15,15 @@ import (
 
 // ResourceView is the administrator-facing resource row.
 type ResourceView struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Tags       string `json:"tags"`
-	CourseCode string `json:"course_code"`
-	HasPdf     bool   `json:"has_pdf"`
-	SizeBytes  int64  `json:"size_bytes,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Tags          string `json:"tags"`
+	CourseCode    string `json:"course_code"`
+	HasPdf        bool   `json:"has_pdf"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
+	DownloadCount int64  `json:"download_count"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // ResourceURLView is a temporary, signed CDN URL for a resource PDF.
@@ -45,8 +46,9 @@ const (
 func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
-		HasPdf:    item.PdfKey != "",
-		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
+		HasPdf:        item.PdfKey != "",
+		DownloadCount: item.DownloadCount,
+		CreatedAt:     item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
 

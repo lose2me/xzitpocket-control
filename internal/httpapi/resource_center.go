@@ -54,6 +54,7 @@ func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id stri
 		writeError(w, r, err)
 		return
 	}
+	s.App.RecordResourceDownload(r.Context(), id)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -61,10 +62,14 @@ func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id stri
 	if _, ok := s.authSession(w, r); !ok {
 		return
 	}
-	out, err := s.App.TextbookResourceURL(r.Context(), id, r.URL.Query().Get("kind"), userURLTTL(r))
+	kind := r.URL.Query().Get("kind")
+	out, err := s.App.TextbookResourceURL(r.Context(), id, kind, userURLTTL(r))
 	if err != nil {
 		writeError(w, r, err)
 		return
+	}
+	if kind == "" || kind == "pdf" {
+		s.App.RecordTextbookDownload(r.Context(), id)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

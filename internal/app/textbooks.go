@@ -25,16 +25,17 @@ type TextbookWriteInput struct {
 
 // TextbookView is the administrator-facing textbook row.
 type TextbookView struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Tags        string   `json:"tags"`
-	CourseCode  string   `json:"course_code"`
-	CourseCodes []string `json:"course_codes"`
-	HasPdf      bool     `json:"has_pdf"`
-	HasCover    bool     `json:"has_cover"`
-	SizeBytes   int64    `json:"size_bytes,omitempty"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Tags          string   `json:"tags"`
+	CourseCode    string   `json:"course_code"`
+	CourseCodes   []string `json:"course_codes"`
+	HasPdf        bool     `json:"has_pdf"`
+	HasCover      bool     `json:"has_cover"`
+	SizeBytes     int64    `json:"size_bytes,omitempty"`
+	DownloadCount int64    `json:"download_count"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 // TextbookResourceView is a temporary, signed CDN URL for a textbook asset.
@@ -55,7 +56,7 @@ func textbookView(item sqlite.Textbook) TextbookView {
 	}
 	return TextbookView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: codes,
-		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "",
+		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "", DownloadCount: item.DownloadCount,
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
@@ -94,6 +95,9 @@ func normalizeCourseAssociations(codes []string, fallback string) ([]string, boo
 }
 
 func (a *App) cosClient() *cloud.COSClient {
+	if a.cosClientOverride != nil {
+		return a.cosClientOverride
+	}
 	return cloud.NewCOSClient(a.Cfg.COSSecretID, a.Cfg.COSSecretKey, a.Cfg.COSBucket, a.Cfg.COSRegion)
 }
 

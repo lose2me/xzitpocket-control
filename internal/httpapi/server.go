@@ -177,6 +177,16 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.schoolCalendar(w, r)
 	case r.Method == http.MethodGet && path == "/resource-center/courses":
 		s.userResourceCourses(w, r)
+	case r.Method == http.MethodPost && path == "/resource-center/submissions":
+		if !s.allow(r, "resource-submission", 30, time.Hour) {
+			writeError(w, r, app.Err("rate_limited", "请求过于频繁", http.StatusTooManyRequests))
+			return
+		}
+		s.userSubmissionTicket(w, r)
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "complete", "resource-center", "submissions"):
+		s.userSubmissionComplete(w, r, segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesID(path, "resource-center", "submissions"):
+		s.userSubmissionAbort(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/resources":
 		s.userCourseResources(w, r)
 	case r.Method == http.MethodGet && path == "/textbooks":
@@ -305,6 +315,28 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookUploadCover(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "textbooks"):
 		s.adminTextbookResourceURL(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "textbooks"):
+		s.adminTextbookDownload(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/textbook-submissions":
+		s.adminSubmissions(w, r, "textbook")
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "approve", "admin", "textbook-submissions"):
+		s.adminSubmissionApprove(w, r, "textbook", segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "reject", "admin", "textbook-submissions"):
+		s.adminSubmissionReject(w, r, "textbook", segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "textbook-submissions"):
+		s.adminSubmissionResourceURL(w, r, "textbook", segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "textbook-submissions"):
+		s.adminSubmissionDownload(w, r, "textbook", segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/resource-submissions":
+		s.adminSubmissions(w, r, "resource")
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "approve", "admin", "resource-submissions"):
+		s.adminSubmissionApprove(w, r, "resource", segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "reject", "admin", "resource-submissions"):
+		s.adminSubmissionReject(w, r, "resource", segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resource-submissions"):
+		s.adminSubmissionResourceURL(w, r, "resource", segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resource-submissions"):
+		s.adminSubmissionDownload(w, r, "resource", segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/resources":
 		s.adminResources(w, r)
 	case r.Method == http.MethodPost && path == "/admin/resources/upload":
@@ -313,6 +345,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminResourceDelete(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resources"):
 		s.adminResourceResourceURL(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resources"):
+		s.adminResourceDownload(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/courses":
 		s.adminCourses(w, r)
 	case r.Method == http.MethodPost && path == "/admin/courses":
@@ -566,7 +600,11 @@ func adminPageFor(path, method string) (string, bool) {
 		return "library", write
 	case path == "/admin/textbooks" || strings.HasPrefix(path, "/admin/textbooks/"):
 		return "textbooks", write
+	case path == "/admin/textbook-submissions" || strings.HasPrefix(path, "/admin/textbook-submissions/"):
+		return "textbooks", write
 	case path == "/admin/resources" || strings.HasPrefix(path, "/admin/resources/"):
+		return "resources", write
+	case path == "/admin/resource-submissions" || strings.HasPrefix(path, "/admin/resource-submissions/"):
 		return "resources", write
 	case path == "/admin/courses" || strings.HasPrefix(path, "/admin/courses/"):
 		return "courses", write

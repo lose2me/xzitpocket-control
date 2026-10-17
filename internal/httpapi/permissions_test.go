@@ -13,6 +13,10 @@ func TestAdminPageFor(t *testing.T) {
 	}{
 		{"/admin/textbooks", http.MethodGet, "textbooks", false},
 		{"/admin/textbooks/123/pdf", http.MethodPost, "textbooks", true},
+		{"/admin/textbook-submissions", http.MethodGet, "textbooks", false},
+		{"/admin/textbook-submissions/abc/approve", http.MethodPost, "textbooks", true},
+		{"/admin/resource-submissions", http.MethodGet, "resources", false},
+		{"/admin/resource-submissions/abc/reject", http.MethodPost, "resources", true},
 		{"/admin/cdn/stats", http.MethodGet, "overview", false},
 		{"/admin/overview-display", http.MethodPut, "overview", true},
 		{"/admin/app/release-test", http.MethodPut, "config", true},
