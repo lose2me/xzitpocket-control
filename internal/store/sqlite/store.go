@@ -171,7 +171,6 @@ var removedColumns = []struct {
 }{
 	{"courses", "books"},
 	{"question_banks", "is_new"},
-	{"question_banks", "order_id"},
 }
 
 func (s *Store) applyColumnRemovals(ctx context.Context) error {
@@ -194,6 +193,9 @@ func (s *Store) applyColumnRemovals(ctx context.Context) error {
 		if _, err := s.DB.ExecContext(ctx, `DROP TABLE "`+table+`"`); err != nil {
 			return fmt.Errorf("remove table %s: %w", table, err)
 		}
+	}
+	if err := s.dropQuestionBankOrderColumn(ctx); err != nil {
+		return err
 	}
 	for _, removal := range removedColumns {
 		found, err := s.tableHasColumn(ctx, removal.table, removal.column)
@@ -230,6 +232,65 @@ func (s *Store) backfillCourseAssociations(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// dropQuestionBankOrderColumn rebuilds question_banks without the legacy
+// order_id column. SQLite refuses to DROP a UNIQUE column, so the table is
+// recreated and its rows copied before the old table is removed.
+func (s *Store) dropQuestionBankOrderColumn(ctx context.Context) error {
+	found, err := s.tableHasColumn(ctx, "question_banks", "order_id")
+	if err != nil || !found {
+		return err
+	}
+	if s.lastMigrationBackup == "" {
+		backup, backupErr := s.backupIncompatibleDatabase(ctx)
+		if backupErr != nil {
+			return fmt.Errorf("snapshot before rebuilding question_banks: %w", backupErr)
+		}
+		s.lastMigrationBackup = backup
+	}
+	if _, err := s.DB.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer func() { _, _ = s.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = ON") }()
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		`CREATE TABLE question_banks_new (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
+			requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
+			course_code TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
+		`INSERT INTO question_banks_new(id, name, status, requires_cdk, course_code, created_at, updated_at)
+			SELECT id, name, status, requires_cdk, course_code, created_at, updated_at FROM question_banks`,
+		`DROP TABLE question_banks`,
+		`ALTER TABLE question_banks_new RENAME TO question_banks`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("rebuild question_banks: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("check question_banks foreign keys: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return errors.New("question_banks rebuild left foreign key violations")
+	}
+	return rows.Err()
 }
 
 func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {

@@ -382,3 +382,45 @@ func TestMigrateBackfillsCourseAssociations(t *testing.T) {
 		t.Fatalf("question bank = %#v, err = %v", bank, err)
 	}
 }
+
+func TestDropQuestionBankOrderColumnRebuildsTable(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE question_banks (
+		id TEXT PRIMARY KEY,
+		order_id INTEGER NOT NULL UNIQUE,
+		name TEXT NOT NULL,
+		status TEXT NOT NULL,
+		requires_cdk INTEGER NOT NULL,
+		course_code TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES ('QB-001', 7, '旧题库', 'active', 0, 'C1', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.dropQuestionBankOrderColumn(ctx); err != nil {
+		t.Fatalf("drop order column: %v", err)
+	}
+	hasOrder, err := store.tableHasColumn(ctx, "question_banks", "order_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasOrder {
+		t.Fatal("question_banks.order_id was not removed")
+	}
+	var name, code string
+	if err := store.DB.QueryRowContext(ctx, "SELECT name, course_code FROM question_banks WHERE id = 'QB-001'").Scan(&name, &code); err != nil {
+		t.Fatal(err)
+	}
+	if name != "旧题库" || code != "C1" {
+		t.Fatalf("row was not preserved: name=%q code=%q", name, code)
+	}
+}
