@@ -11,6 +11,7 @@ type ResourceCourse struct {
 	QuestionBankCount int
 	ResourceCount     int
 	TextbookCount     int
+	CoverTextbookID   string
 }
 
 func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, error) {
@@ -22,7 +23,11 @@ func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, erro
 			(SELECT COUNT(*) FROM resources r WHERE r.course_code = c.code AND r.pdf_key <> ''),
 			(SELECT COUNT(*) FROM textbook_courses tc
 				JOIN textbooks t ON t.id = tc.textbook_id
-				WHERE tc.course_code = c.code AND t.pdf_key <> '')
+				WHERE tc.course_code = c.code AND t.pdf_key <> ''),
+			COALESCE((SELECT tc.textbook_id FROM textbook_courses tc
+				JOIN textbooks t ON t.id = tc.textbook_id
+				WHERE tc.course_code = c.code
+				ORDER BY t.name, t.id LIMIT 1), '')
 		FROM courses c
 		WHERE c.code <> '' AND (
 			EXISTS (SELECT 1 FROM question_bank_courses qbc
@@ -41,7 +46,7 @@ func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, erro
 	items := make([]ResourceCourse, 0)
 	for rows.Next() {
 		var item ResourceCourse
-		if err := rows.Scan(&item.Code, &item.Name, &item.QuestionBankCount, &item.ResourceCount, &item.TextbookCount); err != nil {
+		if err := rows.Scan(&item.Code, &item.Name, &item.QuestionBankCount, &item.ResourceCount, &item.TextbookCount, &item.CoverTextbookID); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

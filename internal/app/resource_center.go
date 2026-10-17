@@ -13,6 +13,7 @@ type ResourceCourseView struct {
 	QuestionBankCount int    `json:"question_bank_count"`
 	ResourceCount     int    `json:"resource_count"`
 	TextbookCount     int    `json:"textbook_count"`
+	CoverURL          string `json:"cover_url,omitempty"`
 }
 
 func (a *App) ListResourceCourses(ctx context.Context) ([]ResourceCourseView, error) {
@@ -22,12 +23,18 @@ func (a *App) ListResourceCourses(ctx context.Context) ([]ResourceCourseView, er
 	}
 	views := make([]ResourceCourseView, 0, len(items))
 	for _, item := range items {
-		views = append(views, ResourceCourseView{
+		view := ResourceCourseView{
 			Code: item.Code, Name: item.Name,
 			QuestionBankCount: item.QuestionBankCount,
 			ResourceCount:     item.ResourceCount,
 			TextbookCount:     item.TextbookCount,
-		})
+		}
+		if item.CoverTextbookID != "" {
+			if cover, err := a.TextbookResourceURL(ctx, item.CoverTextbookID, "cover", 0); err == nil {
+				view.CoverURL = cover.URL
+			}
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }
