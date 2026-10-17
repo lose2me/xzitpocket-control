@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"xzitpocket-control/internal/config"
@@ -37,6 +38,9 @@ type App struct {
 	Cfg    config.Config
 	Store  *sqlite.Store
 	Logger *slog.Logger
+
+	cdnMu    sync.Mutex
+	cdnCache cdnStatsCache
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {

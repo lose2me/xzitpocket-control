@@ -15,7 +15,7 @@ func (s *Server) adminCDNStats(w http.ResponseWriter, r *http.Request) {
 			days = parsed
 		}
 	}
-	out, err := s.App.CDNStats(r.Context(), days)
+	out, err := s.App.CDNStats(r.Context(), days, r.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		writeError(w, r, err)
 		return

@@ -49,7 +49,7 @@ export const template = `
                     <span v-if="cdnPackage" class="cdn-meta text-medium-emphasis">
                       流量包剩余 {{ cdnPackage.remaining }} / {{ cdnPackage.total }}<template v-if="cdnPackage.expire">（{{ cdnPackage.count > 1 ? '共 ' + cdnPackage.count + ' 个，最近到期 ' : '到期 ' }}{{ cdnPackage.expire }}）</template>
                     </span>
-                    <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn>
+                    <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="cdnLoading" @click="loadCDNStats(true)">刷新</v-btn>
                   </v-card-title>
                   <v-divider />
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
@@ -57,7 +57,9 @@ export const template = `
                   </v-tabs>
                   <v-divider />
                   <v-card-text>
-                    <div v-if="!cdnStats" class="empty-state">暂无 CDN 数据</div>
+                    <v-progress-linear v-if="cdnLoading" indeterminate color="primary" class="mb-3" />
+                    <div v-if="cdnError" class="empty-state">{{ cdnError }}</div>
+                    <div v-else-if="!cdnStats" class="empty-state">{{ cdnLoading ? '加载中…' : '暂无 CDN 数据' }}</div>
                     <template v-else-if="cdnDomain">
                       <v-row dense class="mb-3">
                         <v-col v-for="card in cdnCards" :key="card.label" cols="6" sm="4" md="2">

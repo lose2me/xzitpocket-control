@@ -204,6 +204,8 @@ import { template } from './template.js';
       const cdnStats = ref(null);
       const cdnTab = ref('');
       const cdnChartEl = ref(null);
+      const cdnLoading = ref(false);
+      const cdnError = ref('');
       let cdnChart = null;
       const users = ref([]);
       const devices = ref([]);
@@ -628,15 +630,24 @@ import { template } from './template.js';
           series: [{ name: '流量', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: 0.12 }, data: points.map(point => point.value), itemStyle: { color: '#176b4d' }, lineStyle: { width: 3 } }]
         });
       };
-      const loadCDNStats = async () => {
-        const out = await api('/api/v1/admin/cdn/stats?days=30');
-        cdnStats.value = out;
-        const domains = (out && out.domains) || [];
-        if (!domains.some(item => item.domain === cdnTab.value)) {
-          cdnTab.value = domains[0] ? domains[0].domain : '';
+      const loadCDNStats = async (refresh) => {
+        cdnLoading.value = true;
+        cdnError.value = '';
+        try {
+          const out = await api('/api/v1/admin/cdn/stats?days=30' + (refresh ? '&refresh=1' : ''));
+          cdnStats.value = out;
+          const domains = (out && out.domains) || [];
+          if (!domains.some(item => item.domain === cdnTab.value)) {
+            cdnTab.value = domains[0] ? domains[0].domain : '';
+          }
+          await nextTick();
+          drawCDNChart();
+        } catch (e) {
+          if (e && e.status === 401) { clearAdminSession(); return; }
+          cdnError.value = (e && e.message) || 'CDN 统计加载失败';
+        } finally {
+          cdnLoading.value = false;
         }
-        await nextTick();
-        drawCDNChart();
       };
       watch(cdnTab, async () => { await nextTick(); drawCDNChart(); });
       const loadOverview = async () => {
@@ -647,7 +658,7 @@ import { template } from './template.js';
         const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
         series.value = ((await api('/api/v1/admin/metrics/series?days=30')).items || []).filter(row => row.day < today);
         await nextTick(); drawChart();
-        await loadCDNStats();
+        loadCDNStats();
       };
       const loadBanks = async () => {
         const offset = (bankPage.value - 1) * bankItemsPerPage.value;
@@ -1404,7 +1415,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, loadCDNStats, formatBytes, formatBitrate, formatPercent, nav, title, statCards,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
