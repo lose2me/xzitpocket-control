@@ -175,6 +175,16 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.configVersions(w, r)
 	case r.Method == http.MethodGet && path == "/school-calendar":
 		s.schoolCalendar(w, r)
+	case r.Method == http.MethodGet && path == "/resource-center/courses":
+		s.userResourceCourses(w, r)
+	case r.Method == http.MethodGet && path == "/resources":
+		s.userCourseResources(w, r)
+	case r.Method == http.MethodGet && path == "/textbooks":
+		s.userCourseTextbooks(w, r)
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "url", "resources"):
+		s.userResourceURL(w, r, segment(path, 1))
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "url", "textbooks"):
+		s.userTextbookURL(w, r, segment(path, 1))
 	case r.Method == http.MethodGet && path == "/question-banks":
 		s.questionBanks(w, r)
 	case r.Method == http.MethodGet && pathMatchesID(path, "question-banks"):
@@ -518,6 +528,7 @@ func (s *Server) authSession(w http.ResponseWriter, r *http.Request) (app.Sessio
 	}
 	return p, true
 }
+
 type adminPrincipalKey struct{}
 
 func (s *Server) authAdmin(w http.ResponseWriter, r *http.Request) (app.AdminPrincipal, bool) {
