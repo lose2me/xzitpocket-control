@@ -15,15 +15,16 @@ var ErrTextbookExists = errors.New("textbook already exists")
 // Textbook is one book a course uses. CourseCode keeps the first association
 // for sorting and older clients; CourseCodes holds every associated course.
 type Textbook struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Tags        string    `json:"tags"`
-	CourseCode  string    `json:"course_code"`
-	CourseCodes []string  `json:"course_codes"`
-	PdfKey      string    `json:"pdf_key"`
-	CoverKey    string    `json:"cover_key"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Tags          string    `json:"tags"`
+	CourseCode    string    `json:"course_code"`
+	CourseCodes   []string  `json:"course_codes"`
+	PdfKey        string    `json:"pdf_key"`
+	CoverKey      string    `json:"cover_key"`
+	DownloadCount int64     `json:"download_count"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type TextbookInput struct {
@@ -53,7 +54,7 @@ func textbookInputCodes(input TextbookInput) []string {
 	return codes
 }
 
-const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at"
+const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, download_count, created_at, updated_at"
 
 // UploadTextbooks inserts every unseen textbook. Existing rows are never
 // modified, so a stored course association survives later uploads.
@@ -100,11 +101,12 @@ func (s *Store) UploadTextbooks(ctx context.Context, inputs []TextbookInput, now
 }
 
 var textbookListSorts = map[string]string{
-	"name":        "t.name",
-	"tags":        "t.tags",
-	"course_code": "t.course_code",
-	"created_at":  "t.created_at",
-	"updated_at":  "t.updated_at",
+	"name":           "t.name",
+	"tags":           "t.tags",
+	"course_code":    "t.course_code",
+	"download_count": "t.download_count",
+	"created_at":     "t.created_at",
+	"updated_at":     "t.updated_at",
 }
 
 const textbookDefaultOrderBy = "t.course_code ASC, t.name ASC, t.id"
@@ -187,7 +189,7 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 		placeholders = append(placeholders, "?")
 		args = append(args, code)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.created_at, t.updated_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.download_count, t.created_at, t.updated_at
 		FROM textbook_courses tc JOIN textbooks t ON t.id = tc.textbook_id
 		WHERE tc.course_code IN (`+strings.Join(placeholders, ",")+") ORDER BY t.name ASC, t.id ASC", args...)
 	if err != nil {
@@ -198,7 +200,7 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 		var code string
 		var item Textbook
 		var created, updated int64
-		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &created, &updated); err != nil {
+		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &created, &updated); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
@@ -364,7 +366,7 @@ type rowScannerTextbook interface {
 func scanTextbook(row rowScannerTextbook) (Textbook, error) {
 	var item Textbook
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &created, &updated); err != nil {
 		return Textbook{}, err
 	}
 	item.CreatedAt = fromMillis(created)
@@ -380,6 +382,21 @@ func (s *Store) SetTextbookPdfKey(ctx context.Context, id, key string, now time.
 	}
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// IncrementTextbookDownloads counts one PDF download without touching the
+// content's updated_at time.
+func (s *Store) IncrementTextbookDownloads(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE textbooks SET download_count = download_count + 1 WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
 	} else if affected != 1 {
 		return sql.ErrNoRows
 	}

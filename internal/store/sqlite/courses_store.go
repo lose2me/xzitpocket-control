@@ -84,11 +84,12 @@ func (s *Store) UploadCourses(ctx context.Context, inputs []CourseInput, now tim
 // courseListSorts whitelists the ORDER BY targets so only these fixed strings
 // ever reach the SQL text.
 var courseListSorts = map[string]string{
-	"code":           "c.code",
-	"name":           "c.name",
-	"created_at":     "c.created_at",
-	"updated_at":     "c.updated_at",
-	"resource_count": "(SELECT COUNT(*) FROM resources r WHERE r.course_code = c.code)",
+	"code":               "c.code",
+	"name":               "c.name",
+	"created_at":         "c.created_at",
+	"updated_at":         "c.updated_at",
+	"resource_count":     "(SELECT COUNT(*) FROM resources r WHERE r.course_code = c.code)",
+	"resource_downloads": "(SELECT COALESCE(SUM(r.download_count), 0) FROM resources r WHERE r.course_code = c.code)",
 }
 
 const courseDefaultOrderBy = "c.name ASC, c.id"
@@ -147,6 +148,20 @@ func (s *Store) CountCourses(ctx context.Context, search string) (int, error) {
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM courses c"+where, args...).Scan(&count)
 	return count, err
+}
+
+// CourseCodeExists reports whether a course number is known. App submissions
+// reference courses by code and must not create associations to unknown codes.
+func (s *Store) CourseCodeExists(ctx context.Context, code string) (bool, error) {
+	var exists int
+	err := s.DB.QueryRowContext(ctx, "SELECT 1 FROM courses WHERE code = ?", strings.TrimSpace(code)).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {

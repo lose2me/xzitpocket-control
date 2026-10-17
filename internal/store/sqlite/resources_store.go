@@ -16,13 +16,14 @@ var ErrResourceExists = errors.New("resource already exists")
 // association is by course code and is edited manually in the console, so
 // changing the resource fields keeps it.
 type Resource struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Tags       string    `json:"tags"`
-	CourseCode string    `json:"course_code"`
-	PdfKey     string    `json:"pdf_key"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Tags          string    `json:"tags"`
+	CourseCode    string    `json:"course_code"`
+	PdfKey        string    `json:"pdf_key"`
+	DownloadCount int64     `json:"download_count"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ResourceInput struct {
@@ -31,14 +32,15 @@ type ResourceInput struct {
 	CourseCode string
 }
 
-const resourceColumns = "id, name, tags, course_code, pdf_key, created_at, updated_at"
+const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, created_at, updated_at"
 
 var resourceListSorts = map[string]string{
-	"name":        "r.name",
-	"tags":        "r.tags",
-	"course_code": "r.course_code",
-	"created_at":  "r.created_at",
-	"updated_at":  "r.updated_at",
+	"name":           "r.name",
+	"tags":           "r.tags",
+	"course_code":    "r.course_code",
+	"download_count": "r.download_count",
+	"created_at":     "r.created_at",
+	"updated_at":     "r.updated_at",
 }
 
 const resourceDefaultOrderBy = "r.course_code ASC, r.name ASC, r.id"
@@ -186,12 +188,57 @@ type rowScannerResource interface {
 func scanResource(row rowScannerResource) (Resource, error) {
 	var item Resource
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &created, &updated); err != nil {
 		return Resource{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
 	return item, nil
+}
+
+// SumResourceDownloadsByCourse returns the total download count for each of
+// the given course codes. Codes without downloads are omitted.
+func (s *Store) SumResourceDownloadsByCourse(ctx context.Context, codes []string) (map[string]int64, error) {
+	sums := make(map[string]int64, len(codes))
+	if len(codes) == 0 {
+		return sums, nil
+	}
+	placeholders := make([]string, 0, len(codes))
+	args := make([]any, 0, len(codes))
+	for _, code := range codes {
+		placeholders = append(placeholders, "?")
+		args = append(args, code)
+	}
+	rows, err := s.DB.QueryContext(ctx, "SELECT course_code, COALESCE(SUM(download_count), 0) FROM resources WHERE course_code IN ("+
+		strings.Join(placeholders, ",")+") GROUP BY course_code", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code string
+		var count int64
+		if err := rows.Scan(&code, &count); err != nil {
+			return nil, err
+		}
+		sums[code] = count
+	}
+	return sums, rows.Err()
+}
+
+// IncrementResourceDownloads counts one PDF download without touching the
+// content's updated_at time.
+func (s *Store) IncrementResourceDownloads(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE resources SET download_count = download_count + 1 WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // SetResourcePdfKey records the COS key of the resource's PDF.

@@ -47,9 +47,10 @@ var currentSchemaTables = []struct {
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
-	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "created_at", "updated_at"}},
+	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "created_at", "updated_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
-	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "created_at", "updated_at"}},
+	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "created_at", "updated_at"}},
+	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -116,6 +117,9 @@ var additiveMigrations = []struct {
 	{"admin_users", "permissions", `ALTER TABLE admin_users ADD COLUMN permissions TEXT NOT NULL DEFAULT ''`},
 	{"question_banks", "course_code", `ALTER TABLE question_banks ADD COLUMN course_code TEXT NOT NULL DEFAULT ''`},
 	{"admin_users", "key_ciphertext", `ALTER TABLE admin_users ADD COLUMN key_ciphertext TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "status", `ALTER TABLE resource_submissions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending_review'`},
+	{"textbooks", "download_count", `ALTER TABLE textbooks ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0`},
+	{"resources", "download_count", `ALTER TABLE resources ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {

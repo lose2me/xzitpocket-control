@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// COSClient uploads objects to a Tencent COS bucket through the XML API. Only
-// the PUT Object call is implemented, which is all the console needs.
+// COSClient talks to a Tencent COS bucket through the XML API: object upload,
+// deletion, HEAD metadata and the small ranged reads used to verify direct
+// app uploads.
 type COSClient struct {
 	SecretID  string
 	SecretKey string
@@ -30,7 +33,9 @@ func NewCOSClient(secretID, secretKey, bucket, region string) *COSClient {
 		SecretKey: secretKey,
 		Bucket:    bucket,
 		Region:    region,
-		HTTP:      &http.Client{Timeout: 60 * time.Second},
+		// A scanned 80 MB PDF can exceed the old 60 second limit on the
+		// Lighthouse instance's public bandwidth.
+		HTTP: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -62,14 +67,19 @@ func cosHMAC(key, message string) []byte {
 	return mac.Sum(nil)
 }
 
-// cosAuthorization builds the Authorization header value for a signed COS
-// request. The COS signing key is the hex digest of HMAC-SHA1(secret, keyTime).
-func cosAuthorization(secretID, secretKey, keyTime, method, path, headerList, headerString string) string {
+// cosSignature returns the hex signature for a COS request.
+func cosSignature(secretKey, keyTime, method, path, headerList, headerString string) string {
 	httpString := strings.Join([]string{method, path, "", headerString, ""}, "\n")
 	httpHash := sha1.Sum([]byte(httpString))
 	stringToSign := strings.Join([]string{"sha1", keyTime, hex.EncodeToString(httpHash[:]), ""}, "\n")
 	signKey := hex.EncodeToString(cosHMAC(secretKey, keyTime))
-	signature := hex.EncodeToString(cosHMAC(signKey, stringToSign))
+	return hex.EncodeToString(cosHMAC(signKey, stringToSign))
+}
+
+// cosAuthorization builds the Authorization header value for a signed COS
+// request. The COS signing key is the hex digest of HMAC-SHA1(secret, keyTime).
+func cosAuthorization(secretID, secretKey, keyTime, method, path, headerList, headerString string) string {
+	signature := cosSignature(secretKey, keyTime, method, path, headerList, headerString)
 	return "q-sign-algorithm=sha1" +
 		"&q-ak=" + secretID +
 		"&q-sign-time=" + keyTime +
@@ -129,6 +139,105 @@ func (c *COSClient) PutObject(ctx context.Context, key, contentType string, body
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", authorization)
 	return c.do(req, "put", key)
+}
+
+// PresignPutURL returns a time-limited URL that a client can PUT the object
+// to directly, so large uploads do not pass through the control server.
+func (c *COSClient) PresignPutURL(key string, contentLength int64, ttl time.Duration) (string, error) {
+	if !c.Configured() {
+		return "", fmt.Errorf("cos is not configured")
+	}
+	if contentLength <= 0 {
+		return "", fmt.Errorf("invalid content length %d", contentLength)
+	}
+	if ttl <= 0 || ttl > 24*time.Hour {
+		ttl = 30 * time.Minute
+	}
+	path := "/" + strings.TrimPrefix(key, "/")
+	host := c.host()
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+int64(ttl.Seconds()))
+	headerList, headerString := cosHeaderSignature(map[string]string{
+		"content-length": strconv.FormatInt(contentLength, 10),
+		"host":           host,
+	})
+	signature := cosSignature(c.SecretKey, keyTime, "put", path, headerList, headerString)
+	params := url.Values{}
+	params.Set("q-sign-algorithm", "sha1")
+	params.Set("q-ak", c.SecretID)
+	params.Set("q-sign-time", keyTime)
+	params.Set("q-key-time", keyTime)
+	params.Set("q-header-list", headerList)
+	params.Set("q-url-param-list", "")
+	params.Set("q-signature", signature)
+	return fmt.Sprintf("https://%s%s?%s", host, path, params.Encode()), nil
+}
+
+// GetObjectRange reads a small byte range of an object. It is used to verify
+// the PDF signature of a direct upload without downloading the whole file.
+func (c *COSClient) GetObjectRange(ctx context.Context, key string, start, end int64) ([]byte, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("cos is not configured")
+	}
+	if start < 0 || end < start {
+		return nil, fmt.Errorf("invalid range %d-%d", start, end)
+	}
+	path := "/" + strings.TrimPrefix(key, "/")
+	host := c.host()
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
+	rangeValue := fmt.Sprintf("bytes=%d-%d", start, end)
+	headerList, headerString := cosHeaderSignature(map[string]string{"host": host, "range": rangeValue})
+	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "get", path, headerList, headerString)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://%s%s", host, path), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = host
+	req.Header.Set("Range", rangeValue)
+	req.Header.Set("Authorization", authorization)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("cos get %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, end-start+1))
+}
+
+// GetObject starts a signed GET and returns the raw response so callers can
+// stream a PDF to a browser with a Content-Disposition header.
+func (c *COSClient) GetObject(ctx context.Context, key string) (*http.Response, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("cos is not configured")
+	}
+	path := "/" + strings.TrimPrefix(key, "/")
+	host := c.host()
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
+	headerList, headerString := cosHeaderSignature(map[string]string{"host": host})
+	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "get", path, headerList, headerString)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://%s%s", host, path), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = host
+	req.Header.Set("Authorization", authorization)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("cos get %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
+	}
+	return resp, nil
 }
 
 // HeadObject returns the object's size in bytes without downloading it.

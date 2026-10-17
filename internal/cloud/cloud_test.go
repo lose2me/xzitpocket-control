@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -85,6 +87,55 @@ func TestTc3AuthorizationMatchesKnownValue(t *testing.T) {
 		"Signature=be4f67d323c78ab9acb7395e43c0dbcf822a9cfac32fea2449a7bc7726b770a3"
 	if auth != want {
 		t.Fatalf("tc3Authorization mismatch:\n got %q\nwant %q", auth, want)
+	}
+}
+
+func TestPresignPutURL(t *testing.T) {
+	client := NewCOSClient("AKIDtest", "secretkey", "bucket-1250000000", "ap-shanghai")
+	raw, err := client.PresignPutURL("submissions/sub_1/original.pdf", 12, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "bucket-1250000000.cos.ap-shanghai.myqcloud.com" ||
+		parsed.Path != "/submissions/sub_1/original.pdf" {
+		t.Fatalf("url = %q", raw)
+	}
+	query := parsed.Query()
+	if query.Get("q-sign-algorithm") != "sha1" || query.Get("q-ak") != "AKIDtest" ||
+		query.Get("q-header-list") != "content-length;host" || query.Get("q-url-param-list") != "" {
+		t.Fatalf("query = %#v", query)
+	}
+	if len(query.Get("q-signature")) != 40 {
+		t.Fatalf("signature = %q", query.Get("q-signature"))
+	}
+}
+
+func TestGetObjectRangeSendsSignedRange(t *testing.T) {
+	var captured *http.Request
+	client := NewCOSClient("AKIDtest", "secretkey", "bucket-1250000000", "ap-shanghai")
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		captured = req
+		return stubResponse(http.StatusPartialContent, "%PDF-"), nil
+	})}
+	data, err := client.GetObjectRange(context.Background(), "submissions/x/original.pdf", 0, 4)
+	if err != nil {
+		t.Fatalf("GetObjectRange: %v", err)
+	}
+	if string(data) != "%PDF-" {
+		t.Fatalf("data = %q", data)
+	}
+	if captured == nil || captured.Method != http.MethodGet {
+		t.Fatalf("request = %+v", captured)
+	}
+	if captured.Header.Get("Range") != "bytes=0-4" {
+		t.Fatalf("range = %q", captured.Header.Get("Range"))
+	}
+	if auth := captured.Header.Get("Authorization"); !strings.Contains(auth, "q-header-list=host;range") {
+		t.Fatalf("authorization should sign host and range: %q", auth)
 	}
 }
 

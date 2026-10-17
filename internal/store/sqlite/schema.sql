@@ -286,6 +286,7 @@ CREATE TABLE IF NOT EXISTS textbooks (
     course_code TEXT NOT NULL DEFAULT '',
     pdf_key TEXT NOT NULL DEFAULT '',
     cover_key TEXT NOT NULL DEFAULT '',
+    download_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(name, tags, course_code)
@@ -313,6 +314,7 @@ CREATE TABLE IF NOT EXISTS resources (
     tags TEXT NOT NULL DEFAULT '',
     course_code TEXT NOT NULL DEFAULT '',
     pdf_key TEXT NOT NULL DEFAULT '',
+    download_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(name, tags, course_code)
@@ -320,3 +322,24 @@ CREATE TABLE IF NOT EXISTS resources (
 
 CREATE INDEX IF NOT EXISTS idx_resources_name ON resources(name);
 CREATE INDEX IF NOT EXISTS idx_resources_course ON resources(course_code);
+
+-- PDFs uploaded by app users and waiting for administrator review. An
+-- approved submission becomes a textbooks/resources row that keeps pdf_key;
+-- the row is removed once reviewed.
+CREATE TABLE IF NOT EXISTS resource_submissions (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('textbook', 'resource')),
+    course_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '',
+    pdf_key TEXT NOT NULL DEFAULT '',
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_upload', 'pending_review')),
+    submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    submitted_by_name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_submissions_kind ON resource_submissions(kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissions(status, kind, created_at);
