@@ -10,7 +10,7 @@ import (
 	"xzitpocket-control/internal/cloud"
 )
 
-const hostStatsCacheTTL = 60 * time.Second
+const hostStatsCacheTTL = 10 * time.Minute
 
 type hostStatsCache struct {
 	stats   *cloud.HostStats
