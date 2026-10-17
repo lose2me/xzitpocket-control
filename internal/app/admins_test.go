@@ -38,6 +38,13 @@ func TestAdminManagement(t *testing.T) {
 	if _, err := a.CreateAdminForAdmin(ctx, AdminWriteInput{Name: "viewer2", Key: "another-key", Permissions: "overview=r"}, "admin"); err == nil {
 		t.Fatal("duplicate admin should fail")
 	}
+	nameless, err := a.CreateAdminForAdmin(ctx, AdminWriteInput{Key: "nameless-key", Permissions: "audit=r"}, "admin")
+	if err != nil || !adminNamePattern.MatchString(nameless.Name) {
+		t.Fatalf("nameless create = %#v, err = %v", nameless, err)
+	}
+	if _, _, err := a.AdminLogin(ctx, "nameless-key"); err != nil {
+		t.Fatalf("nameless admin should log in: %v", err)
+	}
 	if _, err := a.CreateAdminForAdmin(ctx, AdminWriteInput{Name: "bad", Key: "bad-key-123", Permissions: "*"}, "admin"); err == nil {
 		t.Fatal("wildcard admin should be rejected")
 	}

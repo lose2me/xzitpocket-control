@@ -56,12 +56,17 @@ func (a *App) ListAdminsForAdmin(ctx context.Context) ([]AdminSummaryView, error
 }
 
 func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor string) (AdminSummaryView, error) {
+	// The console no longer asks for an administrator name: accounts are
+	// identified by their key. A name is still stored for internal use and is
+	// generated from the account ID when the caller omits it.
 	name := strings.ToLower(strings.TrimSpace(in.Name))
-	if !adminNamePattern.MatchString(name) {
-		return AdminSummaryView{}, Err("invalid_admin", "管理员名称需为 1-32 位字母、数字、下划线或短横线", http.StatusBadRequest)
-	}
-	if name == superAdminName {
-		return AdminSummaryView{}, Err("invalid_admin", "不能新建超级管理员", http.StatusBadRequest)
+	if name != "" {
+		if !adminNamePattern.MatchString(name) {
+			return AdminSummaryView{}, Err("invalid_admin", "管理员名称需为 1-32 位字母、数字、下划线或短横线", http.StatusBadRequest)
+		}
+		if name == superAdminName {
+			return AdminSummaryView{}, Err("invalid_admin", "不能新建超级管理员", http.StatusBadRequest)
+		}
 	}
 	key := strings.TrimSpace(in.Key)
 	if len(key) < 8 || len(key) > 128 {
@@ -74,10 +79,12 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	if perms["*"] == "rw" {
 		return AdminSummaryView{}, Err("invalid_admin_permissions", "不能授予通配权限", http.StatusBadRequest)
 	}
-	if _, err := a.Store.GetAdminByName(ctx, name); err == nil {
-		return AdminSummaryView{}, Err("admin_exists", "该管理员已存在", http.StatusConflict)
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return AdminSummaryView{}, err
+	if name != "" {
+		if _, err := a.Store.GetAdminByName(ctx, name); err == nil {
+			return AdminSummaryView{}, Err("admin_exists", "该管理员已存在", http.StatusConflict)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return AdminSummaryView{}, err
+		}
 	}
 	hash, err := controlcrypto.Argon2idHash(key)
 	if err != nil {
@@ -86,6 +93,9 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	id, err := controlcrypto.NewID("adm")
 	if err != nil {
 		return AdminSummaryView{}, err
+	}
+	if name == "" {
+		name = strings.ToLower(id)
 	}
 	now := time.Now().UTC()
 	item := sqlite.Admin{

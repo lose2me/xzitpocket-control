@@ -202,7 +202,7 @@ import { template } from './template.js';
       const admins = ref([]);
       const adminDialog = ref(false);
       const adminEditingId = ref('');
-      const adminForm = ref({ name: '', key: '' });
+      const adminForm = ref({ key: '' });
       const adminPermsForm = ref({});
       const drawer = ref(false);
       const VIEW_ROUTES = ['overview', 'users', 'admins', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'config', 'audit'];
@@ -426,11 +426,10 @@ import { template } from './template.js';
         { title: '读写', value: 'rw' }
       ];
       const adminHeaders = [
-        { title: '管理员', key: 'name', sortable: false, width: '22%' },
-        { title: '页面权限', key: 'permissions', sortable: false, width: '43%' },
-        { title: '创建时间', key: 'created_at', sortable: false, width: '13%' },
-        { title: '最近登录', key: 'last_login_at', sortable: false, width: '13%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '9%' }
+        { title: '页面权限', key: 'permissions', sortable: false, width: '55%' },
+        { title: '创建时间', key: 'created_at', sortable: false, width: '15%' },
+        { title: '最近登录', key: 'last_login_at', sortable: false, width: '15%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
       ];
       watch(mdAndUp, (desktop) => { if (!desktop) drawer.value = false; }, { immediate: true });
 
@@ -1323,7 +1322,7 @@ import { template } from './template.js';
       };
       const resetAdminForm = (item) => {
         adminEditingId.value = item ? (item.id || '') : '';
-        adminForm.value = { name: item ? (item.name || '') : '', key: '' };
+        adminForm.value = { key: '' };
         const parsed = parseAdminPerms(item && item.permissions);
         const perms = {};
         adminPageKeys.forEach((page) => { perms[page] = parsed[page] || ''; });
@@ -1341,8 +1340,6 @@ import { template } from './template.js';
       const saveAdmin = () => call(async () => {
         const form = adminForm.value;
         const editing = !!adminEditingId.value;
-        const name = String(form.name || '').trim().toLowerCase();
-        if (!editing && !name) throw new Error('请填写管理员名称');
         if (!editing && String(form.key || '').length < 8) throw new Error('管理密钥至少 8 位');
         const parts = [];
         adminPageKeys.forEach((page) => {
@@ -1352,7 +1349,7 @@ import { template } from './template.js';
         if (!parts.length) throw new Error('请至少授予一个页面的读权限');
         const body = editing
           ? { key: form.key || '', permissions: parts.join(',') }
-          : { name, key: form.key, permissions: parts.join(',') };
+          : { key: form.key, permissions: parts.join(',') };
         const path = '/api/v1/admin/admins' + (editing ? '/' + encodeURIComponent(adminEditingId.value) : '');
         await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
         adminDialog.value = false;
@@ -1362,7 +1359,7 @@ import { template } from './template.js';
       const deleteAdmin = (row) => call(async () => {
         const item = rawItem(row);
         if (item.super) return;
-        if (!window.confirm('确定删除管理员“' + item.name + '”吗？')) return;
+        if (!window.confirm('确定删除该管理员吗？')) return;
         await api('/api/v1/admin/admins/' + encodeURIComponent(item.id), { method: 'DELETE' });
         notify('管理员已删除');
         await loadAdmins();
