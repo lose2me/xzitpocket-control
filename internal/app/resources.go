@@ -119,7 +119,7 @@ func (a *App) UploadCourseResources(ctx context.Context, courseCode string, uplo
 		item, err := a.Store.CreateResource(ctx, sqlite.ResourceInput{Name: name, CourseCode: courseCode}, now)
 		if err != nil {
 			if err == sqlite.ErrResourceExists {
-				failed = append(failed, map[string]string{"name": name, "reason": "该课程下已有同名资源"})
+				failed = append(failed, map[string]string{"name": name, "reason": "该课程下已有同名试卷"})
 				continue
 			}
 			return nil, err
@@ -176,7 +176,7 @@ func (a *App) removeResourceAssets(ctx context.Context, item sqlite.Resource) {
 func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return sqlite.Resource{}, Err("invalid_resource_id", "资源标识无效", 400)
+		return sqlite.Resource{}, Err("invalid_resource_id", "试卷标识无效", 400)
 	}
 	item, err := a.Store.GetResource(ctx, id)
 	if err != nil {
@@ -195,7 +195,7 @@ func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (Re
 		return ResourceURLView{}, err
 	}
 	if item.PdfKey == "" {
-		return ResourceURLView{}, Err("resource_missing", "该资源没有 PDF", 404)
+		return ResourceURLView{}, Err("resource_missing", "该试卷没有 PDF", 404)
 	}
 	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
 		return ResourceURLView{}, Err("cdn_unavailable", "CDN 未配置", 503)

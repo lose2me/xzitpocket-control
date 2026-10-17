@@ -371,7 +371,7 @@ import { template } from './template.js';
         { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '文库', icon: 'mdi-book-open-page-variant' },
         { key: 'textbooks', label: '书单', icon: 'mdi-bookshelf' },
-        { key: 'resources', label: '资源', icon: 'mdi-file-document-multiple-outline' },
+        { key: 'resources', label: '试卷', icon: 'mdi-file-document-multiple-outline' },
         { key: 'courses', label: '课程', icon: 'mdi-book-open-variant' },
         { key: 'share-codes', label: '分享码', icon: 'mdi-share-variant-outline' },
         { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
@@ -508,7 +508,7 @@ import { template } from './template.js';
       const resourceHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '22%' },
         { title: '课程名称', key: 'name', sortable: true, width: '34%' },
-        { title: '资源数', key: 'resource_count', align: 'center', width: '14%' },
+        { title: '试卷数', key: 'resource_count', align: 'center', width: '14%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
       ];
       const courseResourceHeaders = [
@@ -1563,7 +1563,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开文库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传资源', resource_delete: '删除资源', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
