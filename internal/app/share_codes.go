@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -199,8 +200,26 @@ func (a *App) shareCodeView(ctx context.Context, item sqlite.ShareCode) ShareCod
 	}
 }
 
-func (a *App) ListShareCodes(ctx context.Context, limit, offset int) ([]ShareCodeView, int, error) {
-	items, total, err := a.Store.ListShareCodes(ctx, limit, offset)
+func (a *App) ListShareCodes(ctx context.Context, limit, offset int, sortKey, order string) ([]ShareCodeView, int, error) {
+	sortKey = strings.TrimSpace(sortKey)
+	limit = clampLimit(limit)
+	if offset < 0 {
+		offset = 0
+	}
+	if sortKey == "" || sortKey == "created_at" || sortKey == "expires_at" {
+		items, total, err := a.Store.ListShareCodes(ctx, limit, offset, sortKey, order)
+		if err != nil {
+			return nil, 0, err
+		}
+		views := make([]ShareCodeView, 0, len(items))
+		for _, item := range items {
+			views = append(views, a.shareCodeView(ctx, item))
+		}
+		return views, total, nil
+	}
+	// Code/type/student are decrypted or derived, so the whole set has to be
+	// materialized before it can be sorted and paged.
+	items, _, err := a.Store.ListShareCodes(ctx, 1000000, 0, "", "")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -208,7 +227,38 @@ func (a *App) ListShareCodes(ctx context.Context, limit, offset int) ([]ShareCod
 	for _, item := range items {
 		views = append(views, a.shareCodeView(ctx, item))
 	}
-	return views, total, nil
+	descending := strings.EqualFold(strings.TrimSpace(order), "desc")
+	sort.SliceStable(views, func(i, j int) bool {
+		left, right := shareCodeSortValue(views[i], sortKey), shareCodeSortValue(views[j], sortKey)
+		if descending {
+			return left > right
+		}
+		return left < right
+	})
+	total := len(views)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return views[offset:end], total, nil
+}
+
+func shareCodeSortValue(view ShareCodeView, key string) string {
+	switch key {
+	case "code":
+		return view.Code
+	case "type":
+		if strings.HasSuffix(view.Code, "1") {
+			return "schedule"
+		}
+		return "personalization"
+	case "student_id":
+		return view.StudentID
+	}
+	return ""
 }
 
 // GetShareCode returns one share code together with its decrypted payload for

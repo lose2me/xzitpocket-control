@@ -265,7 +265,7 @@ func (a *App) GetQuestionBank(ctx context.Context, id string) (QuestionBankRespo
 	return QuestionBankResponse{QuestionBank: questionBankView(bank)}, nil
 }
 
-func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status string) ([]QuestionBankSummaryView, int, error) {
+func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, sort, order string) ([]QuestionBankSummaryView, int, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
@@ -274,7 +274,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status s
 	if status != "" && status != "active" && status != "draft" && status != "disabled" {
 		return nil, 0, Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
 	}
-	items, err := a.Store.ListQuestionBanks(ctx, limit, offset, status)
+	items, err := a.Store.ListQuestionBanks(ctx, limit, offset, status, sort, order)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -45,7 +45,7 @@ func TestQuestionBankOrderIDsAllocateSortAndRejectDuplicates(t *testing.T) {
 	if !errors.Is(err, ErrQuestionBankOrderTaken) {
 		t.Fatalf("duplicate order error = %v, want ErrQuestionBankOrderTaken", err)
 	}
-	items, err := store.ListQuestionBanks(ctx, 50, 0, "")
+	items, err := store.ListQuestionBanks(ctx, 50, 0, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestQuestionBankOrderIDsAllocateSortAndRejectDuplicates(t *testing.T) {
 	if err := store.UpdateQuestionBank(ctx, manual); err != nil {
 		t.Fatal(err)
 	}
-	items, err = store.ListQuestionBanks(ctx, 50, 0, "")
+	items, err = store.ListQuestionBanks(ctx, 50, 0, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 		t.Fatalf("status change did not advance updated_at: before=%s after=%s", contentUpdatedAt, got.UpdatedAt)
 	}
 	items, total, err := func() ([]QuestionBankSummary, int, error) {
-		items, err := store.ListQuestionBanks(ctx, 50, 0, "")
+		items, err := store.ListQuestionBanks(ctx, 50, 0, "", "", "")
 		if err != nil {
 			return nil, 0, err
 		}

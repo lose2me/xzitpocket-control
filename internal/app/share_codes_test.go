@@ -106,7 +106,7 @@ func TestListShareCodesResolvesStudentID(t *testing.T) {
 	if _, err := a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"v": 2}}, ""); err != nil {
 		t.Fatal(err)
 	}
-	views, total, err := a.ListShareCodes(ctx, 10, 0)
+	views, total, err := a.ListShareCodes(ctx, 10, 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestShareCodeListAndDetailExposeCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	views, total, err := a.ListShareCodes(ctx, 10, 0)
+	views, total, err := a.ListShareCodes(ctx, 10, 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ func (s *Server) questionBanks(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var err error
 	if admin {
-		items, total, err = s.App.ListQuestionBanks(r.Context(), limit, offset, "active")
+		items, total, err = s.App.ListQuestionBanks(r.Context(), limit, offset, "active", r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	} else {
 		items, total, err = s.App.ListQuestionBanksForUser(r.Context(), limit, offset, p.User.ID)
 	}
@@ -99,7 +99,7 @@ func (s *Server) adminLibraryCDKs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, offset := queryPage(r)
-	items, total, err := s.App.ListLibraryCDKs(r.Context(), limit, offset, r.URL.Query().Get("q"))
+	items, total, err := s.App.ListLibraryCDKs(r.Context(), limit, offset, r.URL.Query().Get("sort"), r.URL.Query().Get("order"), r.URL.Query().Get("q"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -159,7 +159,7 @@ func (s *Server) adminQuestionBanks(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, offset := queryPage(r)
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	items, total, err := s.App.ListQuestionBanks(r.Context(), limit, offset, status)
+	items, total, err := s.App.ListQuestionBanks(r.Context(), limit, offset, status, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	if err != nil {
 		writeError(w, r, err)
 		return

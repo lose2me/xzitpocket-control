@@ -117,7 +117,7 @@ func TestLibraryCDKSearch(t *testing.T) {
 	if err := store.CreateLibraryCDKs(ctx, []LibraryCDK{{ID: "cdk-search-1", CodeHash: "search-hash-1", Status: "active", CreatedAt: now}, {ID: "cdk-search-2", CodeHash: "search-hash-2", Status: "used", CreatedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
-	items, total, err := store.ListLibraryCDKs(ctx, 50, 0, "cdk-search-1")
+	items, total, err := store.ListLibraryCDKs(ctx, 50, 0, "", "", "cdk-search-1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -32,14 +33,31 @@ func (s *Store) GetShareCodeByHash(ctx context.Context, codeHash string) (ShareC
 	return scanShareCode(row)
 }
 
-func (s *Store) ListShareCodes(ctx context.Context, limit, offset int) ([]ShareCode, int, error) {
+var shareCodeListSorts = map[string]string{
+	"created_at": "created_at",
+	"expires_at": "expires_at",
+}
+
+func shareCodeOrderBy(sort, order string) string {
+	column, ok := shareCodeListSorts[strings.TrimSpace(sort)]
+	if !ok {
+		return "created_at DESC, id"
+	}
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(order), "desc") {
+		direction = "DESC"
+	}
+	return column + " " + direction + ", id"
+}
+
+func (s *Store) ListShareCodes(ctx context.Context, limit, offset int, sort, order string) ([]ShareCode, int, error) {
 	var total int
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM share_codes").Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, code_hash, code_ciphertext, payload_ciphertext, payload_hash, COALESCE(created_by_user_id, ''), created_at, expires_at
-		FROM share_codes ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+		FROM share_codes ORDER BY `+shareCodeOrderBy(sort, order)+` LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

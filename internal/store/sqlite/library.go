@@ -10,7 +10,30 @@ import (
 	"time"
 )
 
-func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status string) ([]QuestionBankSummary, error) {
+var questionBankListSorts = map[string]string{
+	"orderId":        "b.order_id",
+	"id":             "b.id",
+	"name":           "b.name",
+	"question_count": "COUNT(q.id)",
+	"status":         "b.status",
+	"new":            "b.is_new",
+	"requiresCDK":    "b.requires_cdk",
+	"updated_at":     "b.updated_at",
+}
+
+func questionBankOrderBy(sort, order string) string {
+	column, ok := questionBankListSorts[strings.TrimSpace(sort)]
+	if !ok {
+		return "b.order_id ASC, b.id"
+	}
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(order), "desc") {
+		direction = "DESC"
+	}
+	return column + " " + direction + ", b.id"
+}
+
+func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status, sort, order string) ([]QuestionBankSummary, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -26,7 +49,7 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		query += " WHERE b.status = ?"
 		args = append(args, status)
 	}
-	query += " GROUP BY b.id ORDER BY b.order_id ASC, b.id LIMIT ? OFFSET ?"
+	query += " GROUP BY b.id ORDER BY " + questionBankOrderBy(sort, order) + " LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -528,7 +551,7 @@ func (s *Store) CreateLibraryCDKs(ctx context.Context, cdks []LibraryCDK) error 
 	return tx.Commit()
 }
 
-func (s *Store) ListLibraryCDKs(ctx context.Context, limit, offset int, search ...string) ([]LibraryCDK, int, error) {
+func (s *Store) ListLibraryCDKs(ctx context.Context, limit, offset int, sort, order string, search ...string) ([]LibraryCDK, int, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -537,7 +560,7 @@ func (s *Store) ListLibraryCDKs(ctx context.Context, limit, offset int, search .
 	if offset < 0 {
 		offset = 0
 	}
-	query, args := libraryCDKListQuery(limit, offset, search...)
+	query, args := libraryCDKListQuery(limit, offset, sort, order, search...)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
@@ -607,13 +630,33 @@ func libraryCDKWhere(search ...string) (string, []any) {
 	return where, args
 }
 
-func libraryCDKListQuery(limit, offset int, search ...string) (string, []any) {
+func libraryCDKOrderBy(sort, order string) string {
+	columns := map[string]string{
+		"id":               "c.id",
+		"question_bank_id": "c.question_bank_id",
+		"status":           "c.status",
+		"bound_student_id": "c.bound_student_id_hash",
+		"created_at":       "c.created_at",
+		"used_at":          "c.used_at",
+	}
+	column, ok := columns[strings.TrimSpace(sort)]
+	if !ok {
+		return "c.created_at DESC, c.id"
+	}
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(order), "desc") {
+		direction = "DESC"
+	}
+	return column + " " + direction + ", c.id"
+}
+
+func libraryCDKListQuery(limit, offset int, sort, order string, search ...string) (string, []any) {
 	where, args := libraryCDKWhere(search...)
 	query := `SELECT c.id, c.code_hash, COALESCE(c.question_bank_id, ''),
 		COALESCE(c.bound_student_id_hash, ''), COALESCE(c.bound_student_id_ciphertext, ''), COALESCE(c.bound_user_id, ''), c.status,
 		c.created_at, c.used_at
 		FROM library_cdks c LEFT JOIN question_banks b ON b.id = c.question_bank_id
-		` + where + ` ORDER BY c.created_at DESC, c.id LIMIT ? OFFSET ?`
+		` + where + ` ORDER BY ` + libraryCDKOrderBy(sort, order) + ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	return query, args
 }

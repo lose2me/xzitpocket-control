@@ -84,10 +84,11 @@ func (s *Store) UploadCourses(ctx context.Context, inputs []CourseInput, now tim
 // courseListSorts whitelists the ORDER BY targets so only these fixed strings
 // ever reach the SQL text.
 var courseListSorts = map[string]string{
-	"code":       "c.code",
-	"name":       "c.name",
-	"created_at": "c.created_at",
-	"updated_at": "c.updated_at",
+	"code":           "c.code",
+	"name":           "c.name",
+	"created_at":     "c.created_at",
+	"updated_at":     "c.updated_at",
+	"resource_count": "(SELECT COUNT(*) FROM resources r WHERE r.course_code = c.code)",
 }
 
 const courseDefaultOrderBy = "c.name ASC, c.id"

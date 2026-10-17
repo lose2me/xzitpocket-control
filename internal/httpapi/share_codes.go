@@ -42,7 +42,7 @@ func (s *Server) adminShareCodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, offset := queryPage(r)
-	items, total, err := s.App.ListShareCodes(r.Context(), limit, offset)
+	items, total, err := s.App.ListShareCodes(r.Context(), limit, offset, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	if err != nil {
 		writeError(w, r, err)
 		return

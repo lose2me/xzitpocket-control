@@ -72,8 +72,8 @@ func (a *App) InsertErrorReport(ctx context.Context, p SessionPrincipal, in Erro
 	return accepted, err
 }
 
-func (a *App) ListErrorReports(ctx context.Context, limit, offset int) ([]ErrorReportView, int, error) {
-	items, total, err := a.Store.ListErrorReports(ctx, clampLimit(limit), max0(offset))
+func (a *App) ListErrorReports(ctx context.Context, limit, offset int, sort, order string) ([]ErrorReportView, int, error) {
+	items, total, err := a.Store.ListErrorReports(ctx, clampLimit(limit), max0(offset), sort, order)
 	if err != nil {
 		return nil, 0, err
 	}

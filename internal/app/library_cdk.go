@@ -123,7 +123,7 @@ func libraryCDKView(cdk sqlite.LibraryCDK, encryptionKey []byte) LibraryCDKView 
 	return view
 }
 
-func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, search ...string) ([]LibraryCDKView, int, error) {
+func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, sort, order string, search ...string) ([]LibraryCDKView, int, error) {
 	query := ""
 	if len(search) > 0 {
 		query = strings.TrimSpace(search[0])
@@ -137,7 +137,7 @@ func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, search ...
 	if validLibraryCDKCode(canonicalCode) {
 		codeHash = controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalCode)
 	}
-	items, total, err := a.Store.ListLibraryCDKs(ctx, limit, offset, query, studentHash, codeHash)
+	items, total, err := a.Store.ListLibraryCDKs(ctx, limit, offset, sort, order, query, studentHash, codeHash)
 	if err != nil {
 		return nil, 0, err
 	}

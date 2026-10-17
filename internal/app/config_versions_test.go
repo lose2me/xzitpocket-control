@@ -91,7 +91,7 @@ func TestQuestionBankVersionsTrackSameMillisecondWrites(t *testing.T) {
 		if err != nil || len(items) != 1 || items[0].UpdatedAt != want {
 			t.Fatalf("user summaries = %#v, want version %q: %v", items, want, err)
 		}
-		items, _, err = a.ListQuestionBanks(ctx, 100, 0, "")
+		items, _, err = a.ListQuestionBanks(ctx, 100, 0, "", "", "")
 		if err != nil || len(items) != 1 || items[0].UpdatedAt != want {
 			t.Fatalf("admin summaries = %#v, want version %q: %v", items, want, err)
 		}

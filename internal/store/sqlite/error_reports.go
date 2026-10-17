@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -113,7 +114,29 @@ func (s *Store) CleanupErrorReports(ctx context.Context, before time.Time) (int6
 	return result.RowsAffected()
 }
 
-func (s *Store) ListErrorReports(ctx context.Context, limit, offset int) ([]ErrorReport, int, error) {
+var errorReportListSorts = map[string]string{
+	"occurred_at": "r.occurred_at",
+	"received_at": "r.received_at",
+	"student_id":  "r.student_id_hash",
+	"title":       "r.title",
+	"message":     "r.message",
+	"app_version": "r.app_version",
+	"platform":    "r.platform",
+}
+
+func errorReportOrderBy(sort, order string) string {
+	column, ok := errorReportListSorts[strings.TrimSpace(sort)]
+	if !ok {
+		return "r.occurred_at DESC, r.id DESC"
+	}
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(order), "desc") {
+		direction = "DESC"
+	}
+	return column + " " + direction + ", r.id DESC"
+}
+
+func (s *Store) ListErrorReports(ctx context.Context, limit, offset int, sort, order string) ([]ErrorReport, int, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -125,7 +148,7 @@ func (s *Store) ListErrorReports(ctx context.Context, limit, offset int) ([]Erro
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id, r.event_id, COALESCE(r.user_id, ''), r.device_id, r.student_id_hash,
 		r.app_version, r.platform, r.title, r.message, r.error_text, r.stack_trace, r.occurred_at, r.received_at,
 		EXISTS(SELECT 1 FROM error_report_ignored_students i WHERE i.student_id_hash = r.student_id_hash)
-		FROM error_reports r ORDER BY r.occurred_at DESC, r.id DESC LIMIT ? OFFSET ?`, limit, offset)
+		FROM error_reports r ORDER BY `+errorReportOrderBy(sort, order)+` LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

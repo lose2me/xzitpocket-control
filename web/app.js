@@ -209,14 +209,17 @@ import { template } from './template.js';
       const errorReportsTotal = ref(0);
       const errorReportsPage = ref(1);
       const errorReportsPerPage = ref(25);
+      const errorReportSortBy = ref([]);
       const banks = ref([]);
       const bankTotal = ref(0);
       const bankPage = ref(1);
       const bankItemsPerPage = ref(25);
+      const bankSortBy = ref([]);
       const cdks = ref([]);
       const cdkTotal = ref(0);
       const cdkPage = ref(1);
       const cdkItemsPerPage = ref(25);
+      const cdkSortBy = ref([]);
       const courses = ref([]);
       const courseTotal = ref(0);
       const coursePage = ref(1);
@@ -225,11 +228,13 @@ import { template } from './template.js';
       const courseDialog = ref(false);
       const courseEditingId = ref('');
       const courseForm = ref({ code: '', name: '' });
+      const courseSortBy = ref([]);
       const textbooks = ref([]);
       const textbookTotal = ref(0);
       const textbookPage = ref(1);
       const textbookItemsPerPage = ref(25);
       const textbookSearch = ref('');
+      const textbookSortBy = ref([]);
       const textbookDialog = ref(false);
       const textbookEditingId = ref('');
       const textbookForm = ref({ name: '', tags: '', courseCode: '' });
@@ -256,6 +261,7 @@ import { template } from './template.js';
       const shareCodesTotal = ref(0);
       const shareCodePage = ref(1);
       const shareCodeItemsPerPage = ref(25);
+      const shareCodeSortBy = ref([]);
       const shareCodeDialog = ref(false);
       const shareCodeJSON = ref('{}');
       const shareCodeKind = ref('personalization');
@@ -544,6 +550,10 @@ import { template } from './template.js';
           error.value = e && e.message ? e.message : '请求失败';
         } finally { loading.value = false; }
       };
+      const sortQuery = (sortBy) => {
+        const item = Array.isArray(sortBy) ? (sortBy[0] || {}) : {};
+        return item.key ? '&sort=' + encodeURIComponent(item.key) + '&order=' + encodeURIComponent(item.order || 'asc') : '';
+      };
       const login = () => call(async () => {
         const out = await api('/api/v1/admin/session', { method: 'POST', body: JSON.stringify(loginForm.value) });
         localStorage.setItem('control_admin', out.access_token); logged.value = true; notify('登录成功'); await load();
@@ -568,16 +578,18 @@ import { template } from './template.js';
       };
       const loadBanks = async () => {
         const offset = (bankPage.value - 1) * bankItemsPerPage.value;
-        const out = await api('/api/v1/admin/question-banks?limit=' + bankItemsPerPage.value + '&offset=' + offset);
+        const out = await api('/api/v1/admin/question-banks?limit=' + bankItemsPerPage.value + '&offset=' + offset + sortQuery(bankSortBy.value));
         banks.value = out.items || []; bankTotal.value = out.total || 0;
       };
+      const sortBanks = (sortBy) => call(async () => { bankSortBy.value = Array.isArray(sortBy) ? sortBy : []; bankPage.value = 1; await loadBanks(); });
       const loadCDKs = async () => {
         const offset = (cdkPage.value - 1) * cdkItemsPerPage.value;
         const search = (cdkSearch.value || '').trim();
         const query = search ? '&q=' + encodeURIComponent(search) : '';
-        const out = await api('/api/v1/admin/library-cdks?limit=' + cdkItemsPerPage.value + '&offset=' + offset + query);
+        const out = await api('/api/v1/admin/library-cdks?limit=' + cdkItemsPerPage.value + '&offset=' + offset + query + sortQuery(cdkSortBy.value));
         cdks.value = out.items || []; cdkTotal.value = out.total || 0;
       };
+      const sortCDKs = (sortBy) => call(async () => { cdkSortBy.value = Array.isArray(sortBy) ? sortBy : []; cdkPage.value = 1; await loadCDKs(); });
       const booksLabel = (books) => (books || [])
         .map((book) => (book.tags ? (book.name + ' / ' + book.tags) : book.name))
         .join('；');
@@ -585,10 +597,11 @@ import { template } from './template.js';
         const offset = (coursePage.value - 1) * courseItemsPerPage.value;
         const search = (courseSearch.value || '').trim();
         const query = search ? '&q=' + encodeURIComponent(search) : '';
-        const out = await api('/api/v1/admin/courses?limit=' + courseItemsPerPage.value + '&offset=' + offset + query);
+        const out = await api('/api/v1/admin/courses?limit=' + courseItemsPerPage.value + '&offset=' + offset + query + sortQuery(courseSortBy.value));
         courses.value = (out.items || []).map(item => Object.assign({}, item, { books_text: booksLabel(item.books) }));
         courseTotal.value = out.total || 0;
       };
+      const sortCourses = (sortBy) => call(async () => { courseSortBy.value = Array.isArray(sortBy) ? sortBy : []; coursePage.value = 1; await loadCourses(); });
       const searchCourses = () => call(async () => { coursePage.value = 1; await loadCourses(); });
       const openNewCourse = () => {
         courseEditingId.value = '';
@@ -628,9 +641,10 @@ import { template } from './template.js';
         const offset = (textbookPage.value - 1) * textbookItemsPerPage.value;
         const search = (textbookSearch.value || '').trim();
         const query = search ? '&q=' + encodeURIComponent(search) : '';
-        const out = await api('/api/v1/admin/textbooks?limit=' + textbookItemsPerPage.value + '&offset=' + offset + query);
+        const out = await api('/api/v1/admin/textbooks?limit=' + textbookItemsPerPage.value + '&offset=' + offset + query + sortQuery(textbookSortBy.value));
         textbooks.value = out.items || []; textbookTotal.value = out.total || 0;
       };
+      const sortTextbooks = (sortBy) => call(async () => { textbookSortBy.value = Array.isArray(sortBy) ? sortBy : []; textbookPage.value = 1; await loadTextbooks(); });
       const searchTextbooks = () => call(async () => { textbookPage.value = 1; await loadTextbooks(); });
       const openNewTextbook = () => call(async () => {
         textbookEditingId.value = '';
@@ -892,10 +906,11 @@ import { template } from './template.js';
       };
       const loadErrorReports = async () => {
         const offset = (errorReportsPage.value - 1) * errorReportsPerPage.value;
-        const out = await api('/api/v1/admin/error-reports?limit=' + errorReportsPerPage.value + '&offset=' + offset);
+        const out = await api('/api/v1/admin/error-reports?limit=' + errorReportsPerPage.value + '&offset=' + offset + sortQuery(errorReportSortBy.value));
         errorReports.value = out.items || [];
         errorReportsTotal.value = out.total || 0;
       };
+      const sortErrorReports = (sortBy) => call(async () => { errorReportSortBy.value = Array.isArray(sortBy) ? sortBy : []; errorReportsPage.value = 1; await loadErrorReports(); });
       const searchCDKs = () => call(async () => { cdkPage.value = 1; await loadCDKs(); });
       const loadLibrary = async () => {
         const results = await Promise.all([loadBanks(), loadCDKs(), api('/api/v1/admin/metrics/breakdown')]);
@@ -903,10 +918,11 @@ import { template } from './template.js';
       };
       const loadShareCodes = async () => {
         const offset = (shareCodePage.value - 1) * shareCodeItemsPerPage.value;
-        const out = await api('/api/v1/admin/share-codes?limit=' + shareCodeItemsPerPage.value + '&offset=' + offset);
+        const out = await api('/api/v1/admin/share-codes?limit=' + shareCodeItemsPerPage.value + '&offset=' + offset + sortQuery(shareCodeSortBy.value));
         shareCodes.value = (out.items || []).map(item => Object.assign({}, item, { type: String(item.code || '').slice(-1) === '1' ? 'schedule' : 'personalization' }));
         shareCodesTotal.value = out.total || 0;
       };
+      const sortShareCodes = (sortBy) => call(async () => { shareCodeSortBy.value = Array.isArray(sortBy) ? sortBy : []; shareCodePage.value = 1; await loadShareCodes(); });
       const shareCodeDetailJSON = computed(() => formatShareJSON(shareCodeDetail.value.data || {}));
       const openShareCodeDetail = (row) => call(async () => {
         const out = await api('/api/v1/admin/share-codes/' + encodeURIComponent(rawItem(row).id));
@@ -1307,21 +1323,21 @@ import { template } from './template.js';
       onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); });
 
       return {
-        logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
-        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
-        textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
+        logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
+        textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
         resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
-        courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseDialog, courseEditingId, courseForm, courseHeaders,
+        courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, nav, title, statCards,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
-        loadTextbooks, searchTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
+        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, copyResourceUrl,
         openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, copyResourceLink, onTextbookDrop,
-        loadCourses, searchCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
+        loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel
       };
     },
     template,

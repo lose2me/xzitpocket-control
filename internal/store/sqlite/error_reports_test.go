@@ -33,14 +33,14 @@ func TestErrorReportInsertIsIdempotentAndGroupedByStudentHash(t *testing.T) {
 	if err != nil || accepted {
 		t.Fatalf("duplicate error report = %v, %v", accepted, err)
 	}
-	items, total, err := store.ListErrorReports(ctx, 50, 0)
+	items, total, err := store.ListErrorReports(ctx, 50, 0, "", "")
 	if err != nil || total != 1 || len(items) != 1 || items[0].StudentIDHash != "student-hash" {
 		t.Fatalf("unexpected error reports = %d %#v (%v)", total, items, err)
 	}
 	if err := store.SetErrorReportStudentIgnoredByReportID(ctx, items[0].ID, true, now); err != nil {
 		t.Fatal(err)
 	}
-	items, total, err = store.ListErrorReports(ctx, 50, 0)
+	items, total, err = store.ListErrorReports(ctx, 50, 0, "", "")
 	if err != nil || total != 1 || !items[0].Ignored {
 		t.Fatalf("ignored report state = %d %#v (%v)", total, items, err)
 	}
@@ -56,7 +56,7 @@ func TestErrorReportInsertIsIdempotentAndGroupedByStudentHash(t *testing.T) {
 	if err != nil || !accepted {
 		t.Fatalf("allowed student report = %v, %v", accepted, err)
 	}
-	items, total, err = store.ListErrorReports(ctx, 50, 0)
+	items, total, err = store.ListErrorReports(ctx, 50, 0, "", "")
 	if err != nil || total != 2 || items[0].Ignored || items[1].Ignored {
 		t.Fatalf("allowed report state = %d %#v (%v)", total, items, err)
 	}
@@ -67,7 +67,7 @@ func TestErrorReportInsertIsIdempotentAndGroupedByStudentHash(t *testing.T) {
 	if err != nil || cleared != 2 {
 		t.Fatalf("clear error reports = %d, %v", cleared, err)
 	}
-	items, total, err = store.ListErrorReports(ctx, 50, 0)
+	items, total, err = store.ListErrorReports(ctx, 50, 0, "", "")
 	if err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("cleared reports = %d %#v (%v)", total, items, err)
 	}
