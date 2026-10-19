@@ -70,14 +70,44 @@ func TestOpenDownloadsCountsAndNames(t *testing.T) {
 	}
 }
 
-func TestPdfDownloadName(t *testing.T) {
-	if got := pdfDownloadName("期中/试卷"); got != "期中_试卷.pdf" {
+func TestDownloadFileName(t *testing.T) {
+	if got := downloadFileName("期中/试卷", fileFormatPDF); got != "期中_试卷.pdf" {
 		t.Fatalf("name = %q", got)
 	}
-	if got := pdfDownloadName("report.PDF"); got != "report.PDF" {
+	if got := downloadFileName("report.PDF", fileFormatPDF); got != "report.pdf" {
 		t.Fatalf("name = %q", got)
 	}
-	if got := pdfDownloadName(""); got != "资料.pdf" {
+	if got := downloadFileName("", fileFormatPDF); got != "资料.pdf" {
 		t.Fatalf("name = %q", got)
+	}
+	if got := downloadFileName("期末试卷.docx", fileFormatDOCX); got != "期末试卷.docx" {
+		t.Fatalf("name = %q", got)
+	}
+	if got := downloadFileName("期末试卷", fileFormatDOC); got != "期末试卷.doc" {
+		t.Fatalf("name = %q", got)
+	}
+}
+
+func TestStoredFileFormatAndValidation(t *testing.T) {
+	cases := []struct {
+		key    string
+		format string
+		prefix []byte
+		valid  bool
+	}{
+		{"submissions/a/original.pdf", fileFormatPDF, []byte("%PDF-1.4"), true},
+		{"submissions/a/original.docx", fileFormatDOCX, []byte{'P', 'K', 0x03, 0x04}, true},
+		{"submissions/a/original.doc", fileFormatDOC, []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}, true},
+		{"submissions/a/original.docx", fileFormatDOCX, []byte("%PDF-1.4"), false},
+		{"submissions/a/original.doc", fileFormatDOC, []byte("PK\x03\x04"), false},
+		{"resources/legacy/original", fileFormatPDF, []byte("%PDF-1.4"), true},
+	}
+	for _, tc := range cases {
+		if got := storedFileFormat(tc.key); got != tc.format {
+			t.Fatalf("storedFileFormat(%q) = %q, want %q", tc.key, got, tc.format)
+		}
+		if got := storedFileIsValid(tc.key, tc.prefix); got != tc.valid {
+			t.Fatalf("storedFileIsValid(%q, %q) = %v, want %v", tc.key, tc.prefix, got, tc.valid)
+		}
 	}
 }

@@ -3,12 +3,11 @@ package app
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
-// OpenTextbookDownload counts the download and returns the stored PDF stream
+// OpenTextbookDownload counts the download and returns the stored file stream
 // plus the attachment filename. Callers must close resp.Body.
 func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Response, string, error) {
 	item, err := a.requireTextbook(ctx, id)
@@ -16,31 +15,31 @@ func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Respon
 		return nil, "", err
 	}
 	if item.PdfKey == "" {
-		return nil, "", Err("resource_missing", "该教材没有 PDF", 404)
+		return nil, "", Err("resource_missing", "该教材没有文件", 404)
 	}
-	resp, err := a.openStoredPDF(ctx, item.PdfKey)
+	resp, err := a.openStoredFile(ctx, item.PdfKey)
 	if err != nil {
 		return nil, "", err
 	}
 	a.RecordTextbookDownload(ctx, item.ID, false)
-	return resp, pdfDownloadName(item.Name), nil
+	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
-// OpenResourceDownload counts the download and returns the stored PDF stream.
+// OpenResourceDownload counts the download and returns the stored file stream.
 func (a *App) OpenResourceDownload(ctx context.Context, id string) (*http.Response, string, error) {
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
 		return nil, "", err
 	}
 	if item.PdfKey == "" {
-		return nil, "", Err("resource_missing", "该试卷没有 PDF", 404)
+		return nil, "", Err("resource_missing", "该试卷没有文件", 404)
 	}
-	resp, err := a.openStoredPDF(ctx, item.PdfKey)
+	resp, err := a.openStoredFile(ctx, item.PdfKey)
 	if err != nil {
 		return nil, "", err
 	}
 	a.RecordResourceDownload(ctx, item.ID, false)
-	return resp, pdfDownloadName(item.Name), nil
+	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
 // OpenSubmissionDownload streams a pending upload for review. It is not
@@ -55,24 +54,24 @@ func (a *App) OpenSubmissionDownload(ctx context.Context, id, kind string) (*htt
 		return nil, "", err
 	}
 	if item.PdfKey == "" {
-		return nil, "", Err("resource_missing", "该提交没有 PDF", 404)
+		return nil, "", Err("resource_missing", "该提交没有文件", 404)
 	}
-	resp, err := a.openStoredPDF(ctx, item.PdfKey)
+	resp, err := a.openStoredFile(ctx, item.PdfKey)
 	if err != nil {
 		return nil, "", err
 	}
-	return resp, pdfDownloadName(item.Name), nil
+	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
-func (a *App) openStoredPDF(ctx context.Context, key string) (*http.Response, error) {
+func (a *App) openStoredFile(ctx context.Context, key string) (*http.Response, error) {
 	client, err := a.requireStorage()
 	if err != nil {
 		return nil, err
 	}
 	resp, err := client.GetObject(ctx, key)
 	if err != nil {
-		a.Logger.Error("open stored pdf failed", "error", err, "key", key)
-		return nil, Err("storage_error", "下载 PDF 失败", 502)
+		a.Logger.Error("open stored file failed", "error", err, "key", key)
+		return nil, Err("storage_error", "下载文件失败", 502)
 	}
 	return resp, nil
 }
@@ -139,28 +138,4 @@ func (a *App) RecordResourceDownload(ctx context.Context, id string, includeCont
 	if err := a.Store.IncrementUserDownloads(ctx, item.ContributorUserID); err != nil {
 		a.Logger.Warn("increment contributor downloads failed", "error", err, "user", item.ContributorUserID)
 	}
-}
-
-func pdfDownloadName(name string) string {
-	name = strings.TrimSpace(strings.Map(func(r rune) rune {
-		switch {
-		case r < 0x20 || r == 0x7f:
-			return -1
-		case strings.ContainsRune(`/\:*?"<>|`, r):
-			return '_'
-		default:
-			return r
-		}
-	}, name))
-	if name == "" {
-		name = "资料"
-	}
-	runes := []rune(name)
-	if len(runes) > 180 {
-		name = string(runes[:180])
-	}
-	if !strings.HasSuffix(strings.ToLower(name), ".pdf") {
-		name += ".pdf"
-	}
-	return name
 }

@@ -20,6 +20,7 @@ type ResourceView struct {
 	Tags          string `json:"tags"`
 	CourseCode    string `json:"course_code"`
 	HasPdf        bool   `json:"has_pdf"`
+	Format        string `json:"format"`
 	SizeBytes     int64  `json:"size_bytes,omitempty"`
 	DownloadCount int64  `json:"download_count"`
 	CreatedAt     string `json:"created_at"`
@@ -47,6 +48,7 @@ func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
 		HasPdf:        item.PdfKey != "",
+		Format:        storedFileFormat(item.PdfKey),
 		DownloadCount: item.DownloadCount,
 		CreatedAt:     item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
@@ -191,14 +193,14 @@ func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, 
 	return item, nil
 }
 
-// ResourceURL returns a temporary signed CDN URL for a resource PDF.
+// ResourceURL returns a temporary signed CDN URL for a resource file.
 func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (ResourceURLView, error) {
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
 		return ResourceURLView{}, err
 	}
 	if item.PdfKey == "" {
-		return ResourceURLView{}, Err("resource_missing", "该试卷没有 PDF", 404)
+		return ResourceURLView{}, Err("resource_missing", "该试卷没有文件", 404)
 	}
 	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
 		return ResourceURLView{}, Err("cdn_unavailable", "CDN 未配置", 503)

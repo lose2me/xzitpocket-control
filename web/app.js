@@ -164,6 +164,13 @@ import { template } from './template.js';
     return /\.pdf$/i.test(base) ? base : base + '.pdf';
   };
 
+  // Exam submissions may be PDF or Word; the server stores the format.
+  const documentFileName = (name, format) => {
+    const ext = ['docx', 'doc'].includes(String(format || '').toLowerCase()) ? format.toLowerCase() : 'pdf';
+    const base = String(name || '资料').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\.(pdf|docx|doc)$/i, '') || '资料';
+    return base + '.' + ext;
+  };
+
   const padDatePart = (value) => String(value).padStart(2, '0');
   const formatDateTime = (value) => {
     if (value === undefined || value === null || value === '') return '-';
@@ -1019,7 +1026,7 @@ import { template } from './template.js';
       };
       const downloadSubmission = (kind, row) => call(async () => {
         const item = rawItem(row);
-        await downloadFile(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
+        await downloadFile(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/download', documentFileName(item.name, item.format));
         notify('已开始下载');
       });
       const approveSubmission = (kind, row) => call(async () => {
@@ -1140,7 +1147,7 @@ import { template } from './template.js';
       });
       const downloadResource = (row) => call(async () => {
         const item = rawItem(row);
-        await downloadFile('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
+        await downloadFile('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/download', documentFileName(item.name, item.format));
         notify('已开始下载');
         await loadCourseResources();
       });

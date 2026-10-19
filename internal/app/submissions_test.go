@@ -89,6 +89,61 @@ func TestCreateSubmissionTicketValidation(t *testing.T) {
 	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", SizeBytes: maxSubmissionBytes + 1}); err == nil {
 		t.Fatal("oversized file should be rejected")
 	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", Format: "exe", SizeBytes: 10}); err == nil {
+		t.Fatal("unsupported formats should be rejected")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Format: "docx", TargetID: target.ID, SizeBytes: 10}); err == nil {
+		t.Fatal("textbook uploads must stay PDF-only")
+	}
+}
+
+func TestCompleteDocxSubmission(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(
+		map[string]string{http.MethodGet: "PK\x03\x04docx"},
+		map[string]int64{http.MethodHead: 9},
+	)
+	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "试卷甲", Format: "docx", SizeBytes: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetSubmission(ctx, ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(stored.PdfKey, "/original.docx") {
+		t.Fatalf("docx ticket key = %q", stored.PdfKey)
+	}
+	view, err := a.CompleteSubmission(ctx, p, ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Format != "docx" || view.Status != "pending_review" {
+		t.Fatalf("completed docx view = %#v", view)
+	}
+	out, err := a.ApproveSubmissionForAdmin(ctx, ticket.ID, "resource", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, ok := out["resource"].(ResourceView)
+	if !ok || resource.Format != "docx" {
+		t.Fatalf("approved docx resource = %#v", out)
+	}
+	resp, filename, err := a.OpenResourceDownload(ctx, resource.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if filename != "试卷甲.docx" {
+		t.Fatalf("docx download filename = %q", filename)
+	}
 }
 
 func TestCreateSubmissionTicketLimits(t *testing.T) {

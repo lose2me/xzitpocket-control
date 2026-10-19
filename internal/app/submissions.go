@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -14,20 +13,21 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-// ResourceSubmissionTicketInput describes a PDF the app is about to upload.
+// ResourceSubmissionTicketInput describes a file the app is about to upload.
 // The file itself goes straight to COS through a short-lived signed URL; the
-// control server only sees the metadata and a 5-byte verification range.
+// control server only sees the metadata and a short verification range.
 type ResourceSubmissionTicketInput struct {
 	Kind       string `json:"kind"`
 	CourseCode string `json:"course_code"`
 	Name       string `json:"name"`
 	Tags       string `json:"tags"`
 	TargetID   string `json:"target_id"`
+	Format     string `json:"format"`
 	SizeBytes  int64  `json:"size_bytes"`
 }
 
 // ResourceUploadTicketView is the direct-upload authorization returned to the
-// app. UploadURL is a presigned COS PUT URL for submissions/<id>/original.pdf.
+// app. UploadURL is a presigned COS PUT URL for submissions/<id>/original.<ext>.
 type ResourceUploadTicketView struct {
 	ID        string `json:"id"`
 	UploadURL string `json:"upload_url"`
@@ -44,6 +44,7 @@ type SubmissionView struct {
 	SizeBytes         int64  `json:"size_bytes"`
 	Status            string `json:"status"`
 	HasPdf            bool   `json:"has_pdf"`
+	Format            string `json:"format"`
 	SubmittedByUserID string `json:"submitted_by_user_id,omitempty"`
 	SubmittedByName   string `json:"submitted_by_name"`
 	StudentID         string `json:"student_id,omitempty"`
@@ -76,10 +77,26 @@ func normalizeSubmissionKind(kind string) (string, bool) {
 	}
 }
 
+// normalizeSubmissionFormat accepts PDF for every submission and Word
+// documents for exam papers. An empty format defaults to PDF for older apps.
+func normalizeSubmissionFormat(format string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", fileFormatPDF:
+		return fileFormatPDF, true
+	case fileFormatDOCX:
+		return fileFormatDOCX, true
+	case fileFormatDOC:
+		return fileFormatDOC, true
+	default:
+		return "", false
+	}
+}
+
 func submissionView(item sqlite.Submission) SubmissionView {
 	return SubmissionView{
 		ID: item.ID, Kind: item.Kind, CourseCode: item.CourseCode, Name: item.Name, Tags: item.Tags,
 		SizeBytes: item.SizeBytes, Status: item.Status, HasPdf: item.PdfKey != "",
+		Format:            storedFileFormat(item.PdfKey),
 		SubmittedByUserID: item.SubmittedByUserID, SubmittedByName: item.SubmittedByName,
 		TargetID: item.TargetID, CreatedAt: item.CreatedAt.Format(time.RFC3339),
 	}
@@ -119,6 +136,13 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	kind, ok := normalizeSubmissionKind(in.Kind)
 	if !ok {
 		return ResourceUploadTicketView{}, Err("invalid_kind", "资料类型无效", 400)
+	}
+	format, ok := normalizeSubmissionFormat(in.Format)
+	if !ok {
+		return ResourceUploadTicketView{}, Err("invalid_format", "文件类型无效", 400)
+	}
+	if kind == "textbook" && format != fileFormatPDF {
+		return ResourceUploadTicketView{}, Err("textbook_pdf_only", "教材仅支持 PDF", 400)
 	}
 	courseCode, err := normalizeCourseCode(in.CourseCode)
 	if err != nil {
@@ -166,7 +190,7 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		return ResourceUploadTicketView{}, Err("invalid_tags", "标签无效", 400)
 	}
 	if in.SizeBytes <= 0 || in.SizeBytes > maxSubmissionBytes {
-		return ResourceUploadTicketView{}, Err("invalid_size", "PDF 大小无效", 400)
+		return ResourceUploadTicketView{}, Err("invalid_size", "文件大小无效", 400)
 	}
 
 	a.cleanupStaleUploads(ctx)
@@ -199,7 +223,7 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if err != nil {
 		return ResourceUploadTicketView{}, err
 	}
-	key := fmt.Sprintf("submissions/%s/original.pdf", item.ID)
+	key := fmt.Sprintf("submissions/%s/original.%s", item.ID, format)
 	if err := a.Store.SetSubmissionPdfKey(ctx, item.ID, key, in.SizeBytes, now); err != nil {
 		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
 		return ResourceUploadTicketView{}, err
@@ -244,12 +268,12 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	}
 	if size <= 0 || size > maxSubmissionBytes {
 		a.discardUpload(ctx, item)
-		return SubmissionView{}, Err("invalid_pdf", "PDF 内容无效", 400)
+		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
 	}
-	prefix, err := client.GetObjectRange(ctx, item.PdfKey, 0, 4)
-	if err != nil || !bytes.HasPrefix(prefix, []byte("%PDF")) {
+	prefix, err := client.GetObjectRange(ctx, item.PdfKey, 0, 7)
+	if err != nil || !storedFileIsValid(item.PdfKey, prefix) {
 		a.discardUpload(ctx, item)
-		return SubmissionView{}, Err("invalid_pdf", "PDF 内容无效", 400)
+		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
 	}
 	now := time.Now().UTC()
 	if err := a.Store.MarkSubmissionUploaded(ctx, item.ID, size, now); err != nil {
@@ -398,7 +422,7 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		return nil, err
 	}
 	if item.PdfKey == "" {
-		return nil, Err("resource_missing", "该提交没有 PDF", 404)
+		return nil, Err("resource_missing", "该提交没有文件", 404)
 	}
 	now := time.Now().UTC()
 	var result map[string]any
@@ -524,7 +548,7 @@ func (a *App) SubmissionResourceURL(ctx context.Context, id, kind string, ttl ti
 		return SubmissionURLView{}, err
 	}
 	if item.PdfKey == "" {
-		return SubmissionURLView{}, Err("resource_missing", "该提交没有 PDF", 404)
+		return SubmissionURLView{}, Err("resource_missing", "该提交没有文件", 404)
 	}
 	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
 		return SubmissionURLView{}, Err("cdn_unavailable", "CDN 未配置", 503)
