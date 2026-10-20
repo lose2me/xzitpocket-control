@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -23,11 +22,13 @@ type ResourceSubmissionTicketInput struct {
 	Tags       string `json:"tags"`
 	TargetID   string `json:"target_id"`
 	Format     string `json:"format"`
+	MD5        string `json:"md5"`
 	SizeBytes  int64  `json:"size_bytes"`
 }
 
 // ResourceUploadTicketView is the direct-upload authorization returned to the
-// app. UploadURL is a presigned COS PUT URL for submissions/<id>/original.<ext>.
+// app. UploadURL is a presigned COS PUT URL for a content-addressed key under
+// books/submissions or papers/submissions.
 type ResourceUploadTicketView struct {
 	ID        string `json:"id"`
 	UploadURL string `json:"upload_url"`
@@ -144,6 +145,10 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if kind == "textbook" && format != fileFormatPDF {
 		return ResourceUploadTicketView{}, Err("textbook_pdf_only", "教材仅支持 PDF", 400)
 	}
+	hash, ok := normalizeMD5(in.MD5)
+	if !ok {
+		return ResourceUploadTicketView{}, Err("invalid_md5", "请更新 App 后重试", 400)
+	}
 	courseCode, err := normalizeCourseCode(in.CourseCode)
 	if err != nil {
 		return ResourceUploadTicketView{}, err
@@ -213,6 +218,11 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		return ResourceUploadTicketView{}, err
 	}
 
+	key := submissionObjectKey(kind, format, hash)
+	if _, err := client.HeadObject(ctx, key); err == nil {
+		return ResourceUploadTicketView{}, Err("submission_duplicate", "该文件已提交过，请勿重复上传", 409)
+	}
+
 	now := time.Now().UTC()
 	submitterName, studentIDCiphertext := a.submissionIdentity(ctx, p)
 	item, err := a.Store.CreateSubmission(ctx, sqlite.SubmissionInput{
@@ -223,7 +233,6 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if err != nil {
 		return ResourceUploadTicketView{}, err
 	}
-	key := fmt.Sprintf("submissions/%s/original.%s", item.ID, format)
 	if err := a.Store.SetSubmissionPdfKey(ctx, item.ID, key, in.SizeBytes, now); err != nil {
 		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
 		return ResourceUploadTicketView{}, err
@@ -262,13 +271,17 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	if err != nil {
 		return SubmissionView{}, err
 	}
-	size, err := client.HeadObject(ctx, item.PdfKey)
+	size, etag, err := client.HeadObjectInfo(ctx, item.PdfKey)
 	if err != nil {
 		return SubmissionView{}, Err("upload_missing", "未检测到上传的文件", 409)
 	}
 	if size <= 0 || size > maxSubmissionBytes {
 		a.discardUpload(ctx, item)
 		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
+	}
+	if expected := objectHashFromKey(item.PdfKey); expected != "" && !strings.EqualFold(etag, expected) {
+		a.discardUpload(ctx, item)
+		return SubmissionView{}, Err("invalid_file", "文件校验失败，请重试", 400)
 	}
 	prefix, err := client.GetObjectRange(ctx, item.PdfKey, 0, 7)
 	if err != nil || !storedFileIsValid(item.PdfKey, prefix) {
@@ -424,6 +437,28 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 	if item.PdfKey == "" {
 		return nil, Err("resource_missing", "该提交没有文件", 404)
 	}
+	format := storedFileFormat(item.PdfKey)
+	if kind == "resource" && format != fileFormatPDF {
+		return nil, Err("word_requires_pdf", "Word 试卷请转为 PDF 后再发布", 409)
+	}
+	hash := objectHashFromKey(item.PdfKey)
+	publishedKey := item.PdfKey
+	var client *cloud.COSClient
+	if hash != "" {
+		client, err = a.requireStorage()
+		if err != nil {
+			return nil, err
+		}
+		achieved := achievedObjectKey(kind, format, hash)
+		if achieved != item.PdfKey {
+			if err := client.CopyObject(ctx, item.PdfKey, achieved); err != nil {
+				a.Logger.Error("copy submission to achieved failed", "error", err, "submission", item.ID)
+				return nil, Err("storage_error", "发布文件失败，请稍后重试", 502)
+			}
+			publishedKey = achieved
+			a.purgeCDN(ctx, achieved)
+		}
+	}
 	now := time.Now().UTC()
 	var result map[string]any
 	switch kind {
@@ -452,7 +487,9 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 			textbook = createdTextbook
 			created = true
 		}
-		if err := a.Store.SetTextbookPdfKey(ctx, textbook.ID, item.PdfKey, now); err != nil {
+		oldPdfKey := textbook.PdfKey
+		oldCoverKey := textbook.CoverKey
+		if err := a.Store.SetTextbookPdfKey(ctx, textbook.ID, publishedKey, now); err != nil {
 			if created {
 				_ = a.Store.DeleteTextbook(ctx, textbook.ID)
 			}
@@ -469,7 +506,24 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 				a.Logger.Warn("increment contribution count failed", "error", err, "user", item.SubmittedByUserID)
 			}
 		}
-		textbook.PdfKey = item.PdfKey
+		if oldPdfKey != "" && oldPdfKey != publishedKey {
+			a.removeStoredFileIfUnused(ctx, oldPdfKey)
+		}
+		textbook.PdfKey = publishedKey
+		if hash != "" && oldCoverKey != "" {
+			newCoverKey := textbookCoverKey(hash)
+			if newCoverKey != oldCoverKey {
+				if err := client.CopyObject(ctx, oldCoverKey, newCoverKey); err != nil {
+					a.Logger.Warn("rekey textbook cover failed", "error", err, "textbook", textbook.ID)
+				} else if err := a.Store.SetTextbookCoverKey(ctx, textbook.ID, newCoverKey, now); err != nil {
+					a.Logger.Warn("update textbook cover key failed", "error", err, "textbook", textbook.ID)
+				} else {
+					textbook.CoverKey = newCoverKey
+					a.purgeCDN(ctx, newCoverKey)
+					a.removeCoverIfUnused(ctx, oldCoverKey)
+				}
+			}
+		}
 		textbook.UpdatedAt = now
 		view := textbookView(textbook)
 		view.SizeBytes = item.SizeBytes
@@ -486,14 +540,14 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		if err != nil {
 			return nil, err
 		}
-		if err := a.Store.SetResourcePdfKey(ctx, resource.ID, item.PdfKey, now); err != nil {
+		if err := a.Store.SetResourcePdfKey(ctx, resource.ID, publishedKey, now); err != nil {
 			_ = a.Store.DeleteResource(ctx, resource.ID)
 			return nil, err
 		}
 		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
 			return a.Store.SetResourceContributor(ctx, resource.ID, userID)
 		})
-		resource.PdfKey = item.PdfKey
+		resource.PdfKey = publishedKey
 		resource.UpdatedAt = now
 		view := resourceView(resource)
 		view.SizeBytes = item.SizeBytes
@@ -505,6 +559,8 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		// The reviewed content already exists. Leave the queue row in place for
 		// an operator instead of failing a request that has taken effect.
 		a.Logger.Warn("delete reviewed submission failed", "error", err, "submission", item.ID)
+	} else if publishedKey != item.PdfKey {
+		a.removeStoredFileIfUnused(ctx, item.PdfKey)
 	}
 	return result, nil
 }

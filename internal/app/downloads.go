@@ -76,6 +76,52 @@ func (a *App) openStoredFile(ctx context.Context, key string) (*http.Response, e
 	return resp, nil
 }
 
+// removeStoredFileIfUnused deletes a content-addressed object only after no
+// textbook, resource or pending submission still references it.
+func (a *App) removeStoredFileIfUnused(ctx context.Context, key string) {
+	if key == "" {
+		return
+	}
+	inUse, err := a.Store.PdfKeyInUse(ctx, key)
+	if err != nil {
+		a.Logger.Warn("check stored file usage failed", "error", err, "key", key)
+		return
+	}
+	if inUse {
+		return
+	}
+	if client := a.cosClient(); client.Configured() {
+		if err := client.DeleteObject(ctx, key); err != nil {
+			a.Logger.Warn("delete stored file failed", "error", err, "key", key)
+			return
+		}
+	}
+	a.purgeCDN(ctx, key)
+}
+
+// removeCoverIfUnused deletes a textbook cover only when no other textbook
+// still points at the same key.
+func (a *App) removeCoverIfUnused(ctx context.Context, key string) {
+	if key == "" {
+		return
+	}
+	inUse, err := a.Store.CoverKeyInUse(ctx, key)
+	if err != nil {
+		a.Logger.Warn("check cover usage failed", "error", err, "key", key)
+		return
+	}
+	if inUse {
+		return
+	}
+	if client := a.cosClient(); client.Configured() {
+		if err := client.DeleteObject(ctx, key); err != nil {
+			a.Logger.Warn("delete cover failed", "error", err, "key", key)
+			return
+		}
+	}
+	a.purgeCDN(ctx, key)
+}
+
 // UploadStatsView is the app upload page summary. StudentID is the account
 // every upload is bound to.
 type UploadStatsView struct {

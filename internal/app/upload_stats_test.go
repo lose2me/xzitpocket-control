@@ -31,17 +31,21 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.cosClientOverride = newStubCOSClient(
-		map[string]string{http.MethodGet: "%PDF-"},
-		map[string]int64{http.MethodHead: 12},
-	)
+	pdf := []byte("%PDF-1.4 ok!")
+	hash := md5Hex(pdf)
+	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
 	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "textbook", CourseCode: "C1", Name: "教材甲", TargetID: target.ID, SizeBytes: 12,
+		Kind: "textbook", CourseCode: "C1", Name: "教材甲", TargetID: target.ID, MD5: hash, SizeBytes: int64(len(pdf)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.cosClientOverride = newStubCOSClientWithETag(
+		map[string]string{http.MethodGet: string(pdf)},
+		map[string]int64{http.MethodHead: int64(len(pdf))},
+		hash,
+	)
 	view, err := a.CompleteSubmission(ctx, p, ticket.ID)
 	if err != nil {
 		t.Fatal(err)

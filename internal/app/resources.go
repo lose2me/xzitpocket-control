@@ -129,7 +129,7 @@ func (a *App) UploadCourseResources(ctx context.Context, courseCode string, uplo
 			}
 			return nil, err
 		}
-		key := fmt.Sprintf("resources/%s/original.pdf", item.ID)
+		key := achievedObjectKey("resource", fileFormatPDF, md5Hex(upload.Data))
 		if err := client.PutObject(ctx, key, "application/pdf", upload.Data); err != nil {
 			a.Logger.Error("upload resource pdf failed", "error", err, "resource", item.ID)
 			_ = a.Store.DeleteResource(ctx, item.ID)
@@ -163,19 +163,11 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 	return a.Store.AddAudit(ctx, actor, "resource_delete", "resource", item.ID, "{}", time.Now().UTC())
 }
 
-// removeResourceAssets deletes a removed resource's PDF from object storage and
-// drops its CDN copy. It is best-effort: the row is already gone, so a storage
-// failure is logged rather than surfaced.
+// removeResourceAssets deletes a removed resource's PDF when no other row
+// references the content-addressed key. It is best-effort: the row is already
+// gone, so failures are logged rather than surfaced.
 func (a *App) removeResourceAssets(ctx context.Context, item sqlite.Resource) {
-	if item.PdfKey == "" {
-		return
-	}
-	if client := a.cosClient(); client.Configured() {
-		if err := client.DeleteObject(ctx, item.PdfKey); err != nil {
-			a.Logger.Warn("delete resource object failed", "error", err, "key", item.PdfKey)
-		}
-	}
-	a.purgeCDN(ctx, item.PdfKey)
+	a.removeStoredFileIfUnused(ctx, item.PdfKey)
 }
 
 func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, error) {

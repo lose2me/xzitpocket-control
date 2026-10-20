@@ -14,6 +14,8 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
+const testMD5 = "0123456789abcdef0123456789abcdef"
+
 type cosRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f cosRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
@@ -28,15 +30,29 @@ func cosStubResponse(status int, body string, contentLength int64) *http.Respons
 }
 
 func newStubCOSClient(methodBodies map[string]string, sizes map[string]int64) *cloud.COSClient {
+	return newStubCOSClientWithETag(methodBodies, sizes, "")
+}
+
+func newStubCOSClientWithETag(methodBodies map[string]string, sizes map[string]int64, etag string) *cloud.COSClient {
+	return newStubCOSClientWithHead(http.StatusOK, methodBodies, sizes, etag)
+}
+
+func newStubCOSClientWithHead(headStatus int, methodBodies map[string]string, sizes map[string]int64, etag string) *cloud.COSClient {
 	client := cloud.NewCOSClient("AKIDtest", "secretkey", "bucket-1250000000", "ap-shanghai")
 	client.HTTP = &http.Client{Transport: cosRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.Method {
 		case http.MethodHead:
-			return cosStubResponse(http.StatusOK, "", sizes[req.Method]), nil
+			resp := cosStubResponse(headStatus, "", sizes[req.Method])
+			if etag != "" {
+				resp.Header.Set("ETag", `"`+etag+`"`)
+			}
+			return resp, nil
 		case http.MethodGet:
 			return cosStubResponse(http.StatusOK, methodBodies[req.Method], int64(len(methodBodies[req.Method]))), nil
 		default:
-			return cosStubResponse(http.StatusMethodNotAllowed, "", 0), nil
+			// PUT covers direct uploads and server-side copies; DELETE cleans up
+			// superseded objects.
+			return cosStubResponse(http.StatusOK, "", 0), nil
 		}
 	})}
 	return client
@@ -62,37 +78,40 @@ func TestCreateSubmissionTicketValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "other", CourseCode: "C1", Name: "x", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "other", CourseCode: "C1", Name: "x", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("unknown kind should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "missing", Name: "x", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", MD5: "not-a-hash", SizeBytes: 10}); err == nil {
+		t.Fatal("missing md5 should be rejected")
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "missing", Name: "x", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("unknown course should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("textbook without a target should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: "missing", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: "missing", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("missing target textbook should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: other.ID, SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Name: "x", TargetID: other.ID, MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("textbook from another course should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", TargetID: target.ID, SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", TargetID: target.ID, MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("missing object storage should be reported")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("empty resource name should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", SizeBytes: 0}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", MD5: testMD5, SizeBytes: 0}); err == nil {
 		t.Fatal("empty file should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", SizeBytes: maxSubmissionBytes + 1}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", MD5: testMD5, SizeBytes: maxSubmissionBytes + 1}); err == nil {
 		t.Fatal("oversized file should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", Format: "exe", SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", Format: "exe", MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("unsupported formats should be rejected")
 	}
-	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Format: "docx", TargetID: target.ID, SizeBytes: 10}); err == nil {
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "textbook", CourseCode: "C1", Format: "docx", TargetID: target.ID, MD5: testMD5, SizeBytes: 10}); err == nil {
 		t.Fatal("textbook uploads must stay PDF-only")
 	}
 }
@@ -104,12 +123,11 @@ func TestCompleteDocxSubmission(t *testing.T) {
 	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	a.cosClientOverride = newStubCOSClient(
-		map[string]string{http.MethodGet: "PK\x03\x04docx"},
-		map[string]int64{http.MethodHead: 9},
-	)
+	docx := []byte("PK\x03\x04docx")
+	hash := md5Hex(docx)
+	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "resource", CourseCode: "C1", Name: "试卷甲", Format: "docx", SizeBytes: 9,
+		Kind: "resource", CourseCode: "C1", Name: "试卷甲", Format: "docx", MD5: hash, SizeBytes: int64(len(docx)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -118,9 +136,15 @@ func TestCompleteDocxSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(stored.PdfKey, "/original.docx") {
-		t.Fatalf("docx ticket key = %q", stored.PdfKey)
+	wantKey := papersSubmissionsPrefix + hash + ".docx"
+	if stored.PdfKey != wantKey {
+		t.Fatalf("docx ticket key = %q, want %q", stored.PdfKey, wantKey)
 	}
+	a.cosClientOverride = newStubCOSClientWithETag(
+		map[string]string{http.MethodGet: string(docx)},
+		map[string]int64{http.MethodHead: int64(len(docx))},
+		hash,
+	)
 	view, err := a.CompleteSubmission(ctx, p, ticket.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -128,21 +152,61 @@ func TestCompleteDocxSubmission(t *testing.T) {
 	if view.Format != "docx" || view.Status != "pending_review" {
 		t.Fatalf("completed docx view = %#v", view)
 	}
+	if _, err := a.ApproveSubmissionForAdmin(ctx, ticket.ID, "resource", "admin"); err == nil {
+		t.Fatal("word submissions must not be published without conversion")
+	}
+}
+
+func TestApprovePdfSubmissionMovesToAchieved(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	pdf := []byte("%PDF-1.4 ok")
+	hash := md5Hex(pdf)
+	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
+	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "试卷甲", MD5: hash, SizeBytes: int64(len(pdf)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClientWithETag(
+		map[string]string{http.MethodGet: string(pdf)},
+		map[string]int64{http.MethodHead: int64(len(pdf))},
+		hash,
+	)
+	if _, err := a.CompleteSubmission(ctx, p, ticket.ID); err != nil {
+		t.Fatal(err)
+	}
 	out, err := a.ApproveSubmissionForAdmin(ctx, ticket.ID, "resource", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resource, ok := out["resource"].(ResourceView)
-	if !ok || resource.Format != "docx" {
-		t.Fatalf("approved docx resource = %#v", out)
+	view, ok := out["resource"].(ResourceView)
+	if !ok {
+		t.Fatalf("approve = %#v", out)
 	}
-	resp, filename, err := a.OpenResourceDownload(ctx, resource.ID)
+	wantKey := papersAchievedPrefix + hash + ".pdf"
+	stored, err := store.GetResource(ctx, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PdfKey != wantKey {
+		t.Fatalf("published key = %q, want %q", stored.PdfKey, wantKey)
+	}
+	if _, err := store.GetSubmission(ctx, ticket.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("reviewed submission should be removed, err = %v", err)
+	}
+	resp, filename, err := a.OpenResourceDownload(ctx, view.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if filename != "试卷甲.docx" {
-		t.Fatalf("docx download filename = %q", filename)
+	if filename != "试卷甲.pdf" {
+		t.Fatalf("download filename = %q", filename)
 	}
 }
 
@@ -163,7 +227,7 @@ func TestCreateSubmissionTicketLimits(t *testing.T) {
 		}
 	}
 	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "resource", CourseCode: "C1", Name: "新试卷", SizeBytes: 10,
+		Kind: "resource", CourseCode: "C1", Name: "新试卷", MD5: testMD5, SizeBytes: 10,
 	}); err == nil {
 		t.Fatal("a full review queue should reject new tickets")
 	}
@@ -182,7 +246,7 @@ func TestCreateSubmissionTicketLimits(t *testing.T) {
 		}
 	}
 	if _, err := a.CreateSubmissionTicket(ctx, other, ResourceSubmissionTicketInput{
-		Kind: "resource", CourseCode: "C1", Name: "另一份", SizeBytes: 10,
+		Kind: "resource", CourseCode: "C1", Name: "另一份", MD5: testMD5, SizeBytes: 10,
 	}); err == nil {
 		t.Fatal("too many concurrent uploads should be rejected")
 	}
@@ -195,22 +259,25 @@ func TestCompleteSubmissionVerifiesUpload(t *testing.T) {
 	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	a.cosClientOverride = newStubCOSClient(
-		map[string]string{http.MethodGet: "%PDF-"},
-		map[string]int64{http.MethodHead: 12},
-	)
-
+	pdf := []byte("%PDF-1.4 ok!")
+	hash := md5Hex(pdf)
+	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "resource", CourseCode: "C1", Name: "试卷甲", SizeBytes: 12,
+		Kind: "resource", CourseCode: "C1", Name: "试卷甲", MD5: hash, SizeBytes: int64(len(pdf)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.cosClientOverride = newStubCOSClientWithETag(
+		map[string]string{http.MethodGet: string(pdf)},
+		map[string]int64{http.MethodHead: int64(len(pdf))},
+		hash,
+	)
 	view, err := a.CompleteSubmission(ctx, p, ticket.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Status != "pending_review" || view.SizeBytes != 12 || !view.HasPdf {
+	if view.Status != "pending_review" || view.SizeBytes != int64(len(pdf)) || !view.HasPdf {
 		t.Fatalf("completed view = %#v", view)
 	}
 	stored, err := store.GetSubmission(ctx, ticket.ID)
@@ -219,16 +286,20 @@ func TestCompleteSubmissionVerifiesUpload(t *testing.T) {
 	}
 
 	// A non-PDF object is removed and never enters the queue.
-	a.cosClientOverride = newStubCOSClient(
-		map[string]string{http.MethodGet: "NOPE!"},
-		map[string]int64{http.MethodHead: 5},
-	)
+	bad := []byte("NOPE!")
+	badHash := md5Hex(bad)
+	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
 	badTicket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "resource", CourseCode: "C1", Name: "假试卷", SizeBytes: 5,
+		Kind: "resource", CourseCode: "C1", Name: "假试卷", MD5: badHash, SizeBytes: int64(len(bad)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.cosClientOverride = newStubCOSClientWithETag(
+		map[string]string{http.MethodGet: string(bad)},
+		map[string]int64{http.MethodHead: int64(len(bad))},
+		badHash,
+	)
 	if _, err := a.CompleteSubmission(ctx, p, badTicket.ID); err == nil {
 		t.Fatal("a non-PDF upload should be rejected")
 	}

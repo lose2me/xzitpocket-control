@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"path"
 	"strings"
 )
@@ -10,7 +12,67 @@ const (
 	fileFormatPDF  = "pdf"
 	fileFormatDOCX = "docx"
 	fileFormatDOC  = "doc"
+
+	booksSubmissionsPrefix  = "books/submissions/"
+	booksAchievedPrefix     = "books/achieved/"
+	papersSubmissionsPrefix = "papers/submissions/"
+	papersAchievedPrefix    = "papers/achieved/"
 )
+
+// normalizeMD5 validates a lowercase or uppercase 32-character hex MD5.
+func normalizeMD5(raw string) (string, bool) {
+	hash := strings.ToLower(strings.TrimSpace(raw))
+	if len(hash) != 32 {
+		return "", false
+	}
+	for _, r := range hash {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return "", false
+		}
+	}
+	return hash, true
+}
+
+// md5Hex is used for content-addressed object names. It is not a security
+// primitive; COS also reports the MD5 of a single-part upload as the ETag, so
+// direct uploads can be verified without downloading the file again.
+func md5Hex(data []byte) string {
+	sum := md5.Sum(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// submissionObjectKey is the pending-review location for a submission.
+func submissionObjectKey(kind, format, hash string) string {
+	if kind == "textbook" {
+		return booksSubmissionsPrefix + hash + "." + fileFormatPDF
+	}
+	return papersSubmissionsPrefix + hash + "." + format
+}
+
+// achievedObjectKey is the published location for approved content.
+func achievedObjectKey(kind, format, hash string) string {
+	if kind == "textbook" {
+		return booksAchievedPrefix + hash + "." + fileFormatPDF
+	}
+	return papersAchievedPrefix + hash + "." + format
+}
+
+// textbookCoverKey names a cover after its textbook PDF; covers are never
+// hashed separately.
+func textbookCoverKey(hash string) string {
+	return booksAchievedPrefix + hash + ".webp"
+}
+
+// objectHashFromKey extracts the content hash from a new-style object key.
+// Legacy ID-based keys return an empty string.
+func objectHashFromKey(key string) string {
+	base := path.Base(strings.TrimSpace(key))
+	base = strings.TrimSuffix(base, path.Ext(base))
+	if hash, ok := normalizeMD5(base); ok {
+		return hash
+	}
+	return ""
+}
 
 // storedFileFormat derives the file format from the object key extension.
 // Legacy keys end in ".pdf"; unknown extensions are treated as PDF.

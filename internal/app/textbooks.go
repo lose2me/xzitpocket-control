@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -233,26 +232,11 @@ func (a *App) purgeCDN(ctx context.Context, keys ...string) {
 }
 
 // removeTextbookAssets deletes a removed textbook's PDF/cover from object
-// storage and drops their CDN copies. It is best-effort: the row is already
-// gone, so a storage failure is logged rather than surfaced.
+// storage when no other row references the content-addressed key. It is
+// best-effort: the row is already gone, so failures are logged.
 func (a *App) removeTextbookAssets(ctx context.Context, item sqlite.Textbook) {
-	keys := make([]string, 0, 2)
-	for _, key := range []string{item.PdfKey, item.CoverKey} {
-		if key != "" {
-			keys = append(keys, key)
-		}
-	}
-	if len(keys) == 0 {
-		return
-	}
-	if client := a.cosClient(); client.Configured() {
-		for _, key := range keys {
-			if err := client.DeleteObject(ctx, key); err != nil {
-				a.Logger.Warn("delete textbook object failed", "error", err, "key", key)
-			}
-		}
-	}
-	a.purgeCDN(ctx, keys...)
+	a.removeStoredFileIfUnused(ctx, item.PdfKey)
+	a.removeCoverIfUnused(ctx, item.CoverKey)
 }
 
 func (a *App) requireTextbook(ctx context.Context, id string) (sqlite.Textbook, error) {
@@ -291,7 +275,10 @@ func (a *App) UploadTextbookPdf(ctx context.Context, id string, data []byte, act
 	if err != nil {
 		return TextbookView{}, err
 	}
-	key := fmt.Sprintf("books/%s/original.pdf", item.ID)
+	hash := md5Hex(data)
+	key := achievedObjectKey("textbook", fileFormatPDF, hash)
+	oldPdfKey := item.PdfKey
+	oldCoverKey := item.CoverKey
 	if err := client.PutObject(ctx, key, "application/pdf", data); err != nil {
 		a.Logger.Error("upload textbook pdf failed", "error", err, "textbook", item.ID)
 		return TextbookView{}, Err("storage_error", "上传 PDF 失败", 502)
@@ -302,6 +289,23 @@ func (a *App) UploadTextbookPdf(ctx context.Context, id string, data []byte, act
 	}
 	item.PdfKey = key
 	a.purgeCDN(ctx, key)
+	if oldPdfKey != "" && oldPdfKey != key {
+		a.removeStoredFileIfUnused(ctx, oldPdfKey)
+	}
+	if oldCoverKey != "" {
+		newCoverKey := textbookCoverKey(hash)
+		if newCoverKey != oldCoverKey {
+			if err := client.CopyObject(ctx, oldCoverKey, newCoverKey); err != nil {
+				a.Logger.Warn("rekey textbook cover failed", "error", err, "textbook", item.ID)
+			} else if err := a.Store.SetTextbookCoverKey(ctx, item.ID, newCoverKey, now); err != nil {
+				a.Logger.Warn("update textbook cover key failed", "error", err, "textbook", item.ID)
+			} else {
+				item.CoverKey = newCoverKey
+				a.purgeCDN(ctx, newCoverKey)
+				a.removeCoverIfUnused(ctx, oldCoverKey)
+			}
+		}
+	}
 	_ = a.Store.AddAudit(ctx, actor, "textbook_pdf", "textbook", item.ID, "{}", now)
 	return textbookView(item), nil
 }
@@ -319,7 +323,12 @@ func (a *App) UploadTextbookCover(ctx context.Context, id string, data []byte, a
 	if err != nil {
 		return TextbookView{}, err
 	}
-	key := fmt.Sprintf("books/%s/cover.webp", item.ID)
+	hash := objectHashFromKey(item.PdfKey)
+	if hash == "" {
+		return TextbookView{}, Err("pdf_required", "请先上传教材 PDF", 400)
+	}
+	key := textbookCoverKey(hash)
+	oldCoverKey := item.CoverKey
 	if err := client.PutObject(ctx, key, "image/webp", data); err != nil {
 		a.Logger.Error("upload textbook cover failed", "error", err, "textbook", item.ID)
 		return TextbookView{}, Err("storage_error", "上传封面失败", 502)
@@ -330,6 +339,9 @@ func (a *App) UploadTextbookCover(ctx context.Context, id string, data []byte, a
 	}
 	item.CoverKey = key
 	a.purgeCDN(ctx, key)
+	if oldCoverKey != "" && oldCoverKey != key {
+		a.removeCoverIfUnused(ctx, oldCoverKey)
+	}
 	_ = a.Store.AddAudit(ctx, actor, "textbook_cover", "textbook", item.ID, "{}", now)
 	return textbookView(item), nil
 }

@@ -213,16 +213,35 @@ func (s *Store) DeleteSubmission(ctx context.Context, id string) error {
 	return nil
 }
 
-// PdfKeyInUse reports whether an approved submission's object is already
-// referenced by content, so rejecting a leftover queue row never deletes a
-// file that the resource centre still serves.
+// PdfKeyInUse reports whether an object is still referenced by published
+// content or another pending submission. Content-addressed keys can be shared
+// by identical files, so cleanup must never delete an object another row uses.
 func (s *Store) PdfKeyInUse(ctx context.Context, key string) (bool, error) {
 	if strings.TrimSpace(key) == "" {
 		return false, nil
 	}
 	var exists int
 	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM textbooks WHERE pdf_key = ?
-		UNION ALL SELECT 1 FROM resources WHERE pdf_key = ? LIMIT 1`, key, key).Scan(&exists)
+		UNION ALL SELECT 1 FROM resources WHERE pdf_key = ?
+		UNION ALL SELECT 1 FROM resource_submissions WHERE pdf_key = ? LIMIT 1`,
+		key, key, key).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CoverKeyInUse reports whether another textbook still references the cover,
+// which is possible when two textbooks point at the same PDF.
+func (s *Store) CoverKeyInUse(ctx context.Context, key string) (bool, error) {
+	if strings.TrimSpace(key) == "" {
+		return false, nil
+	}
+	var exists int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM textbooks WHERE cover_key = ? LIMIT 1`, key).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

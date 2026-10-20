@@ -242,8 +242,16 @@ func (c *COSClient) GetObject(ctx context.Context, key string) (*http.Response, 
 
 // HeadObject returns the object's size in bytes without downloading it.
 func (c *COSClient) HeadObject(ctx context.Context, key string) (int64, error) {
+	size, _, err := c.HeadObjectInfo(ctx, key)
+	return size, err
+}
+
+// HeadObjectInfo returns an object's size and ETag. COS reports the MD5 of a
+// single-part upload as the ETag, which lets the control server verify a
+// client-computed content hash without downloading the file again.
+func (c *COSClient) HeadObjectInfo(ctx context.Context, key string) (int64, string, error) {
 	if !c.Configured() {
-		return 0, fmt.Errorf("cos is not configured")
+		return 0, "", fmt.Errorf("cos is not configured")
 	}
 	path := "/" + strings.TrimPrefix(key, "/")
 	host := c.host()
@@ -255,20 +263,48 @@ func (c *COSClient) HeadObject(ctx context.Context, key string) (int64, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, fmt.Sprintf("https://%s%s", host, path), nil)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	req.Host = host
 	req.Header.Set("Authorization", authorization)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return 0, fmt.Errorf("cos head %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
+		return 0, "", fmt.Errorf("cos head %s: %s: %s", key, resp.Status, strings.TrimSpace(string(raw)))
 	}
-	return resp.ContentLength, nil
+	return resp.ContentLength, strings.Trim(resp.Header.Get("ETag"), `"`), nil
+}
+
+// CopyObject duplicates an object inside the bucket. COS performs the copy
+// server-side, so published files never travel through the Lighthouse host.
+func (c *COSClient) CopyObject(ctx context.Context, sourceKey, destinationKey string) error {
+	if !c.Configured() {
+		return fmt.Errorf("cos is not configured")
+	}
+	path := "/" + strings.TrimPrefix(destinationKey, "/")
+	host := c.host()
+	source := host + "/" + cosURIEncode(strings.TrimPrefix(sourceKey, "/"))
+	now := time.Now().Unix()
+	keyTime := fmt.Sprintf("%d;%d", now-60, now+3600)
+
+	headerList, headerString := cosHeaderSignature(map[string]string{
+		"host":              host,
+		"x-cos-copy-source": source,
+	})
+	authorization := cosAuthorization(c.SecretID, c.SecretKey, keyTime, "put", path, headerList, headerString)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("https://%s%s", host, path), http.NoBody)
+	if err != nil {
+		return err
+	}
+	req.Host = host
+	req.Header.Set("x-cos-copy-source", source)
+	req.Header.Set("Authorization", authorization)
+	return c.do(req, "copy", sourceKey+" -> "+destinationKey)
 }
 
 // DeleteObject removes key from the bucket. COS reports success for a key that
