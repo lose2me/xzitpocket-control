@@ -16,6 +16,23 @@ import (
 
 const identityProvider = "xzit-oa"
 
+// contributorInfo returns the bound student's plaintext ID and alias for
+// administrator content rows. Missing identities simply render as unbound.
+func (a *App) contributorInfo(ctx context.Context, userID string) (studentID, name string) {
+	if userID == "" {
+		return "", ""
+	}
+	identity, err := a.Store.GetIdentityByUser(ctx, userID, identityProvider)
+	if err != nil {
+		return "", ""
+	}
+	name = strings.TrimSpace(identity.StudentAlias)
+	if plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext); err == nil {
+		studentID = plain
+	}
+	return
+}
+
 type RegisterDeviceInput struct {
 	InstallationID string `json:"installation_id"`
 	PublicKey      string `json:"public_key"`

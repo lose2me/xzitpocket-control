@@ -497,13 +497,14 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		}
 		if item.SubmittedByUserID != "" {
 			// The latest PDF contributor owns future download attribution.
+			oldContributor := textbook.ContributorUserID
 			if err := a.Store.SetTextbookContributor(ctx, textbook.ID, item.SubmittedByUserID); err != nil {
 				a.Logger.Warn("link contribution failed", "error", err, "textbook", textbook.ID)
 			} else {
+				if oldContributor != item.SubmittedByUserID {
+					a.transferContribution(ctx, oldContributor, item.SubmittedByUserID)
+				}
 				textbook.ContributorUserID = item.SubmittedByUserID
-			}
-			if err := a.Store.IncrementUserContribution(ctx, item.SubmittedByUserID); err != nil {
-				a.Logger.Warn("increment contribution count failed", "error", err, "user", item.SubmittedByUserID)
 			}
 		}
 		if oldPdfKey != "" && oldPdfKey != publishedKey {

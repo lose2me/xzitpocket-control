@@ -69,6 +69,24 @@ func (s *Server) adminResourceUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) adminResourceContributor(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	var in app.ContributorBindingInput
+	if err := decodeJSON(r, &in, 4<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.BindResourceContributor(r.Context(), id, in.StudentID, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) adminResourceDelete(w http.ResponseWriter, r *http.Request, id string) {
 	p, ok := s.authAdmin(w, r)
 	if !ok || !checkAdminCSRF(w, r) {

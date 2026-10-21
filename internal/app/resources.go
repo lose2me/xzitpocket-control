@@ -15,16 +15,19 @@ import (
 
 // ResourceView is the administrator-facing resource row.
 type ResourceView struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Tags          string `json:"tags"`
-	CourseCode    string `json:"course_code"`
-	HasPdf        bool   `json:"has_pdf"`
-	Format        string `json:"format"`
-	SizeBytes     int64  `json:"size_bytes,omitempty"`
-	DownloadCount int64  `json:"download_count"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Tags                 string `json:"tags"`
+	CourseCode           string `json:"course_code"`
+	HasPdf               bool   `json:"has_pdf"`
+	Format               string `json:"format"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	DownloadCount        int64  `json:"download_count"`
+	ContributorUserID    string `json:"contributor_user_id,omitempty"`
+	ContributorStudentID string `json:"contributor_student_id,omitempty"`
+	ContributorName      string `json:"contributor_name,omitempty"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
 }
 
 // ResourceURLView is a temporary, signed CDN URL for a resource PDF.
@@ -54,6 +57,17 @@ func resourceView(item sqlite.Resource) ResourceView {
 	}
 }
 
+// resourceViewForAdmin adds the contributor's decrypted student ID. It is only
+// used by administrator endpoints; app-facing rows leave these fields empty.
+func (a *App) resourceViewForAdmin(ctx context.Context, item sqlite.Resource) ResourceView {
+	view := resourceView(item)
+	view.ContributorUserID = item.ContributorUserID
+	if item.ContributorUserID != "" {
+		view.ContributorStudentID, view.ContributorName = a.contributorInfo(ctx, item.ContributorUserID)
+	}
+	return view
+}
+
 func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, courseCode, sort, order string) ([]ResourceView, int, error) {
 	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, courseCode, sort, order)
 	if err != nil {
@@ -65,7 +79,7 @@ func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, sear
 	}
 	views := make([]ResourceView, 0, len(items))
 	for _, item := range items {
-		views = append(views, resourceView(item))
+		views = append(views, a.resourceViewForAdmin(ctx, item))
 	}
 	return views, total, nil
 }

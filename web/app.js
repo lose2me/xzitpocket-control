@@ -595,12 +595,13 @@ import { template } from './template.js';
         { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
       const textbookHeaders = [
-        { title: '教材名称', key: 'name', sortable: true, width: '27%' },
-        { title: '标签', key: 'tags', width: '24%' },
-        { title: '关联课程', key: 'course_code', sortable: true, width: '17%' },
-        { title: '下载量', key: 'download_count', sortable: true, align: 'center', width: '10%' },
-        { title: '更新时间', key: 'updated_at', width: '12%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '10%' }
+        { title: '教材名称', key: 'name', sortable: true, width: '22%' },
+        { title: '标签', key: 'tags', width: '18%' },
+        { title: '关联课程', key: 'course_code', sortable: true, width: '13%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
+        { title: '下载量', key: 'download_count', sortable: true, align: 'center', width: '8%' },
+        { title: '更新时间', key: 'updated_at', width: '10%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
       ];
       const submissionHeaders = [
         { title: '名称', key: 'name', width: '22%' },
@@ -619,10 +620,11 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
       ];
       const courseResourceHeaders = [
-        { title: '文件名', key: 'name', width: '45%' },
-        { title: '下载量', key: 'download_count', align: 'center', width: '12%' },
-        { title: '上传时间', key: 'created_at', width: '22%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
+        { title: '文件名', key: 'name', width: '30%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '16%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '10%' },
+        { title: '上传时间', key: 'created_at', width: '16%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '28%' }
       ];
       const courseHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '20%' },
@@ -1080,6 +1082,18 @@ import { template } from './template.js';
         notify(editing ? '教材已更新' : '教材已创建');
         await loadTextbooks();
       });
+      const bindTextbookContributor = (row) => call(async () => {
+        const item = rawItem(row);
+        const value = window.prompt('输入贡献者学号（留空解除绑定）', item.contributor_student_id || '');
+        if (value === null) return;
+        const studentId = String(value).trim();
+        await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + '/contributor', {
+          method: 'POST',
+          body: JSON.stringify({ student_id: studentId }),
+        });
+        notify(studentId ? '已绑定贡献者学号' : '已解除贡献者绑定');
+        await loadTextbooks();
+      });
       const deleteTextbook = (row) => call(async () => {
         const item = rawItem(row);
         if (!window.confirm('确定删除教材“' + item.name + '”吗？App 重新上报后会再次收录。')) return;
@@ -1143,6 +1157,19 @@ import { template } from './template.js';
         if (!window.confirm('确定删除文件“' + item.name + '”吗？')) return;
         await api('/api/v1/admin/resources/' + encodeURIComponent(item.id), { method: 'DELETE' });
         notify('文件已删除');
+        await loadCourseResources();
+        await loadCourses();
+      });
+      const bindResourceContributor = (row) => call(async () => {
+        const item = rawItem(row);
+        const value = window.prompt('输入贡献者学号（留空解除绑定）', item.contributor_student_id || '');
+        if (value === null) return;
+        const studentId = String(value).trim();
+        await api('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/contributor', {
+          method: 'POST',
+          body: JSON.stringify({ student_id: studentId }),
+        });
+        notify(studentId ? '已绑定贡献者学号' : '已解除贡献者绑定');
         await loadCourseResources();
         await loadCourses();
       });
@@ -1837,8 +1864,8 @@ import { template } from './template.js';
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
-        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook,
-        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, onTextbookDrop,
+        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, bindTextbookContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook,
+        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, bindResourceContributor, onTextbookDrop,
         loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
         admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey
       };

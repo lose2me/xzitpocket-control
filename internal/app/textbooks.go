@@ -24,17 +24,20 @@ type TextbookWriteInput struct {
 
 // TextbookView is the administrator-facing textbook row.
 type TextbookView struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Tags          string   `json:"tags"`
-	CourseCode    string   `json:"course_code"`
-	CourseCodes   []string `json:"course_codes"`
-	HasPdf        bool     `json:"has_pdf"`
-	HasCover      bool     `json:"has_cover"`
-	SizeBytes     int64    `json:"size_bytes,omitempty"`
-	DownloadCount int64    `json:"download_count"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Tags                 string   `json:"tags"`
+	CourseCode           string   `json:"course_code"`
+	CourseCodes          []string `json:"course_codes"`
+	HasPdf               bool     `json:"has_pdf"`
+	HasCover             bool     `json:"has_cover"`
+	SizeBytes            int64    `json:"size_bytes,omitempty"`
+	DownloadCount        int64    `json:"download_count"`
+	ContributorUserID    string   `json:"contributor_user_id,omitempty"`
+	ContributorStudentID string   `json:"contributor_student_id,omitempty"`
+	ContributorName      string   `json:"contributor_name,omitempty"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 // TextbookResourceView is a temporary, signed CDN URL for a textbook asset.
@@ -100,6 +103,17 @@ func (a *App) cosClient() *cloud.COSClient {
 	return cloud.NewCOSClient(a.Cfg.COSSecretID, a.Cfg.COSSecretKey, a.Cfg.COSBucket, a.Cfg.COSRegion)
 }
 
+// textbookViewForAdmin adds the contributor's decrypted student ID. It is only
+// used by administrator endpoints; app-facing rows leave these fields empty.
+func (a *App) textbookViewForAdmin(ctx context.Context, item sqlite.Textbook) TextbookView {
+	view := textbookView(item)
+	view.ContributorUserID = item.ContributorUserID
+	if item.ContributorUserID != "" {
+		view.ContributorStudentID, view.ContributorName = a.contributorInfo(ctx, item.ContributorUserID)
+	}
+	return view
+}
+
 func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, search, sort, order string) ([]TextbookView, int, error) {
 	items, err := a.Store.ListTextbooks(ctx, clampLimit(limit), max0(offset), search, sort, order)
 	if err != nil {
@@ -111,7 +125,7 @@ func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, sear
 	}
 	views := make([]TextbookView, 0, len(items))
 	for _, item := range items {
-		views = append(views, textbookView(item))
+		views = append(views, a.textbookViewForAdmin(ctx, item))
 	}
 	return views, total, nil
 }

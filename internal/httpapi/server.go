@@ -317,6 +317,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookUploadPdf(w, r, segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "cover", "admin", "textbooks"):
 		s.adminTextbookUploadCover(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "contributor", "admin", "textbooks"):
+		s.adminTextbookContributor(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "textbooks"):
 		s.adminTextbookResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "textbooks"):
@@ -351,6 +353,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminResourceResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resources"):
 		s.adminResourceDownload(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "contributor", "admin", "resources"):
+		s.adminResourceContributor(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/courses":
 		s.adminCourses(w, r)
 	case r.Method == http.MethodPost && path == "/admin/courses":
