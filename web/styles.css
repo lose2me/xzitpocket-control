@@ -416,3 +416,24 @@ body {
   font-size: 11px;
   line-height: 1.3;
 }
+
+/* Keep the traffic-package summary and its refresh button on one line. */
+.cdn-package-row {
+  min-width: 0;
+}
+.cdn-package-row .cdn-meta {
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .cdn-refresh-btn .v-btn__prepend {
+    display: none;
+  }
+  .cdn-refresh-btn {
+    padding-inline: 10px;
+  }
+}
+@media (max-width: 380px) {
+  .cdn-package-row .cdn-meta {
+    font-size: 10px;
+  }
+}

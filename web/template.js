@@ -47,10 +47,12 @@ export const template = `
                     <v-icon icon="mdi-chart-box-outline" color="primary" />
                     <span>资源统计</span>
                     <v-spacer />
-                    <span v-if="activePackage" class="cdn-meta text-medium-emphasis">
-                      流量包剩余 {{ activePackage.remaining }} / {{ activePackage.total }}<template v-if="activePackage.expire">（{{ activePackage.count > 1 ? '共 ' + activePackage.count + ' 个，最近到期 ' : '到期 ' }}{{ activePackage.expire }}）</template>
-                    </span>
-                    <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" :loading="cdnLoading || hostLoading" @click="refreshActiveStats">刷新</v-btn>
+                    <div class="cdn-package-row d-flex align-center ga-2 flex-nowrap ml-auto">
+                      <span v-if="activePackage" class="cdn-meta text-medium-emphasis text-no-wrap">
+                        流量包剩余 {{ activePackage.remaining }} / {{ activePackage.total }}<template v-if="activePackage.expire">（{{ activePackage.count > 1 ? '共 ' + activePackage.count + ' 个，最近到期 ' : '到期 ' }}{{ activePackage.expire }}）</template>
+                      </span>
+                      <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-refresh" class="cdn-refresh-btn flex-shrink-0" :loading="cdnLoading || hostLoading" @click="refreshActiveStats">刷新</v-btn>
+                    </div>
                   </v-card-title>
                   <v-divider />
                   <v-tabs v-model="cdnTab" density="comfortable" color="primary">
