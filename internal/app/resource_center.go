@@ -54,11 +54,11 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 	if err != nil {
 		return nil, 0, err
 	}
-	items, err := a.Store.ListResources(ctx, 200, 0, "", code, "", "")
+	items, err := a.Store.ListResources(ctx, 200, 0, "", code, "", "", false)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := a.Store.CountResources(ctx, "", code)
+	total, err := a.Store.CountResources(ctx, "", code, false)
 	if err != nil {
 		return nil, 0, err
 	}

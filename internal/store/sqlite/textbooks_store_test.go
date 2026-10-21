@@ -47,7 +47,7 @@ func TestUploadTextbooksInsertAndKeepAssociation(t *testing.T) {
 	if len(grouped["3007P0102"]) != 1 || grouped["3007P0102"][0].Tags != "清华社" {
 		t.Fatalf("grouped textbooks = %#v", grouped)
 	}
-	total, err := store.CountTextbooks(ctx, "")
+	total, err := store.CountTextbooks(ctx, "", false)
 	if err != nil || total != 2 {
 		t.Fatalf("count = %d, err = %v", total, err)
 	}

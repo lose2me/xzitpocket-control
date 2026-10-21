@@ -30,7 +30,7 @@ func TestQuestionBankCreateAndListSortsByName(t *testing.T) {
 	if _, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "alpha", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	items, err := store.ListQuestionBanks(ctx, 50, 0, "", "", "")
+	items, err := store.ListQuestionBanks(ctx, 50, 0, "", false, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,11 +98,11 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 		t.Fatalf("status change did not advance updated_at: before=%s after=%s", contentUpdatedAt, got.UpdatedAt)
 	}
 	items, total, err := func() ([]QuestionBankSummary, int, error) {
-		items, err := store.ListQuestionBanks(ctx, 50, 0, "", "", "")
+		items, err := store.ListQuestionBanks(ctx, 50, 0, "", false, "", "")
 		if err != nil {
 			return nil, 0, err
 		}
-		total, err := store.CountQuestionBanks(ctx, "")
+		total, err := store.CountQuestionBanks(ctx, "", false)
 		return items, total, err
 	}()
 	if err != nil {

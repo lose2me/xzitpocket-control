@@ -29,7 +29,7 @@ func TestResourceListingFilterAndCourseCounts(t *testing.T) {
 		}
 	}
 
-	views, total, err := a.ListResourcesForAdmin(ctx, 50, 0, "", "C1", "", "")
+	views, total, err := a.ListResourcesForAdmin(ctx, 50, 0, "", "C1", "", "", false)
 	if err != nil || total != 2 || len(views) != 2 {
 		t.Fatalf("filtered list = %#v, total=%d, err=%v", views, total, err)
 	}

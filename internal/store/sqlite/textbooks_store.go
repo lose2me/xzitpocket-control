@@ -26,6 +26,7 @@ type Textbook struct {
 	ContributorUserID string    `json:"contributor_user_id"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+	ArchivedAt        time.Time `json:"archived_at"`
 }
 
 type TextbookInput struct {
@@ -55,7 +56,7 @@ func textbookInputCodes(input TextbookInput) []string {
 	return codes
 }
 
-const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, download_count, contributor_user_id, created_at, updated_at"
+const textbookColumns = "id, name, tags, course_code, pdf_key, cover_key, download_count, contributor_user_id, created_at, updated_at, archived_at"
 
 // UploadTextbooks inserts every unseen textbook. Existing rows are never
 // modified, so a stored course association survives later uploads.
@@ -124,16 +125,23 @@ func textbookOrderBy(sort, order string) string {
 	return column + " " + direction + ", t.id"
 }
 
-func textbookWhere(search string) (string, []any) {
-	if search = strings.TrimSpace(search); search == "" {
-		return "", nil
+func textbookWhere(search string, archived bool) (string, []any) {
+	clauses := make([]string, 0, 2)
+	args := make([]any, 0, 3)
+	if archived {
+		clauses = append(clauses, "t.archived_at > 0")
+	} else {
+		clauses = append(clauses, "t.archived_at = 0")
 	}
-	like := "%" + escapeLike(search) + "%"
-	return " WHERE (t.name LIKE ? ESCAPE '\\' OR t.tags LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM textbook_courses tc WHERE tc.textbook_id = t.id AND tc.course_code LIKE ? ESCAPE '\\'))",
-		[]any{like, like, like}
+	if search = strings.TrimSpace(search); search != "" {
+		like := "%" + escapeLike(search) + "%"
+		clauses = append(clauses, "(t.name LIKE ? ESCAPE '\\' OR t.tags LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM textbook_courses tc WHERE tc.textbook_id = t.id AND tc.course_code LIKE ? ESCAPE '\\'))")
+		args = append(args, like, like, like)
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func (s *Store) ListTextbooks(ctx context.Context, limit, offset int, search, sort, order string) ([]Textbook, error) {
+func (s *Store) ListTextbooks(ctx context.Context, limit, offset int, search, sort, order string, archived bool) ([]Textbook, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -142,7 +150,7 @@ func (s *Store) ListTextbooks(ctx context.Context, limit, offset int, search, so
 	if offset < 0 {
 		offset = 0
 	}
-	where, args := textbookWhere(search)
+	where, args := textbookWhere(search, archived)
 	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, "SELECT "+textbookColumns+" FROM textbooks t"+where+
 		" ORDER BY "+textbookOrderBy(sort, order)+" LIMIT ? OFFSET ?", args...)
@@ -170,8 +178,8 @@ func (s *Store) ListTextbooks(ctx context.Context, limit, offset int, search, so
 	return result, nil
 }
 
-func (s *Store) CountTextbooks(ctx context.Context, search string) (int, error) {
-	where, args := textbookWhere(search)
+func (s *Store) CountTextbooks(ctx context.Context, search string, archived bool) (int, error) {
+	where, args := textbookWhere(search, archived)
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM textbooks t"+where, args...).Scan(&count)
 	return count, err
@@ -190,9 +198,9 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 		placeholders = append(placeholders, "?")
 		args = append(args, code)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.download_count, t.contributor_user_id, t.created_at, t.updated_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT tc.course_code, t.id, t.name, t.tags, t.course_code, t.pdf_key, t.cover_key, t.download_count, t.contributor_user_id, t.created_at, t.updated_at, t.archived_at
 		FROM textbook_courses tc JOIN textbooks t ON t.id = tc.textbook_id
-		WHERE tc.course_code IN (`+strings.Join(placeholders, ",")+") ORDER BY t.name ASC, t.id ASC", args...)
+		WHERE tc.course_code IN (`+strings.Join(placeholders, ",")+") AND t.archived_at = 0 ORDER BY t.name ASC, t.id ASC", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +208,12 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 	for rows.Next() {
 		var code string
 		var item Textbook
-		var created, updated int64
-		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
+		var created, updated, archived int64
+		if err := rows.Scan(&code, &item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated, &archived); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
+		item.ArchivedAt = optionalFromMillis(archived)
 		item.CourseCodes = []string{code}
 		grouped[code] = append(grouped[code], item)
 	}
@@ -213,7 +222,7 @@ func (s *Store) ListTextbooksForCourses(ctx context.Context, codes []string) (ma
 
 // ListAllTextbooks returns every textbook, used by the app upload picker.
 func (s *Store) ListAllTextbooks(ctx context.Context) ([]Textbook, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT "+textbookColumns+" FROM textbooks t ORDER BY t.name ASC, t.id ASC")
+	rows, err := s.DB.QueryContext(ctx, "SELECT "+textbookColumns+" FROM textbooks t WHERE t.archived_at = 0 ORDER BY t.name ASC, t.id ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -390,12 +399,13 @@ type rowScannerTextbook interface {
 
 func scanTextbook(row rowScannerTextbook) (Textbook, error) {
 	var item Textbook
-	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
+	var created, updated, archived int64
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.CoverKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated, &archived); err != nil {
 		return Textbook{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
+	item.ArchivedAt = optionalFromMillis(archived)
 	return item, nil
 }
 
@@ -437,6 +447,23 @@ func (s *Store) SetTextbookContributor(ctx context.Context, id, userID string) e
 	}
 	if affected, countErr := result.RowsAffected(); countErr != nil {
 		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetTextbookArchive toggles a textbook between the live list and the archive.
+// Object keys are updated together with the flag so a row never points at the
+// other area's namespace. Archiving keeps contributor and download counters.
+func (s *Store) SetTextbookArchive(ctx context.Context, id, pdfKey, coverKey string, archivedAt time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET pdf_key = ?, cover_key = ?, archived_at = ? WHERE id = ?`,
+		pdfKey, coverKey, optionalMillis(archivedAt), id)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
 	} else if affected != 1 {
 		return sql.ErrNoRows
 	}

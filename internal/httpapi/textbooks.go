@@ -18,7 +18,8 @@ func (s *Server) adminTextbooks(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, offset := queryPage(r)
 	items, total, err := s.App.ListTextbooksForAdmin(r.Context(), limit, offset,
-		r.URL.Query().Get("q"), r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+		r.URL.Query().Get("q"), r.URL.Query().Get("sort"), r.URL.Query().Get("order"),
+		r.URL.Query().Get("archived") == "1")
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -72,6 +73,27 @@ func (s *Server) adminTextbookDelete(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (s *Server) adminTextbookArchive(w http.ResponseWriter, r *http.Request, id string) {
+	s.setTextbookArchived(w, r, id, true)
+}
+
+func (s *Server) adminTextbookRestore(w http.ResponseWriter, r *http.Request, id string) {
+	s.setTextbookArchived(w, r, id, false)
+}
+
+func (s *Server) setTextbookArchived(w http.ResponseWriter, r *http.Request, id string, archived bool) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	out, err := s.App.SetTextbookArchived(r.Context(), id, archived, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) adminTextbookUploadPdf(w http.ResponseWriter, r *http.Request, id string) {
@@ -148,7 +170,7 @@ func (s *Server) adminTextbookResourceURL(w http.ResponseWriter, r *http.Request
 			ttl = time.Duration(seconds) * time.Second
 		}
 	}
-	out, err := s.App.TextbookResourceURL(r.Context(), id, r.URL.Query().Get("kind"), ttl)
+	out, err := s.App.TextbookResourceURLForAdmin(r.Context(), id, r.URL.Query().Get("kind"), ttl)
 	if err != nil {
 		writeError(w, r, err)
 		return

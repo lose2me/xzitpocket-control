@@ -314,8 +314,14 @@ import { template } from './template.js';
       const textbookForm = ref({ name: '', tags: '', courseCodes: [] });
       const textbookSubmissions = ref([]);
       const textbookSubmissionTotal = ref(0);
+      const archivedTextbooks = ref([]);
+      const archivedTextbookTotal = ref(0);
       const resourceSubmissions = ref([]);
       const resourceSubmissionTotal = ref(0);
+      const archivedResources = ref([]);
+      const archivedResourceTotal = ref(0);
+      const archivedBanks = ref([]);
+      const archivedBankTotal = ref(0);
       const resourceDialog = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
@@ -587,11 +593,11 @@ import { template } from './template.js';
         { title: '最近活动', key: 'last_seen_at', width: '30%' }
       ];
       const bankHeaders = [
-        { title: '题库 ID', key: 'id', width: '15%' }, { title: '名称', key: 'name', width: '20%' },
-        { title: '关联课程', key: 'courseCode', sortable: true, width: '12%' },
+        { title: '题库 ID', key: 'id', width: '14%' }, { title: '名称', key: 'name', width: '17%' },
+        { title: '关联课程', key: 'courseCode', sortable: true, width: '11%' },
         { title: '题目数', key: 'question_count', align: 'center', width: '8%' }, { title: '状态', key: 'status', width: '8%' },
         { title: 'CDK 解锁', key: 'requiresCDK', align: 'center', width: '9%' }, { title: '更新时间', key: 'updated_at', width: '8%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '12%' }
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
       const cdkHeaders = [
         { title: 'CDK ID', key: 'id', width: '20%' },
@@ -600,13 +606,13 @@ import { template } from './template.js';
         { title: '创建时间', key: 'created_at', width: '13%' }, { title: '使用时间', key: 'used_at', width: '13%' }, { title: '操作', key: 'actions', sortable: false, align: 'center', width: '11%' }
       ];
       const textbookHeaders = [
-        { title: '教材名称', key: 'name', sortable: true, width: '22%' },
-        { title: '标签', key: 'tags', width: '18%' },
+        { title: '教材名称', key: 'name', sortable: true, width: '20%' },
+        { title: '标签', key: 'tags', width: '14%' },
         { title: '关联课程', key: 'course_code', sortable: true, width: '13%' },
         { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
         { title: '下载量', key: 'download_count', sortable: true, align: 'center', width: '8%' },
         { title: '更新时间', key: 'updated_at', width: '10%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '15%' }
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
       ];
       const submissionHeaders = [
         { title: '名称', key: 'name', width: '22%' },
@@ -625,11 +631,34 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
       ];
       const courseResourceHeaders = [
-        { title: '文件名', key: 'name', width: '30%' },
-        { title: '贡献者学号', key: 'contributor_student_id', width: '16%' },
+        { title: '文件名', key: 'name', width: '26%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '15%' },
         { title: '下载量', key: 'download_count', align: 'center', width: '10%' },
-        { title: '上传时间', key: 'created_at', width: '16%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '28%' }
+        { title: '上传时间', key: 'created_at', width: '15%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '34%' }
+      ];
+      const archivedTextbookHeaders = [
+        { title: '教材名称', key: 'name', width: '25%' },
+        { title: '关联课程', key: 'course_code', width: '14%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '8%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '27%' }
+      ];
+      const archivedResourceHeaders = [
+        { title: '文件名', key: 'name', width: '26%' },
+        { title: '关联课程', key: 'course_code', width: '12%' },
+        { title: '类型', key: 'format', align: 'center', width: '7%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '8%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
+      ];
+      const archivedBankHeaders = [
+        { title: '题库 ID', key: 'id', width: '15%' },
+        { title: '名称', key: 'name', width: '23%' },
+        { title: '关联课程', key: 'courseCode', width: '16%' },
+        { title: '题目数', key: 'question_count', align: 'center', width: '8%' },
+        { title: '状态', key: 'status', width: '9%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '24%' }
       ];
       const courseHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '20%' },
@@ -959,6 +988,10 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/question-banks?limit=' + bankItemsPerPage.value + '&offset=' + offset + sortQuery(bankSortBy.value));
         banks.value = out.items || []; bankTotal.value = out.total || 0;
       };
+      const loadArchivedBanks = async () => {
+        const out = await api('/api/v1/admin/question-banks?archived=1&limit=200');
+        archivedBanks.value = out.items || []; archivedBankTotal.value = out.total || 0;
+      };
       const sortBanks = (sortBy) => call(async () => { bankSortBy.value = Array.isArray(sortBy) ? sortBy : []; bankPage.value = 1; await loadBanks(); });
       const loadCDKs = async () => {
         const offset = (cdkPage.value - 1) * cdkItemsPerPage.value;
@@ -1021,6 +1054,10 @@ import { template } from './template.js';
         const query = search ? '&q=' + encodeURIComponent(search) : '';
         const out = await api('/api/v1/admin/textbooks?limit=' + textbookItemsPerPage.value + '&offset=' + offset + query + sortQuery(textbookSortBy.value));
         textbooks.value = out.items || []; textbookTotal.value = out.total || 0;
+      };
+      const loadArchivedTextbooks = async () => {
+        const out = await api('/api/v1/admin/textbooks?archived=1&limit=200');
+        archivedTextbooks.value = out.items || []; archivedTextbookTotal.value = out.total || 0;
       };
       // ── App upload review queue ──
       const submissionBase = (kind) => '/api/v1/admin/' + kind + '-submissions';
@@ -1118,18 +1155,28 @@ import { template } from './template.js';
         if (!window.confirm('确定删除教材“' + item.name + '”吗？App 重新上报后会再次收录。')) return;
         await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id), { method: 'DELETE' });
         notify('教材已删除');
-        await loadTextbooks();
+        await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
       });
       const downloadTextbook = (row) => call(async () => {
         const item = rawItem(row);
         await downloadFile('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + '/download', pdfFileName(item.name));
         notify('已开始下载');
-        await loadTextbooks();
+        await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
+      });
+      const setTextbookArchived = (row, archived) => call(async () => {
+        const item = rawItem(row);
+        await api('/api/v1/admin/textbooks/' + encodeURIComponent(item.id) + (archived ? '/archive' : '/restore'), { method: 'POST' });
+        notify(archived ? '教材已归档' : '教材已恢复');
+        await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
       });
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
         const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code));
         courseResources.value = out.items || [];
+      };
+      const loadArchivedResources = async () => {
+        const out = await api('/api/v1/admin/resources?archived=1&limit=200');
+        archivedResources.value = out.items || []; archivedResourceTotal.value = out.total || 0;
       };
       const openResourceDialog = (row) => call(async () => {
         const item = rawItem(row);
@@ -1177,13 +1224,19 @@ import { template } from './template.js';
         await api('/api/v1/admin/resources/' + encodeURIComponent(item.id), { method: 'DELETE' });
         notify('文件已删除');
         await loadCourseResources();
-        await loadCourses();
+        await Promise.all([loadCourses(), loadArchivedResources()]);
       });
       const downloadResource = (row) => call(async () => {
         const item = rawItem(row);
         await downloadFile('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/download', documentFileName(item.name, item.format));
         notify('已开始下载');
-        await loadCourseResources();
+        await Promise.all([loadCourseResources(), loadArchivedResources()]);
+      });
+      const setResourceArchived = (row, archived) => call(async () => {
+        const item = rawItem(row);
+        await api('/api/v1/admin/resources/' + encodeURIComponent(item.id) + (archived ? '/archive' : '/restore'), { method: 'POST' });
+        notify(archived ? '试卷已归档' : '试卷已恢复');
+        await Promise.all([loadCourseResources(), loadCourses(), loadArchivedResources()]);
       });
 
       // ── Textbook PDF + cover (rendered in the browser with pdf.js) ──
@@ -1351,8 +1404,8 @@ import { template } from './template.js';
       const sortErrorReports = (sortBy) => call(async () => { errorReportSortBy.value = Array.isArray(sortBy) ? sortBy : []; errorReportsPage.value = 1; await loadErrorReports(); });
       const searchCDKs = () => call(async () => { cdkPage.value = 1; await loadCDKs(); });
       const loadLibrary = async () => {
-        const results = await Promise.all([loadBanks(), loadCDKs(), api('/api/v1/admin/metrics/breakdown')]);
-        breakdown.value = results[2];
+        const results = await Promise.all([loadBanks(), loadArchivedBanks(), loadCDKs(), api('/api/v1/admin/metrics/breakdown')]);
+        breakdown.value = results[3];
       };
       const loadShareCodes = async () => {
         const offset = (shareCodePage.value - 1) * shareCodeItemsPerPage.value;
@@ -1508,8 +1561,8 @@ import { template } from './template.js';
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
-          else if (view.value === 'textbooks') await Promise.all([loadTextbookSubmissions(), loadTextbooks()]);
-          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses()]);
+          else if (view.value === 'textbooks') await Promise.all([loadTextbookSubmissions(), loadTextbooks(), loadArchivedTextbooks()]);
+          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
@@ -1769,7 +1822,13 @@ import { template } from './template.js';
         const item = rawItem(row);
         if (!window.confirm('确定删除题库“' + item.name + '”吗？该题库的题目与已绑定的 CDK 会一并删除，且不可恢复。')) return;
         await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id), { method: 'DELETE' });
-        notify('题库已删除'); await loadBanks();
+        notify('题库已删除'); await Promise.all([loadBanks(), loadArchivedBanks()]);
+      });
+      const setBankArchived = (row, archived) => call(async () => {
+        const item = rawItem(row);
+        await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id) + (archived ? '/archive' : '/restore'), { method: 'POST' });
+        notify(archived ? '题库已归档' : '题库已恢复');
+        await Promise.all([loadBanks(), loadArchivedBanks()]);
       });
       const showUser = (user) => call(async () => {
         const row = rawItem(user); selectedUser.value = await api('/api/v1/admin/users/' + encodeURIComponent(row.id));
@@ -1842,7 +1901,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开题库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', resource_upload: '上传试卷', resource_delete: '删除试卷', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', textbook_archive: '归档教材', textbook_restore: '恢复教材', resource_upload: '上传试卷', resource_delete: '删除试卷', resource_archive: '归档试卷', resource_restore: '恢复试卷', question_bank_archive: '归档题库', question_bank_restore: '恢复题库', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
@@ -1858,19 +1917,19 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
-        textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
+        textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
-        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
+        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, visibleNav, title, statCards, adminName, canRead, canWrite,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
-        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
-        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, openContributorDialog, saveContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook,
+        showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, setBankArchived, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
+        loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, openContributorDialog, saveContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook, setTextbookArchived,
         openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, onTextbookDrop,
         loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
         admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey

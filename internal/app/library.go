@@ -79,6 +79,7 @@ type QuestionBankSummaryView struct {
 	CourseCode    string   `json:"courseCode"`
 	CourseCodes   []string `json:"courseCodes"`
 	QuestionCount int      `json:"question_count"`
+	Archived      bool     `json:"archived"`
 	CreatedAt     string   `json:"created_at"`
 	UpdatedAt     string   `json:"updated_at"`
 }
@@ -86,6 +87,7 @@ type QuestionBankSummaryView struct {
 type AdminQuestionBankView struct {
 	QuestionBank QuestionBankView `json:"questionBank"`
 	Status       string           `json:"status"`
+	Archived     bool             `json:"archived"`
 	CreatedAt    string           `json:"created_at"`
 	UpdatedAt    string           `json:"updated_at"`
 }
@@ -274,7 +276,7 @@ func (a *App) GetQuestionBank(ctx context.Context, id string) (QuestionBankRespo
 	return QuestionBankResponse{QuestionBank: questionBankView(bank)}, nil
 }
 
-func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, sort, order string) ([]QuestionBankSummaryView, int, error) {
+func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status string, archived bool, sort, order string) ([]QuestionBankSummaryView, int, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
@@ -283,11 +285,11 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, 
 	if status != "" && status != "active" && status != "draft" && status != "disabled" {
 		return nil, 0, Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
 	}
-	items, err := a.Store.ListQuestionBanks(ctx, limit, offset, status, sort, order)
+	items, err := a.Store.ListQuestionBanks(ctx, limit, offset, status, archived, sort, order)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := a.Store.CountQuestionBanks(ctx, status)
+	total, err := a.Store.CountQuestionBanks(ctx, status, archived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -297,7 +299,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status, 
 		if codes == nil {
 			codes = []string{}
 		}
-		result = append(result, QuestionBankSummaryView{ID: item.ID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, Archived: !item.ArchivedAt.IsZero(), CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }
@@ -310,7 +312,7 @@ func (a *App) GetAdminQuestionBank(ctx context.Context, id string) (AdminQuestio
 	if err != nil {
 		return AdminQuestionBankView{}, err
 	}
-	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(bank.UpdatedAt)}, nil
+	return AdminQuestionBankView{QuestionBank: questionBankView(bank), Status: bank.Status, Archived: !bank.ArchivedAt.IsZero(), CreatedAt: bank.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(bank.UpdatedAt)}, nil
 }
 
 func (a *App) CreateQuestionBank(ctx context.Context, in QuestionBankInput, actor string) (AdminQuestionBankView, error) {
@@ -381,6 +383,39 @@ func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor strin
 		return err
 	}
 	return a.Store.AddAudit(ctx, actor, "question_bank_status", "question_bank", id, controlcrypto.JSON(map[string]string{"status": status}), time.Now().UTC())
+}
+
+// SetQuestionBankArchived toggles a bank's archive flag. Archiving hides the
+// bank from app clients but keeps its questions, CDKs and status.
+func (a *App) SetQuestionBankArchived(ctx context.Context, id string, archived bool, actor string) (AdminQuestionBankView, error) {
+	id = strings.TrimSpace(id)
+	existing, err := a.Store.GetQuestionBank(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AdminQuestionBankView{}, ErrNotFound
+	}
+	if err != nil {
+		return AdminQuestionBankView{}, err
+	}
+	now := time.Now().UTC()
+	archivedAt := time.Time{}
+	if archived {
+		archivedAt = now
+	}
+	if archived == !existing.ArchivedAt.IsZero() {
+		return a.GetAdminQuestionBank(ctx, id)
+	}
+	if err := a.Store.SetQuestionBankArchive(ctx, id, archivedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AdminQuestionBankView{}, ErrNotFound
+		}
+		return AdminQuestionBankView{}, err
+	}
+	action := "question_bank_archive"
+	if !archived {
+		action = "question_bank_restore"
+	}
+	_ = a.Store.AddAudit(ctx, actor, action, "question_bank", id, "{}", now)
+	return a.GetAdminQuestionBank(ctx, id)
 }
 
 func (a *App) DeleteQuestionBank(ctx context.Context, id, actor string) error {

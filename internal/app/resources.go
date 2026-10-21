@@ -26,6 +26,7 @@ type ResourceView struct {
 	ContributorUserID    string `json:"contributor_user_id,omitempty"`
 	ContributorStudentID string `json:"contributor_student_id,omitempty"`
 	ContributorName      string `json:"contributor_name,omitempty"`
+	Archived             bool   `json:"archived"`
 	CreatedAt            string `json:"created_at"`
 	UpdatedAt            string `json:"updated_at"`
 }
@@ -53,6 +54,7 @@ func resourceView(item sqlite.Resource) ResourceView {
 		HasPdf:        item.PdfKey != "",
 		Format:        storedFileFormat(item.PdfKey),
 		DownloadCount: item.DownloadCount,
+		Archived:      !item.ArchivedAt.IsZero(),
 		CreatedAt:     item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
@@ -68,12 +70,12 @@ func (a *App) resourceViewForAdmin(ctx context.Context, item sqlite.Resource) Re
 	return view
 }
 
-func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, courseCode, sort, order string) ([]ResourceView, int, error) {
-	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, courseCode, sort, order)
+func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, courseCode, sort, order string, archived bool) ([]ResourceView, int, error) {
+	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, courseCode, sort, order, archived)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := a.Store.CountResources(ctx, search, courseCode)
+	total, err := a.Store.CountResources(ctx, search, courseCode, archived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -180,6 +182,53 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 	return a.Store.AddAudit(ctx, actor, "resource_delete", "resource", item.ID, "{}", time.Now().UTC())
 }
 
+// SetResourceArchived moves an exam between the published and archived COS
+// areas. Contributor and download counters stay attached to the row.
+func (a *App) SetResourceArchived(ctx context.Context, id string, archived bool, actor string) (ResourceView, error) {
+	item, err := a.requireResource(ctx, id)
+	if err != nil {
+		return ResourceView{}, err
+	}
+	if archived == !item.ArchivedAt.IsZero() {
+		return a.resourceViewForAdmin(ctx, item), nil
+	}
+	newPdfKey := item.PdfKey
+	if newPdfKey != "" {
+		if hash := objectHashFromKey(newPdfKey); hash != "" {
+			if archived {
+				newPdfKey = archivedObjectKey("resource", storedFileFormat(newPdfKey), hash)
+			} else {
+				newPdfKey = publishedObjectKey("resource", storedFileFormat(newPdfKey), hash)
+			}
+		}
+	}
+	if newPdfKey != item.PdfKey {
+		if err := a.copyStoredObject(ctx, item.PdfKey, newPdfKey); err != nil {
+			return ResourceView{}, err
+		}
+	}
+	now := time.Now().UTC()
+	archivedAt := time.Time{}
+	if archived {
+		archivedAt = now
+	}
+	oldPdfKey := item.PdfKey
+	if err := a.Store.SetResourceArchive(ctx, item.ID, newPdfKey, archivedAt); err != nil {
+		return ResourceView{}, err
+	}
+	item.PdfKey, item.ArchivedAt = newPdfKey, archivedAt
+	if oldPdfKey != newPdfKey {
+		a.removeStoredFileIfUnused(ctx, oldPdfKey)
+	}
+	a.purgeCDN(ctx, newPdfKey)
+	action := "resource_archive"
+	if !archived {
+		action = "resource_restore"
+	}
+	_ = a.Store.AddAudit(ctx, actor, action, "resource", item.ID, "{}", now)
+	return a.resourceViewForAdmin(ctx, item), nil
+}
+
 // removeResourceAssets deletes a removed resource's PDF when no other row
 // references the content-addressed key. It is best-effort: the row is already
 // gone, so failures are logged rather than surfaced.
@@ -202,11 +251,23 @@ func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, 
 	return item, nil
 }
 
-// ResourceURL returns a temporary signed CDN URL for a resource file.
+// ResourceURL returns a temporary signed CDN URL for a published resource.
 func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (ResourceURLView, error) {
+	return a.resourceURL(ctx, id, ttl, false)
+}
+
+// ResourceURLForAdmin also serves archived resources in the console.
+func (a *App) ResourceURLForAdmin(ctx context.Context, id string, ttl time.Duration) (ResourceURLView, error) {
+	return a.resourceURL(ctx, id, ttl, true)
+}
+
+func (a *App) resourceURL(ctx context.Context, id string, ttl time.Duration, allowArchived bool) (ResourceURLView, error) {
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
 		return ResourceURLView{}, err
+	}
+	if !allowArchived && !item.ArchivedAt.IsZero() {
+		return ResourceURLView{}, ErrNotFound
 	}
 	if item.PdfKey == "" {
 		return ResourceURLView{}, Err("resource_missing", "该试卷没有文件", 404)

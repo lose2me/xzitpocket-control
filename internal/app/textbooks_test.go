@@ -24,7 +24,7 @@ func TestTextbookAdminCRUDAndReassign(t *testing.T) {
 	if _, err := a.UpdateTextbookForAdmin(ctx, "missing", TextbookWriteInput{Name: "x"}, "admin"); err == nil {
 		t.Fatal("updating a missing textbook should fail")
 	}
-	views, total, err := a.ListTextbooksForAdmin(ctx, 50, 0, "3007X0001", "", "")
+	views, total, err := a.ListTextbooksForAdmin(ctx, 50, 0, "3007X0001", "", "", false)
 	if err != nil || total != 1 || len(views) != 1 {
 		t.Fatalf("list = %#v, total=%d, err=%v", views, total, err)
 	}

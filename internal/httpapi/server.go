@@ -291,6 +291,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminQuestionBankDelete(w, r, segment(path, 2))
 	case r.Method == http.MethodPatch && pathMatchesIDSuffix(path, "status", "admin", "question-banks"):
 		s.adminQuestionBankStatus(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "archive", "admin", "question-banks"):
+		s.adminQuestionBankArchive(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "restore", "admin", "question-banks"):
+		s.adminQuestionBankRestore(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/library-cdks":
 		s.adminLibraryCDKs(w, r)
 	case r.Method == http.MethodPost && path == "/admin/library-cdks":
@@ -313,6 +317,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookUpdate(w, r, segment(path, 2))
 	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "textbooks"):
 		s.adminTextbookDelete(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "archive", "admin", "textbooks"):
+		s.adminTextbookArchive(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "restore", "admin", "textbooks"):
+		s.adminTextbookRestore(w, r, segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "pdf", "admin", "textbooks"):
 		s.adminTextbookUploadPdf(w, r, segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "cover", "admin", "textbooks"):
@@ -349,6 +357,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminResourceUpload(w, r)
 	case r.Method == http.MethodDelete && pathMatchesID(path, "admin", "resources"):
 		s.adminResourceDelete(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "archive", "admin", "resources"):
+		s.adminResourceArchive(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "restore", "admin", "resources"):
+		s.adminResourceRestore(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resources"):
 		s.adminResourceResourceURL(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resources"):

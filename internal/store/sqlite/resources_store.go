@@ -25,6 +25,7 @@ type Resource struct {
 	ContributorUserID string    `json:"contributor_user_id"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+	ArchivedAt        time.Time `json:"archived_at"`
 }
 
 type ResourceInput struct {
@@ -33,7 +34,7 @@ type ResourceInput struct {
 	CourseCode string
 }
 
-const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, contributor_user_id, created_at, updated_at"
+const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, contributor_user_id, created_at, updated_at, archived_at"
 
 var resourceListSorts = map[string]string{
 	"name":           "r.name",
@@ -58,9 +59,14 @@ func resourceOrderBy(sort, order string) string {
 	return column + " " + direction + ", r.id"
 }
 
-func resourceWhere(search, courseCode string) (string, []any) {
-	clauses := make([]string, 0, 2)
+func resourceWhere(search, courseCode string, archived bool) (string, []any) {
+	clauses := make([]string, 0, 3)
 	args := make([]any, 0, 4)
+	if archived {
+		clauses = append(clauses, "r.archived_at > 0")
+	} else {
+		clauses = append(clauses, "r.archived_at = 0")
+	}
 	if search = strings.TrimSpace(search); search != "" {
 		like := "%" + escapeLike(search) + "%"
 		clauses = append(clauses, "(r.name LIKE ? ESCAPE '\\' OR r.tags LIKE ? ESCAPE '\\' OR r.course_code LIKE ? ESCAPE '\\')")
@@ -76,7 +82,7 @@ func resourceWhere(search, courseCode string) (string, []any) {
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func (s *Store) ListResources(ctx context.Context, limit, offset int, search, courseCode, sort, order string) ([]Resource, error) {
+func (s *Store) ListResources(ctx context.Context, limit, offset int, search, courseCode, sort, order string, archived bool) ([]Resource, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -85,7 +91,7 @@ func (s *Store) ListResources(ctx context.Context, limit, offset int, search, co
 	if offset < 0 {
 		offset = 0
 	}
-	where, args := resourceWhere(search, courseCode)
+	where, args := resourceWhere(search, courseCode, archived)
 	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, "SELECT "+resourceColumns+" FROM resources r"+where+
 		" ORDER BY "+resourceOrderBy(sort, order)+" LIMIT ? OFFSET ?", args...)
@@ -104,8 +110,8 @@ func (s *Store) ListResources(ctx context.Context, limit, offset int, search, co
 	return result, rows.Err()
 }
 
-func (s *Store) CountResources(ctx context.Context, search, courseCode string) (int, error) {
-	where, args := resourceWhere(search, courseCode)
+func (s *Store) CountResources(ctx context.Context, search, courseCode string, archived bool) (int, error) {
+	where, args := resourceWhere(search, courseCode, archived)
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM resources r"+where, args...).Scan(&count)
 	return count, err
@@ -124,7 +130,7 @@ func (s *Store) CountResourcesByCourse(ctx context.Context, codes []string) (map
 		placeholders = append(placeholders, "?")
 		args = append(args, code)
 	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT course_code, COUNT(*) FROM resources WHERE course_code IN ("+
+	rows, err := s.DB.QueryContext(ctx, "SELECT course_code, COUNT(*) FROM resources WHERE archived_at = 0 AND course_code IN ("+
 		strings.Join(placeholders, ",")+") GROUP BY course_code", args...)
 	if err != nil {
 		return nil, err
@@ -188,12 +194,13 @@ type rowScannerResource interface {
 
 func scanResource(row rowScannerResource) (Resource, error) {
 	var item Resource
-	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated); err != nil {
+	var created, updated, archived int64
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated, &archived); err != nil {
 		return Resource{}, err
 	}
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
+	item.ArchivedAt = optionalFromMillis(archived)
 	return item, nil
 }
 
@@ -221,6 +228,22 @@ func (s *Store) IncrementResourceDownloads(ctx context.Context, id string) error
 	}
 	if affected, countErr := result.RowsAffected(); countErr != nil {
 		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetResourceArchive toggles a resource between the live list and the archive.
+// Object keys move with the flag; contributor and download counters stay.
+func (s *Store) SetResourceArchive(ctx context.Context, id, pdfKey string, archivedAt time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE resources SET pdf_key = ?, archived_at = ? WHERE id = ?`,
+		pdfKey, optionalMillis(archivedAt), id)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
 	} else if affected != 1 {
 		return sql.ErrNoRows
 	}

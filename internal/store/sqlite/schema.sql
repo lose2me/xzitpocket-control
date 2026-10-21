@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS question_banks (
     requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
     course_code TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    archived_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- A question bank may be shared by several courses. question_banks.course_code
@@ -292,6 +293,7 @@ CREATE TABLE IF NOT EXISTS textbooks (
     contributor_user_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
+    archived_at INTEGER NOT NULL DEFAULT 0,
     UNIQUE(name, tags, course_code)
 );
 
@@ -321,11 +323,15 @@ CREATE TABLE IF NOT EXISTS resources (
     contributor_user_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
+    archived_at INTEGER NOT NULL DEFAULT 0,
     UNIQUE(name, tags, course_code)
 );
 
 CREATE INDEX IF NOT EXISTS idx_resources_name ON resources(name);
 CREATE INDEX IF NOT EXISTS idx_resources_course ON resources(course_code);
+CREATE INDEX IF NOT EXISTS idx_question_banks_archived ON question_banks(archived_at);
+CREATE INDEX IF NOT EXISTS idx_textbooks_archived ON textbooks(archived_at);
+CREATE INDEX IF NOT EXISTS idx_resources_archived ON resources(archived_at);
 
 -- PDFs uploaded by app users and waiting for administrator review. An
 -- approved submission becomes a textbooks/resources row that keeps pdf_key;

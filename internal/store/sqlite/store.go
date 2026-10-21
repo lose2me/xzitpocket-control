@@ -32,7 +32,7 @@ var currentSchemaTables = []struct {
 	{name: "activity_events", columns: []string{"id", "event_id", "user_id", "device_id", "type", "occurred_at", "received_at", "properties_json"}},
 	{name: "error_reports", columns: []string{"id", "event_id", "user_id", "device_id", "student_id_hash", "app_version", "platform", "title", "message", "error_text", "stack_trace", "occurred_at", "received_at"}},
 	{name: "error_report_ignored_students", columns: []string{"student_id_hash", "ignored_at"}},
-	{name: "question_banks", columns: []string{"id", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at"}},
+	{name: "question_banks", columns: []string{"id", "name", "status", "requires_cdk", "course_code", "created_at", "updated_at", "archived_at"}},
 	{name: "question_bank_courses", columns: []string{"question_bank_id", "course_code"}},
 	{name: "question_bank_id_counter", columns: []string{"id", "next_number"}},
 	{name: "questions", columns: []string{"id", "bank_id", "question_number", "type", "title", "question_text", "correct_answer", "sort_order"}},
@@ -47,9 +47,9 @@ var currentSchemaTables = []struct {
 	{name: "school_calendar_config", columns: []string{"id", "days_json", "slots_json", "updated_at"}},
 	{name: "share_codes", columns: []string{"id", "code_hash", "code_ciphertext", "payload_ciphertext", "payload_hash", "created_by_user_id", "created_at", "expires_at"}},
 	{name: "courses", columns: []string{"id", "code", "name", "created_at", "updated_at"}},
-	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
+	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
-	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at"}},
+	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
 
@@ -126,6 +126,9 @@ var additiveMigrations = []struct {
 	{"resources", "contributor_user_id", `ALTER TABLE resources ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "student_id_ciphertext", `ALTER TABLE resource_submissions ADD COLUMN student_id_ciphertext TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "target_id", `ALTER TABLE resource_submissions ADD COLUMN target_id TEXT NOT NULL DEFAULT ''`},
+	{"textbooks", "archived_at", `ALTER TABLE textbooks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
+	{"resources", "archived_at", `ALTER TABLE resources ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
+	{"question_banks", "archived_at", `ALTER TABLE question_banks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -573,6 +576,7 @@ type QuestionBank struct {
 	CourseCodes []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	ArchivedAt  time.Time
 	Questions   []Question
 }
 
@@ -606,6 +610,7 @@ type QuestionBankSummary struct {
 	QuestionCount int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	ArchivedAt    time.Time
 }
 
 // LibraryCDK is an unassigned code that binds to one question bank on redemption.
@@ -655,6 +660,21 @@ func millis(t time.Time) int64 {
 
 func fromMillis(value int64) time.Time {
 	return time.UnixMilli(value).UTC()
+}
+
+// optionalMillis stores a zero time as 0 so "not archived" checks stay simple.
+func optionalMillis(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return millis(t)
+}
+
+func optionalFromMillis(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return fromMillis(value)
 }
 
 func nullableTime(value sql.NullInt64) *time.Time {

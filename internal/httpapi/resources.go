@@ -20,7 +20,8 @@ func (s *Server) adminResources(w http.ResponseWriter, r *http.Request) {
 	limit, offset := queryPage(r)
 	items, total, err := s.App.ListResourcesForAdmin(r.Context(), limit, offset,
 		r.URL.Query().Get("q"), r.URL.Query().Get("course_code"),
-		r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+		r.URL.Query().Get("sort"), r.URL.Query().Get("order"),
+		r.URL.Query().Get("archived") == "1")
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -99,6 +100,27 @@ func (s *Server) adminResourceDelete(w http.ResponseWriter, r *http.Request, id 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
+func (s *Server) adminResourceArchive(w http.ResponseWriter, r *http.Request, id string) {
+	s.setResourceArchived(w, r, id, true)
+}
+
+func (s *Server) adminResourceRestore(w http.ResponseWriter, r *http.Request, id string) {
+	s.setResourceArchived(w, r, id, false)
+}
+
+func (s *Server) setResourceArchived(w http.ResponseWriter, r *http.Request, id string, archived bool) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	out, err := s.App.SetResourceArchived(r.Context(), id, archived, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) adminResourceResourceURL(w http.ResponseWriter, r *http.Request, id string) {
 	if _, ok := s.authAdmin(w, r); !ok {
 		return
@@ -109,7 +131,7 @@ func (s *Server) adminResourceResourceURL(w http.ResponseWriter, r *http.Request
 			ttl = time.Duration(seconds) * time.Second
 		}
 	}
-	out, err := s.App.ResourceURL(r.Context(), id, ttl)
+	out, err := s.App.ResourceURLForAdmin(r.Context(), id, ttl)
 	if err != nil {
 		writeError(w, r, err)
 		return

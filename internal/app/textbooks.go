@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type TextbookView struct {
 	ContributorUserID    string   `json:"contributor_user_id,omitempty"`
 	ContributorStudentID string   `json:"contributor_student_id,omitempty"`
 	ContributorName      string   `json:"contributor_name,omitempty"`
+	Archived             bool     `json:"archived"`
 	CreatedAt            string   `json:"created_at"`
 	UpdatedAt            string   `json:"updated_at"`
 }
@@ -59,6 +61,7 @@ func textbookView(item sqlite.Textbook) TextbookView {
 	return TextbookView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: codes,
 		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "", DownloadCount: item.DownloadCount,
+		Archived:  !item.ArchivedAt.IsZero(),
 		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
@@ -114,12 +117,12 @@ func (a *App) textbookViewForAdmin(ctx context.Context, item sqlite.Textbook) Te
 	return view
 }
 
-func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, search, sort, order string) ([]TextbookView, int, error) {
-	items, err := a.Store.ListTextbooks(ctx, clampLimit(limit), max0(offset), search, sort, order)
+func (a *App) ListTextbooksForAdmin(ctx context.Context, limit, offset int, search, sort, order string, archived bool) ([]TextbookView, int, error) {
+	items, err := a.Store.ListTextbooks(ctx, clampLimit(limit), max0(offset), search, sort, order, archived)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := a.Store.CountTextbooks(ctx, search)
+	total, err := a.Store.CountTextbooks(ctx, search, archived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -224,6 +227,98 @@ func (a *App) DeleteTextbookForAdmin(ctx context.Context, id, actor string) erro
 		a.transferAttribution(ctx, item.ContributorUserID, "", item.DownloadCount)
 	}
 	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", item.ID, "{}", time.Now().UTC())
+}
+
+// SetTextbookArchived moves a textbook between the published and archived COS
+// areas. The row, its contributor and its download totals stay untouched so an
+// archived book keeps its attribution and can be restored without re-binding.
+func (a *App) SetTextbookArchived(ctx context.Context, id string, archived bool, actor string) (TextbookView, error) {
+	item, err := a.requireTextbook(ctx, id)
+	if err != nil {
+		return TextbookView{}, err
+	}
+	if archived == !item.ArchivedAt.IsZero() {
+		return a.textbookViewForAdmin(ctx, item), nil
+	}
+	newPdfKey, newCoverKey, err := textbookAreaKeys(item, archived)
+	if err != nil {
+		return TextbookView{}, err
+	}
+	if newPdfKey != item.PdfKey {
+		if err := a.copyStoredObject(ctx, item.PdfKey, newPdfKey); err != nil {
+			return TextbookView{}, err
+		}
+	}
+	if newCoverKey != item.CoverKey {
+		if err := a.copyStoredObject(ctx, item.CoverKey, newCoverKey); err != nil {
+			return TextbookView{}, err
+		}
+	}
+	now := time.Now().UTC()
+	archivedAt := time.Time{}
+	if archived {
+		archivedAt = now
+	}
+	oldPdfKey, oldCoverKey := item.PdfKey, item.CoverKey
+	if err := a.Store.SetTextbookArchive(ctx, item.ID, newPdfKey, newCoverKey, archivedAt); err != nil {
+		return TextbookView{}, err
+	}
+	item.PdfKey, item.CoverKey, item.ArchivedAt = newPdfKey, newCoverKey, archivedAt
+	if oldPdfKey != newPdfKey {
+		a.removeStoredFileIfUnused(ctx, oldPdfKey)
+	}
+	if oldCoverKey != newCoverKey {
+		a.removeCoverIfUnused(ctx, oldCoverKey)
+	}
+	a.purgeCDN(ctx, newPdfKey, newCoverKey)
+	action := "textbook_archive"
+	if !archived {
+		action = "textbook_restore"
+	}
+	_ = a.Store.AddAudit(ctx, actor, action, "textbook", item.ID, "{}", now)
+	return a.textbookViewForAdmin(ctx, item), nil
+}
+
+// textbookAreaKeys derives the published or archived object keys for a
+// textbook from its content hash. Legacy keys without a hash stay in place.
+func textbookAreaKeys(item sqlite.Textbook, archived bool) (string, string, error) {
+	pdfKey, coverKey := item.PdfKey, item.CoverKey
+	if pdfKey != "" {
+		if hash := objectHashFromKey(pdfKey); hash != "" {
+			if archived {
+				pdfKey = archivedObjectKey("textbook", fileFormatPDF, hash)
+			} else {
+				pdfKey = publishedObjectKey("textbook", fileFormatPDF, hash)
+			}
+		}
+	}
+	if coverKey != "" {
+		if hash := objectHashFromKey(coverKey); hash != "" {
+			if archived {
+				coverKey = archivedTextbookCoverKey(hash)
+			} else {
+				coverKey = textbookCoverKey(hash)
+			}
+		}
+	}
+	return pdfKey, coverKey, nil
+}
+
+// copyStoredObject copies a COS object so the source can be removed once no row
+// references it any more.
+func (a *App) copyStoredObject(ctx context.Context, src, dst string) error {
+	if src == "" || src == dst {
+		return nil
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		return err
+	}
+	if err := client.CopyObject(ctx, src, dst); err != nil {
+		a.Logger.Error("copy stored object failed", "error", err, "source", src, "destination", dst)
+		return Err("storage_error", "移动存储文件失败", http.StatusBadGateway)
+	}
+	return nil
 }
 
 // purgeCDN invalidates cached copies of the given object keys. It is
@@ -363,12 +458,24 @@ func (a *App) UploadTextbookCover(ctx context.Context, id string, data []byte, a
 	return textbookView(item), nil
 }
 
-// TextbookResourceURL returns a temporary signed CDN URL for a textbook asset.
-// kind is "pdf" or "cover".
+// TextbookResourceURL returns a temporary signed CDN URL for a published
+// textbook asset. kind is "pdf" or "cover".
 func (a *App) TextbookResourceURL(ctx context.Context, id, kind string, ttl time.Duration) (TextbookResourceView, error) {
+	return a.textbookResourceURL(ctx, id, kind, ttl, false)
+}
+
+// TextbookResourceURLForAdmin also serves archived textbooks in the console.
+func (a *App) TextbookResourceURLForAdmin(ctx context.Context, id, kind string, ttl time.Duration) (TextbookResourceView, error) {
+	return a.textbookResourceURL(ctx, id, kind, ttl, true)
+}
+
+func (a *App) textbookResourceURL(ctx context.Context, id, kind string, ttl time.Duration, allowArchived bool) (TextbookResourceView, error) {
 	item, err := a.requireTextbook(ctx, id)
 	if err != nil {
 		return TextbookResourceView{}, err
+	}
+	if !allowArchived && !item.ArchivedAt.IsZero() {
+		return TextbookResourceView{}, ErrNotFound
 	}
 	var key string
 	switch strings.TrimSpace(kind) {

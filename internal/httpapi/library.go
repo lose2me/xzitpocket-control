@@ -18,7 +18,7 @@ func (s *Server) questionBanks(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var err error
 	if admin {
-		items, total, err = s.App.ListQuestionBanks(r.Context(), limit, offset, "active", r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+		items, total, err = s.App.ListQuestionBanks(r.Context(), limit, offset, "active", false, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	} else {
 		items, total, err = s.App.ListQuestionBanksForUser(r.Context(), limit, offset, p.User.ID)
 	}
@@ -159,7 +159,8 @@ func (s *Server) adminQuestionBanks(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, offset := queryPage(r)
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	items, total, err := s.App.ListQuestionBanks(r.Context(), limit, offset, status, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+	archived := r.URL.Query().Get("archived") == "1"
+	items, total, err := s.App.ListQuestionBanks(r.Context(), limit, offset, status, archived, r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -225,6 +226,27 @@ func (s *Server) adminQuestionBankDelete(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (s *Server) adminQuestionBankArchive(w http.ResponseWriter, r *http.Request, id string) {
+	s.setQuestionBankArchived(w, r, id, true)
+}
+
+func (s *Server) adminQuestionBankRestore(w http.ResponseWriter, r *http.Request, id string) {
+	s.setQuestionBankArchived(w, r, id, false)
+}
+
+func (s *Server) setQuestionBankArchived(w http.ResponseWriter, r *http.Request, id string, archived bool) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	out, err := s.App.SetQuestionBankArchived(r.Context(), id, archived, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) adminQuestionBankStatus(w http.ResponseWriter, r *http.Request, id string) {

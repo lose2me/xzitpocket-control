@@ -32,7 +32,7 @@ func questionBankOrderBy(sort, order string) string {
 	return column + " " + direction + ", b.id"
 }
 
-func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status, sort, order string) ([]QuestionBankSummary, error) {
+func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status string, archived bool, sort, order string) ([]QuestionBankSummary, error) {
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 200 {
@@ -42,12 +42,14 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 		offset = 0
 	}
 	args := []any{}
-	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
-		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id`
+	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at, b.archived_at
+		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id WHERE `
+	clauses := []string{"b.archived_at " + archivedComparison(archived)}
 	if status != "" {
-		query += " WHERE b.status = ?"
+		clauses = append(clauses, "b.status = ?")
 		args = append(args, status)
 	}
+	query += strings.Join(clauses, " AND ")
 	query += " GROUP BY b.id ORDER BY " + questionBankOrderBy(sort, order) + " LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
@@ -59,12 +61,13 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 	for rows.Next() {
 		var item QuestionBankSummary
 		var requiresCDK int
-		var created, updated int64
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
+		var created, updated, archivedAt int64
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated, &archivedAt); err != nil {
 			return nil, err
 		}
 		item.RequiresCDK = requiresCDK != 0
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
+		item.ArchivedAt = optionalFromMillis(archivedAt)
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -79,11 +82,18 @@ func (s *Store) ListQuestionBanks(ctx context.Context, limit, offset int, status
 	return result, nil
 }
 
-func (s *Store) CountQuestionBanks(ctx context.Context, status string) (int, error) {
-	query := "SELECT COUNT(*) FROM question_banks"
+func archivedComparison(archived bool) string {
+	if archived {
+		return "> 0"
+	}
+	return "= 0"
+}
+
+func (s *Store) CountQuestionBanks(ctx context.Context, status string, archived bool) (int, error) {
+	query := "SELECT COUNT(*) FROM question_banks WHERE archived_at " + archivedComparison(archived)
 	args := []any{}
 	if status != "" {
-		query += " WHERE status = ?"
+		query += " AND status = ?"
 		args = append(args, status)
 	}
 	var count int
@@ -103,9 +113,9 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	if offset < 0 {
 		offset = 0
 	}
-	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at
+	query := `SELECT b.id, b.name, b.status, b.requires_cdk, b.course_code, COUNT(q.id), b.created_at, b.updated_at, b.archived_at
 		FROM question_banks b LEFT JOIN questions q ON q.bank_id = b.id
-		WHERE b.status = 'active'
+		WHERE b.status = 'active' AND b.archived_at = 0
 		GROUP BY b.id ORDER BY b.name ASC, b.id LIMIT ? OFFSET ?`
 	rows, err := s.DB.QueryContext(ctx, query, limit, offset)
 	if err != nil {
@@ -116,12 +126,13 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 	for rows.Next() {
 		var item QuestionBankSummary
 		var requiresCDK int
-		var created, updated int64
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated); err != nil {
+		var created, updated, archivedAt int64
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &requiresCDK, &item.CourseCode, &item.QuestionCount, &created, &updated, &archivedAt); err != nil {
 			return nil, 0, err
 		}
 		item.RequiresCDK = requiresCDK != 0
 		item.CreatedAt, item.UpdatedAt = fromMillis(created), fromMillis(updated)
+		item.ArchivedAt = optionalFromMillis(archivedAt)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,7 +145,7 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 		return nil, 0, err
 	}
 	var total int
-	countQuery := `SELECT COUNT(*) FROM question_banks b WHERE b.status = 'active'`
+	countQuery := `SELECT COUNT(*) FROM question_banks b WHERE b.status = 'active' AND b.archived_at = 0`
 	if err := s.DB.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -151,7 +162,7 @@ type QuestionBankStatus struct {
 
 func (s *Store) ListInactiveQuestionBanks(ctx context.Context) ([]QuestionBankStatus, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		"SELECT id, status FROM question_banks WHERE status != 'active' ORDER BY id")
+		"SELECT id, status FROM question_banks WHERE status != 'active' OR archived_at > 0 ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -178,15 +189,16 @@ type questionBankQuerier interface {
 
 func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string) (QuestionBank, error) {
 	row := queryer.QueryRowContext(ctx,
-		"SELECT id, name, status, requires_cdk, course_code, created_at, updated_at FROM question_banks WHERE id = ?", id)
+		"SELECT id, name, status, requires_cdk, course_code, created_at, updated_at, archived_at FROM question_banks WHERE id = ?", id)
 	var bank QuestionBank
 	var requiresCDK int
-	var created, updated int64
-	if err := row.Scan(&bank.ID, &bank.Name, &bank.Status, &requiresCDK, &bank.CourseCode, &created, &updated); err != nil {
+	var created, updated, archivedAt int64
+	if err := row.Scan(&bank.ID, &bank.Name, &bank.Status, &requiresCDK, &bank.CourseCode, &created, &updated, &archivedAt); err != nil {
 		return QuestionBank{}, err
 	}
 	bank.RequiresCDK = requiresCDK != 0
 	bank.CreatedAt, bank.UpdatedAt = fromMillis(created), fromMillis(updated)
+	bank.ArchivedAt = optionalFromMillis(archivedAt)
 	bank.Questions = make([]Question, 0)
 	rows, err := queryer.QueryContext(ctx, `SELECT q.id, q.bank_id, q.question_number, q.type, q.title, q.question_text,
 		q.correct_answer, q.sort_order, o.id, o.question_id, o.label, o.text, o.sort_order
@@ -469,6 +481,25 @@ func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, no
 		return errors.New("invalid question bank status")
 	}
 	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET updated_at = CASE WHEN status <> ? THEN MAX(updated_at + 1, ?) ELSE updated_at END, status = ? WHERE id = ?", status, millis(now), status, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetQuestionBankArchive moves a bank in or out of the archive. Its status,
+// questions, CDKs and usage counters are left untouched.
+func (s *Store) SetQuestionBankArchive(ctx context.Context, id string, archivedAt time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE question_banks
+		SET archived_at = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`,
+		optionalMillis(archivedAt), millis(archivedAt), id)
 	if err != nil {
 		return err
 	}

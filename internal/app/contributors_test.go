@@ -101,7 +101,7 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	}
 
 	// Admin lists expose the contributor; app-facing rows must not leak it.
-	items, _, err := a.ListTextbooksForAdmin(ctx, 50, 0, "", "", "")
+	items, _, err := a.ListTextbooksForAdmin(ctx, 50, 0, "", "", "", false)
 	if err != nil || len(items) != 1 || items[0].ContributorStudentID != "" {
 		// The textbook was just unbound, so the admin row has no student ID.
 		t.Fatalf("admin textbooks after unbind = %#v, err = %v", items, err)
@@ -111,7 +111,7 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	}
 	assertUserStats(t, store, "usr-c1", 1, 3)
 	assertUserStats(t, store, "usr-c2", 1, 2)
-	items, _, err = a.ListTextbooksForAdmin(ctx, 50, 0, "", "", "")
+	items, _, err = a.ListTextbooksForAdmin(ctx, 50, 0, "", "", "", false)
 	if err != nil || len(items) != 1 || items[0].ContributorStudentID != "2023000002" {
 		t.Fatalf("admin textbooks = %#v, err = %v", items, err)
 	}

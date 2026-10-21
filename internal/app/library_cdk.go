@@ -217,7 +217,7 @@ func (a *App) GetQuestionBankForUser(ctx context.Context, id, userID string) (Qu
 	if err != nil {
 		return QuestionBankResponse{}, err
 	}
-	if bank.Status != "active" {
+	if bank.Status != "active" || !bank.ArchivedAt.IsZero() {
 		return QuestionBankResponse{}, ErrNotFound
 	}
 	if bank.RequiresCDK {
@@ -250,7 +250,7 @@ func (a *App) ListQuestionBanksForUser(ctx context.Context, limit, offset int, u
 		if codes == nil {
 			codes = []string{}
 		}
-		result = append(result, QuestionBankSummaryView{ID: item.ID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
+		result = append(result, QuestionBankSummaryView{ID: item.ID, Name: item.Name, Status: item.Status, RequiresCDK: item.RequiresCDK, CourseCode: item.CourseCode, CourseCodes: codes, QuestionCount: item.QuestionCount, Archived: !item.ArchivedAt.IsZero(), CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt)})
 	}
 	return result, total, nil
 }
