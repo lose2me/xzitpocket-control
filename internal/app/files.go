@@ -13,10 +13,10 @@ const (
 	fileFormatDOCX = "docx"
 	fileFormatDOC  = "doc"
 
-	booksSubmissionsPrefix  = "books/submissions/"
-	booksAchievedPrefix     = "books/achieved/"
-	papersSubmissionsPrefix = "papers/submissions/"
-	papersAchievedPrefix    = "papers/achieved/"
+	booksSubmissionsPrefix  = "submissions/books/"
+	booksAchievedPrefix     = "achieved/books/"
+	papersSubmissionsPrefix = "submissions/papers/"
+	papersAchievedPrefix    = "achieved/papers/"
 )
 
 // normalizeMD5 validates a lowercase or uppercase 32-character hex MD5.
