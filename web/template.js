@@ -228,13 +228,19 @@ export const template = `
                 <v-spacer />
                 <v-btn v-if="canWrite('resources')" color="primary" prepend-icon="mdi-cloud-upload-outline" :loading="uploading" :disabled="uploading" @click="uploadResources">上传</v-btn>
               </div>
+              <div v-if="resourceContributorEditingId" id="resource-contributor-form" class="d-flex align-center flex-wrap ga-3 mt-4">
+                <span class="text-body-2 text-medium-emphasis">绑定贡献者 · {{ resourceContributorName }}</span>
+                <v-text-field v-model="resourceContributorStudentID" label="贡献者学号（留空解除绑定）" variant="outlined" density="compact" hide-details clearable style="max-width: 280px; min-width: 220px;" />
+                <v-btn color="primary" :loading="loading" @click="saveResourceContributor">保存</v-btn>
+                <v-btn variant="text" @click="cancelResourceContributor">取消</v-btn>
+              </div>
               <v-divider class="my-4" />
               <v-data-table :headers="courseResourceHeaders" :items="courseResources" item-value="id" :items-per-page="-1" hide-default-footer density="comfortable" class="admin-table" no-data-text="该课程暂无试卷">
                 <template #item.name="{ item }"><span class="table-ellipsis" :title="valueOrDash(rawItem(item).name)">{{ valueOrDash(rawItem(item).name) }}</span></template>
                 <template #item.contributor_student_id="{ item }"><span class="mono">{{ rawItem(item).contributor_student_id || '未绑定' }}</span></template>
                 <template #item.download_count="{ item }"><span>{{ rawItem(item).download_count || 0 }}</span></template>
                 <template #item.created_at="{ item }"><span class="text-medium-emphasis text-no-wrap">{{ valueOrDash(rawItem(item).created_at) }}</span></template>
-                <template #item.actions="{ item }"><div class="table-actions"><v-btn v-if="rawItem(item).has_pdf" size="small" variant="text" color="secondary" prepend-icon="mdi-download" @click="downloadResource(rawItem(item))">下载</v-btn><v-btn v-if="canWrite('resources')" size="small" variant="text" color="primary" prepend-icon="mdi-account-key-outline" @click="bindResourceContributor(rawItem(item))">绑定</v-btn><v-btn v-if="canWrite('resources')" size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="deleteResource(rawItem(item))">删除</v-btn></div></template>
+                <template #item.actions="{ item }"><div class="table-actions"><v-btn v-if="rawItem(item).has_pdf" size="small" variant="text" color="secondary" prepend-icon="mdi-download" @click="downloadResource(rawItem(item))">下载</v-btn><v-btn v-if="canWrite('resources')" size="small" variant="text" color="primary" prepend-icon="mdi-account-key-outline" @click="openResourceContributor(rawItem(item))">绑定</v-btn><v-btn v-if="canWrite('resources')" size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="deleteResource(rawItem(item))">删除</v-btn></div></template>
               </v-data-table>
             </v-card-text>
           </v-card>

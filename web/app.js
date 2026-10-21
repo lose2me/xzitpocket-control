@@ -319,6 +319,9 @@ import { template } from './template.js';
       const resourceDialog = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
+      const resourceContributorEditingId = ref('');
+      const resourceContributorStudentID = ref('');
+      const resourceContributorName = ref('');
       const resourceFiles = ref([]);
       const uploading = ref(false);
       const uploadProgress = ref(0);
@@ -1116,6 +1119,7 @@ import { template } from './template.js';
         const item = rawItem(row);
         resourceCourse.value = { code: item.code || '', name: item.name || '' };
         resourceFiles.value = [];
+        cancelResourceContributor();
         await loadCourseResources();
         resourceDialog.value = true;
       });
@@ -1160,16 +1164,32 @@ import { template } from './template.js';
         await loadCourseResources();
         await loadCourses();
       });
-      const bindResourceContributor = (row) => call(async () => {
-        const item = rawItem(row);
-        const value = window.prompt('输入贡献者学号（留空解除绑定）', item.contributor_student_id || '');
-        if (value === null) return;
-        const studentId = String(value).trim();
-        await api('/api/v1/admin/resources/' + encodeURIComponent(item.id) + '/contributor', {
+      const cancelResourceContributor = () => {
+        resourceContributorEditingId.value = '';
+        resourceContributorStudentID.value = '';
+        resourceContributorName.value = '';
+      };
+      const openResourceContributor = (item) => {
+        resourceContributorEditingId.value = item.id;
+        resourceContributorStudentID.value = item.contributor_student_id || '';
+        resourceContributorName.value = item.name || '';
+        nextTick(() => {
+          const el = document.getElementById('resource-contributor-form');
+          if (el && el.scrollIntoView) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+      };
+      const saveResourceContributor = () => call(async () => {
+        const id = resourceContributorEditingId.value;
+        if (!id) return;
+        const studentId = String(resourceContributorStudentID.value || '').trim();
+        await api('/api/v1/admin/resources/' + encodeURIComponent(id) + '/contributor', {
           method: 'POST',
           body: JSON.stringify({ student_id: studentId }),
         });
         notify(studentId ? '已绑定贡献者学号' : '已解除贡献者绑定');
+        cancelResourceContributor();
         await loadCourseResources();
         await loadCourses();
       });
@@ -1856,7 +1876,7 @@ import { template } from './template.js';
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
-        resourceDialog, resourceCourse, courseResources, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
+        resourceDialog, resourceCourse, courseResources, resourceContributorEditingId, resourceContributorStudentID, resourceContributorName, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
@@ -1865,7 +1885,7 @@ import { template } from './template.js';
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, bindTextbookContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook,
-        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, bindResourceContributor, onTextbookDrop,
+        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, openResourceContributor, saveResourceContributor, cancelResourceContributor, onTextbookDrop,
         loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
         admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey
       };
