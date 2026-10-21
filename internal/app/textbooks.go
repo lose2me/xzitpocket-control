@@ -220,6 +220,11 @@ func (a *App) DeleteTextbookForAdmin(ctx context.Context, id, actor string) erro
 		return err
 	}
 	a.removeTextbookAssets(ctx, item)
+	if item.ContributorUserID != "" {
+		if err := a.Store.AdjustUserContribution(ctx, item.ContributorUserID, -1); err != nil {
+			a.Logger.Warn("release textbook contribution failed", "error", err, "textbook", item.ID, "user", item.ContributorUserID)
+		}
+	}
 	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", item.ID, "{}", time.Now().UTC())
 }
 

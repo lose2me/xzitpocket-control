@@ -117,6 +117,24 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	if err != nil || len(uploadItems) != 1 || uploadItems[0].ContributorStudentID != "" {
 		t.Fatalf("upload textbooks = %#v, err = %v", uploadItems, err)
 	}
+
+	// Removing published content releases the contribution credit. Historical
+	// downloads stay on the contributor: deleting content must not erase stats.
+	if got := contributionCount(t, store, "usr-c1"); got != 1 {
+		t.Fatalf("usr-c1 contributions before delete = %d, want 1", got)
+	}
+	if err := a.DeleteTextbookForAdmin(ctx, textbook.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if got := contributionCount(t, store, "usr-c1"); got != 0 {
+		t.Fatalf("usr-c1 contributions after delete = %d, want 0", got)
+	}
+	if err := a.DeleteResourceForAdmin(ctx, resource.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if got := contributionCount(t, store, "usr-c2"); got != 0 {
+		t.Fatalf("usr-c2 contributions after delete = %d, want 0", got)
+	}
 }
 
 func contributionCount(t *testing.T, store *sqlite.Store, userID string) int64 {

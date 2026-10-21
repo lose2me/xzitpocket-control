@@ -174,6 +174,11 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 		return err
 	}
 	a.removeResourceAssets(ctx, item)
+	if item.ContributorUserID != "" {
+		if err := a.Store.AdjustUserContribution(ctx, item.ContributorUserID, -1); err != nil {
+			a.Logger.Warn("release resource contribution failed", "error", err, "resource", item.ID, "user", item.ContributorUserID)
+		}
+	}
 	return a.Store.AddAudit(ctx, actor, "resource_delete", "resource", item.ID, "{}", time.Now().UTC())
 }
 
