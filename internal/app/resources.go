@@ -143,7 +143,7 @@ func (a *App) UploadCourseResources(ctx context.Context, courseCode string, uplo
 			}
 			return nil, err
 		}
-		key := achievedObjectKey("resource", fileFormatPDF, md5Hex(upload.Data))
+		key := publishedObjectKey("resource", fileFormatPDF, md5Hex(upload.Data))
 		if err := client.PutObject(ctx, key, "application/pdf", upload.Data); err != nil {
 			a.Logger.Error("upload resource pdf failed", "error", err, "resource", item.ID)
 			_ = a.Store.DeleteResource(ctx, item.ID)
@@ -175,9 +175,7 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 	}
 	a.removeResourceAssets(ctx, item)
 	if item.ContributorUserID != "" {
-		if err := a.Store.AdjustUserContribution(ctx, item.ContributorUserID, -1); err != nil {
-			a.Logger.Warn("release resource contribution failed", "error", err, "resource", item.ID, "user", item.ContributorUserID)
-		}
+		a.transferAttribution(ctx, item.ContributorUserID, "", item.DownloadCount)
 	}
 	return a.Store.AddAudit(ctx, actor, "resource_delete", "resource", item.ID, "{}", time.Now().UTC())
 }

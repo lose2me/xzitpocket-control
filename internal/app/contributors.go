@@ -36,9 +36,10 @@ func (a *App) resolveContributor(ctx context.Context, studentID string) (userID,
 	return identity.UserID, identity.StudentAlias, nil
 }
 
-// transferContribution moves one contribution credit between accounts. It is
-// best-effort: a counter failure must not undo an attribution change.
-func (a *App) transferContribution(ctx context.Context, oldUserID, newUserID string) {
+// transferAttribution moves one published resource and its total download
+// count between accounts. It is best-effort: a counter failure must not undo
+// an attribution change.
+func (a *App) transferAttribution(ctx context.Context, oldUserID, newUserID string, downloads int64) {
 	if oldUserID == newUserID {
 		return
 	}
@@ -46,10 +47,16 @@ func (a *App) transferContribution(ctx context.Context, oldUserID, newUserID str
 		if err := a.Store.AdjustUserContribution(ctx, oldUserID, -1); err != nil {
 			a.Logger.Warn("decrement contributor count failed", "error", err, "user", oldUserID)
 		}
+		if err := a.Store.AdjustUserDownloads(ctx, oldUserID, -downloads); err != nil {
+			a.Logger.Warn("decrement contributor downloads failed", "error", err, "user", oldUserID)
+		}
 	}
 	if newUserID != "" {
 		if err := a.Store.AdjustUserContribution(ctx, newUserID, 1); err != nil {
 			a.Logger.Warn("increment contributor count failed", "error", err, "user", newUserID)
+		}
+		if err := a.Store.AdjustUserDownloads(ctx, newUserID, downloads); err != nil {
+			a.Logger.Warn("increment contributor downloads failed", "error", err, "user", newUserID)
 		}
 	}
 }
@@ -77,7 +84,7 @@ func (a *App) BindTextbookContributor(ctx context.Context, id, studentID, actor 
 		}
 		return TextbookView{}, err
 	}
-	a.transferContribution(ctx, oldUserID, newUserID)
+	a.transferAttribution(ctx, oldUserID, newUserID, item.DownloadCount)
 	item.ContributorUserID = newUserID
 	now := time.Now().UTC()
 	_ = a.Store.AddAudit(ctx, actor, "textbook_contributor_bind", "textbook", item.ID,
@@ -110,7 +117,7 @@ func (a *App) BindResourceContributor(ctx context.Context, id, studentID, actor 
 		}
 		return ResourceView{}, err
 	}
-	a.transferContribution(ctx, oldUserID, newUserID)
+	a.transferAttribution(ctx, oldUserID, newUserID, item.DownloadCount)
 	item.ContributorUserID = newUserID
 	now := time.Now().UTC()
 	_ = a.Store.AddAudit(ctx, actor, "resource_contributor_bind", "resource", item.ID,

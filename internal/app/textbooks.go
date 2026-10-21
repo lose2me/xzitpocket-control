@@ -221,9 +221,7 @@ func (a *App) DeleteTextbookForAdmin(ctx context.Context, id, actor string) erro
 	}
 	a.removeTextbookAssets(ctx, item)
 	if item.ContributorUserID != "" {
-		if err := a.Store.AdjustUserContribution(ctx, item.ContributorUserID, -1); err != nil {
-			a.Logger.Warn("release textbook contribution failed", "error", err, "textbook", item.ID, "user", item.ContributorUserID)
-		}
+		a.transferAttribution(ctx, item.ContributorUserID, "", item.DownloadCount)
 	}
 	return a.Store.AddAudit(ctx, actor, "textbook_delete", "textbook", item.ID, "{}", time.Now().UTC())
 }
@@ -295,7 +293,7 @@ func (a *App) UploadTextbookPdf(ctx context.Context, id string, data []byte, act
 		return TextbookView{}, err
 	}
 	hash := md5Hex(data)
-	key := achievedObjectKey("textbook", fileFormatPDF, hash)
+	key := publishedObjectKey("textbook", fileFormatPDF, hash)
 	oldPdfKey := item.PdfKey
 	oldCoverKey := item.CoverKey
 	if err := client.PutObject(ctx, key, "application/pdf", data); err != nil {

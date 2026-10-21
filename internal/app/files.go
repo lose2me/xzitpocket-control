@@ -14,9 +14,11 @@ const (
 	fileFormatDOC  = "doc"
 
 	booksSubmissionsPrefix  = "submissions/books/"
-	booksAchievedPrefix     = "achieved/books/"
 	papersSubmissionsPrefix = "submissions/papers/"
-	papersAchievedPrefix    = "achieved/papers/"
+	booksPublishedPrefix    = "published/books/"
+	papersPublishedPrefix   = "published/papers/"
+	booksArchivedPrefix     = "achieved/books/"
+	papersArchivedPrefix    = "achieved/papers/"
 )
 
 // normalizeMD5 validates a lowercase or uppercase 32-character hex MD5.
@@ -49,18 +51,31 @@ func submissionObjectKey(kind, format, hash string) string {
 	return papersSubmissionsPrefix + hash + "." + format
 }
 
-// achievedObjectKey is the published location for approved content.
-func achievedObjectKey(kind, format, hash string) string {
+// publishedObjectKey is the live location for approved content.
+func publishedObjectKey(kind, format, hash string) string {
 	if kind == "textbook" {
-		return booksAchievedPrefix + hash + "." + fileFormatPDF
+		return booksPublishedPrefix + hash + "." + fileFormatPDF
 	}
-	return papersAchievedPrefix + hash + "." + format
+	return papersPublishedPrefix + hash + "." + format
+}
+
+// archivedObjectKey is where archived content waits. Archiving preserves the
+// contributor's counters; only deletion removes them.
+func archivedObjectKey(kind, format, hash string) string {
+	if kind == "textbook" {
+		return booksArchivedPrefix + hash + "." + fileFormatPDF
+	}
+	return papersArchivedPrefix + hash + "." + format
 }
 
 // textbookCoverKey names a cover after its textbook PDF; covers are never
 // hashed separately.
 func textbookCoverKey(hash string) string {
-	return booksAchievedPrefix + hash + ".webp"
+	return booksPublishedPrefix + hash + ".webp"
+}
+
+func archivedTextbookCoverKey(hash string) string {
+	return booksArchivedPrefix + hash + ".webp"
 }
 
 // objectHashFromKey extracts the content hash from a new-style object key.

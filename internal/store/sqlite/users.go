@@ -289,6 +289,26 @@ func (s *Store) AdjustUserContribution(ctx context.Context, userID string, delta
 	return nil
 }
 
+// AdjustUserDownloads moves a content's download total when attribution
+// changes. The counter never drops below zero.
+func (s *Store) AdjustUserDownloads(ctx context.Context, userID string, delta int64) error {
+	if userID == "" || delta == 0 {
+		return nil
+	}
+	result, err := s.DB.ExecContext(ctx,
+		"UPDATE users SET download_count = MAX(0, download_count + ?) WHERE id = ?",
+		delta, userID)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // IncrementUserDownloads counts one download of a user's contributed content.
 func (s *Store) IncrementUserDownloads(ctx context.Context, userID string) error {
 	result, err := s.DB.ExecContext(ctx, "UPDATE users SET download_count = download_count + 1 WHERE id = ?", userID)

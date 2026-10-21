@@ -449,7 +449,7 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		if err != nil {
 			return nil, err
 		}
-		achieved := achievedObjectKey(kind, format, hash)
+		achieved := publishedObjectKey(kind, format, hash)
 		if achieved != item.PdfKey {
 			if err := client.CopyObject(ctx, item.PdfKey, achieved); err != nil {
 				a.Logger.Error("copy submission to achieved failed", "error", err, "submission", item.ID)
@@ -502,7 +502,7 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 				a.Logger.Warn("link contribution failed", "error", err, "textbook", textbook.ID)
 			} else {
 				if oldContributor != item.SubmittedByUserID {
-					a.transferContribution(ctx, oldContributor, item.SubmittedByUserID)
+					a.transferAttribution(ctx, oldContributor, item.SubmittedByUserID, textbook.DownloadCount)
 				}
 				textbook.ContributorUserID = item.SubmittedByUserID
 			}

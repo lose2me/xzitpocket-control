@@ -21,7 +21,7 @@ func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordTextbookDownload(ctx, item.ID, false)
+	a.RecordTextbookDownload(ctx, item.ID, true)
 	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
@@ -38,7 +38,7 @@ func (a *App) OpenResourceDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordResourceDownload(ctx, item.ID, false)
+	a.RecordResourceDownload(ctx, item.ID, true)
 	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 

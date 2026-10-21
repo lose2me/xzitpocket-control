@@ -54,6 +54,16 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 3; i++ {
+		if err := store.IncrementTextbookDownloads(ctx, textbook.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if err := store.IncrementResourceDownloads(ctx, resource.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	view, err := a.BindTextbookContributor(ctx, textbook.ID, "2023000002", "admin")
 	if err != nil {
@@ -62,9 +72,7 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	if view.ContributorStudentID != "2023000002" || view.ContributorName != "张三" {
 		t.Fatalf("textbook contributor view = %#v", view)
 	}
-	if got := contributionCount(t, store, "usr-c1"); got != 1 {
-		t.Fatalf("usr-c1 contributions = %d, want 1", got)
-	}
+	assertUserStats(t, store, "usr-c1", 1, 3)
 
 	resourceView, err := a.BindResourceContributor(ctx, resource.ID, "2023000003", "admin")
 	if err != nil {
@@ -73,28 +81,20 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	if resourceView.ContributorStudentID != "2023000003" || resourceView.ContributorName != "李四" {
 		t.Fatalf("resource contributor view = %#v", resourceView)
 	}
-	if got := contributionCount(t, store, "usr-c2"); got != 1 {
-		t.Fatalf("usr-c2 contributions = %d, want 1", got)
-	}
+	assertUserStats(t, store, "usr-c2", 1, 2)
 
-	// Moving a contribution from one student to another keeps the total stable.
+	// Moving content transfers both the contribution and its download total.
 	if _, err := a.BindTextbookContributor(ctx, textbook.ID, "2023000003", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contributionCount(t, store, "usr-c1"); got != 0 {
-		t.Fatalf("usr-c1 contributions after transfer = %d, want 0", got)
-	}
-	if got := contributionCount(t, store, "usr-c2"); got != 2 {
-		t.Fatalf("usr-c2 contributions after transfer = %d, want 2", got)
-	}
+	assertUserStats(t, store, "usr-c1", 0, 0)
+	assertUserStats(t, store, "usr-c2", 2, 5)
 
-	// Leaving the student ID empty unbinds and removes the credit.
+	// Unbinding removes the content and its downloads from the student.
 	if _, err := a.BindTextbookContributor(ctx, textbook.ID, "", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contributionCount(t, store, "usr-c2"); got != 1 {
-		t.Fatalf("usr-c2 contributions after unbind = %d, want 1", got)
-	}
+	assertUserStats(t, store, "usr-c2", 1, 2)
 
 	if _, err := a.BindTextbookContributor(ctx, textbook.ID, "9999999999", "admin"); err == nil {
 		t.Fatal("unknown student id should be rejected")
@@ -109,6 +109,8 @@ func TestBindPublishedContentContributor(t *testing.T) {
 	if _, err := a.BindTextbookContributor(ctx, textbook.ID, "2023000002", "admin"); err != nil {
 		t.Fatal(err)
 	}
+	assertUserStats(t, store, "usr-c1", 1, 3)
+	assertUserStats(t, store, "usr-c2", 1, 2)
 	items, _, err = a.ListTextbooksForAdmin(ctx, 50, 0, "", "", "")
 	if err != nil || len(items) != 1 || items[0].ContributorStudentID != "2023000002" {
 		t.Fatalf("admin textbooks = %#v, err = %v", items, err)
@@ -118,30 +120,24 @@ func TestBindPublishedContentContributor(t *testing.T) {
 		t.Fatalf("upload textbooks = %#v, err = %v", uploadItems, err)
 	}
 
-	// Removing published content releases the contribution credit. Historical
-	// downloads stay on the contributor: deleting content must not erase stats.
-	if got := contributionCount(t, store, "usr-c1"); got != 1 {
-		t.Fatalf("usr-c1 contributions before delete = %d, want 1", got)
-	}
+	// Deleting content removes its contribution and download total.
 	if err := a.DeleteTextbookForAdmin(ctx, textbook.ID, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contributionCount(t, store, "usr-c1"); got != 0 {
-		t.Fatalf("usr-c1 contributions after delete = %d, want 0", got)
-	}
+	assertUserStats(t, store, "usr-c1", 0, 0)
 	if err := a.DeleteResourceForAdmin(ctx, resource.ID, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contributionCount(t, store, "usr-c2"); got != 0 {
-		t.Fatalf("usr-c2 contributions after delete = %d, want 0", got)
-	}
+	assertUserStats(t, store, "usr-c2", 0, 0)
 }
 
-func contributionCount(t *testing.T, store *sqlite.Store, userID string) int64 {
+func assertUserStats(t *testing.T, store *sqlite.Store, userID string, contribution, downloads int64) {
 	t.Helper()
-	contribution, _, err := store.GetUserStats(context.Background(), userID)
+	gotContribution, gotDownloads, err := store.GetUserStats(context.Background(), userID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return contribution
+	if gotContribution != contribution || gotDownloads != downloads {
+		t.Fatalf("%s stats = %d/%d, want %d/%d", userID, gotContribution, gotDownloads, contribution, downloads)
+	}
 }

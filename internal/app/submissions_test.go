@@ -189,7 +189,7 @@ func TestApprovePdfSubmissionMovesToAchieved(t *testing.T) {
 	if !ok {
 		t.Fatalf("approve = %#v", out)
 	}
-	wantKey := papersAchievedPrefix + hash + ".pdf"
+	wantKey := papersPublishedPrefix + hash + ".pdf"
 	stored, err := store.GetResource(ctx, view.ID)
 	if err != nil {
 		t.Fatal(err)
