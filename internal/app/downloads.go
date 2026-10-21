@@ -147,8 +147,8 @@ func (a *App) GetUploadStats(ctx context.Context, p SessionPrincipal) (UploadSta
 }
 
 // RecordTextbookDownload is best-effort: a failed counter update must not
-// break the download. App downloads also count toward the contributor's
-// profile; admin downloads only update the textbook total.
+// break the download. Every counted download, app or admin, also counts toward
+// the contributor's profile.
 func (a *App) RecordTextbookDownload(ctx context.Context, id string, includeContributor bool) {
 	if err := a.Store.IncrementTextbookDownloads(ctx, id); err != nil {
 		a.Logger.Warn("record textbook download failed", "error", err, "textbook", id)
@@ -167,8 +167,8 @@ func (a *App) RecordTextbookDownload(ctx context.Context, id string, includeCont
 }
 
 // RecordResourceDownload is best-effort: a failed counter update must not
-// break the download. App downloads also count toward the contributor's
-// profile; admin downloads only update the exam total.
+// break the download. Every counted download, app or admin, also counts toward
+// the contributor's profile.
 func (a *App) RecordResourceDownload(ctx context.Context, id string, includeContributor bool) {
 	if err := a.Store.IncrementResourceDownloads(ctx, id); err != nil {
 		a.Logger.Warn("record resource download failed", "error", err, "resource", id)
