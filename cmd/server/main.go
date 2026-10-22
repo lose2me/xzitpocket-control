@@ -150,6 +150,7 @@ func main() {
 	}()
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	application.StartAIAnalysis(sigCtx)
 	<-sigCtx.Done()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

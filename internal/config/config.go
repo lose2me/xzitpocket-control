@@ -45,6 +45,21 @@ type Config struct {
 	MonitorSecretID  string
 	MonitorSecretKey string
 
+	// AIAnalysis configures the DeepSeek-compatible vision model used to
+	// analyse exam PDFs. The API key is never logged.
+	AIAnalysisEnabled bool
+	AIAPIKey          string
+	AIBaseURL         string
+	AIModel           string
+	AIWindows         string
+	AITimezone        string
+	AIPagesPerChunk   int
+	AIRequestTimeout  time.Duration
+	AIMaxAttempts     int
+	AIImageQuality    int
+	AIImageMaxEdge    int
+	AIWorkDir         string
+
 	// Admins are the console administrator accounts configured in .env. The
 	// first entry is the legacy CONTROL_ADMIN_KEY (super admin).
 	Admins []AdminAccount
@@ -106,6 +121,30 @@ func Load() (Config, error) {
 		CDNURLTTL:            durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
 		MonitorSecretID:      configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
 		MonitorSecretKey:     configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
+		AIAPIKey:             strings.TrimSpace(values["CONTROL_AI_API_KEY"]),
+		AIBaseURL:            configValue(values, "CONTROL_AI_BASE_URL", "https://api.deepseek.com/v1"),
+		AIModel:              configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
+		AIWindows:            configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
+		AITimezone:           configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
+		AIPagesPerChunk:      intConfigValue(values, "CONTROL_AI_PAGES_PER_CHUNK", 5),
+		AIRequestTimeout:     durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
+		AIMaxAttempts:        intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
+		AIImageQuality:       intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
+		AIImageMaxEdge:       intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
+		AIWorkDir:            configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
+	}
+	cfg.AIAnalysisEnabled = boolConfigValue(values, "CONTROL_AI_ENABLED", cfg.AIAPIKey != "")
+	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 20 {
+		cfg.AIPagesPerChunk = 5
+	}
+	if cfg.AIMaxAttempts < 1 || cfg.AIMaxAttempts > 10 {
+		cfg.AIMaxAttempts = 3
+	}
+	if cfg.AIImageQuality < 10 || cfg.AIImageQuality > 100 {
+		cfg.AIImageQuality = 80
+	}
+	if cfg.AIImageMaxEdge < 320 || cfg.AIImageMaxEdge > 4096 {
+		cfg.AIImageMaxEdge = 1600
 	}
 	if cfg.EventRetentionDays < 1 {
 		cfg.EventRetentionDays = 90
@@ -435,6 +474,20 @@ func intConfigValue(values map[string]string, key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func boolConfigValue(values map[string]string, key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(values[key]))
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func durationConfigValue(values map[string]string, key string, fallback time.Duration) time.Duration {

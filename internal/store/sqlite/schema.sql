@@ -355,3 +355,32 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
 
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_kind ON resource_submissions(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissions(status, kind, created_at);
+
+-- AI analysis of an exam PDF. One row per resource; the row is also the
+-- resumable job state so a restart can continue from the last finished page.
+-- messages_json keeps the whole paper's conversation (text only) so later
+-- pages are answered in the same context; images for the current page are
+-- rebuilt from the PDF and are not stored here.
+CREATE TABLE IF NOT EXISTS resource_ai_tasks (
+    id TEXT PRIMARY KEY,
+    resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
+    solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
+    precheck_note TEXT NOT NULL DEFAULT '',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    next_page INTEGER NOT NULL DEFAULT 1,
+    total_pages INTEGER NOT NULL DEFAULT 0,
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    markdown TEXT NOT NULL DEFAULT '',
+    output_key TEXT NOT NULL DEFAULT '',
+    output_size INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    started_at INTEGER NOT NULL DEFAULT 0,
+    finished_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_ai_tasks_status ON resource_ai_tasks(status, created_at);

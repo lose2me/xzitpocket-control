@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"xzitpocket-control/internal/ai"
 	"xzitpocket-control/internal/cloud"
 	"xzitpocket-control/internal/config"
 	controlcrypto "xzitpocket-control/internal/crypto"
@@ -53,6 +54,13 @@ type App struct {
 
 	bucketMu    sync.Mutex
 	bucketCache bucketStatsCache
+
+	// AI exam analysis. The model is nil when the feature is disabled.
+	aiModel    *ai.Model
+	aiWindows  []ai.Window
+	aiLocation *time.Location
+	aiCancelMu sync.Mutex
+	aiCancel   map[string]context.CancelFunc
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {
@@ -61,6 +69,9 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 	}
 	a := &App{Cfg: cfg, Store: store, Logger: logger}
 	if err := a.ensureAdmins(context.Background()); err != nil {
+		return nil, err
+	}
+	if err := a.initAIAnalysis(); err != nil {
 		return nil, err
 	}
 	return a, nil

@@ -169,6 +169,11 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 	if err != nil {
 		return err
 	}
+	aiOutputKey := ""
+	if task, taskErr := a.Store.GetAITaskByResource(ctx, item.ID); taskErr == nil {
+		aiOutputKey = task.OutputKey
+		a.cancelAIRequest(task.ID)
+	}
 	if err := a.Store.DeleteResource(ctx, item.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -176,6 +181,13 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 		return err
 	}
 	a.removeResourceAssets(ctx, item)
+	if aiOutputKey != "" {
+		if client, err := a.requireStorage(); err == nil {
+			if err := client.DeleteObject(ctx, aiOutputKey); err != nil {
+				a.Logger.Warn("delete AI analysis output", "error", err, "key", aiOutputKey)
+			}
+		}
+	}
 	if item.ContributorUserID != "" {
 		a.transferAttribution(ctx, item.ContributorUserID, "", item.DownloadCount)
 	}

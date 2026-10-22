@@ -3,6 +3,8 @@ module xzitpocket-control
 go 1.23.0
 
 require (
+	github.com/sashabaranov/go-openai v1.43.0
+	github.com/yuin/goldmark v1.7.13
 	golang.org/x/crypto v0.36.0
 	modernc.org/sqlite v1.38.2
 )

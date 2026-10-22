@@ -50,6 +50,7 @@ var currentSchemaTables = []struct {
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
+	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at"}},
 	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
 
