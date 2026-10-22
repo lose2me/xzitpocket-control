@@ -59,6 +59,7 @@ type Config struct {
 	AIImageQuality    int
 	AIImageMaxEdge    int
 	AIWorkDir         string
+	AIMathJaxDir      string
 
 	// Admins are the console administrator accounts configured in .env. The
 	// first entry is the legacy CONTROL_ADMIN_KEY (super admin).
@@ -132,6 +133,7 @@ func Load() (Config, error) {
 		AIImageQuality:       intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
 		AIImageMaxEdge:       intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
 		AIWorkDir:            configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
+		AIMathJaxDir:         configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
 	}
 	cfg.AIAnalysisEnabled = boolConfigValue(values, "CONTROL_AI_ENABLED", cfg.AIAPIKey != "")
 	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 20 {

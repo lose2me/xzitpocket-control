@@ -112,9 +112,14 @@ func (a *App) initAIAnalysis() error {
 	a.aiWindows = windows
 	a.aiLocation = location
 	a.aiCancel = make(map[string]context.CancelFunc)
-	for _, binary := range []string{"pdftohtml", "cwebp", "weasyprint"} {
+	for _, binary := range []string{"pdftohtml", "cwebp", "weasyprint", "node"} {
 		if _, err := exec.LookPath(binary); err != nil {
-			a.Logger.Warn("AI analysis dependency missing", "binary", binary, "hint", "apt-get install -y poppler-utils webp weasyprint fonts-noto-cjk")
+			a.Logger.Warn("AI analysis dependency missing", "binary", binary, "hint", "apt-get install -y poppler-utils webp weasyprint fonts-noto-cjk nodejs npm")
+		}
+	}
+	if a.Cfg.AIMathJaxDir != "" {
+		if _, err := os.Stat(filepath.Join(a.Cfg.AIMathJaxDir, "render.js")); err != nil {
+			a.Logger.Warn("AI math renderer missing; formulas stay as LaTeX", "dir", a.Cfg.AIMathJaxDir, "hint", "cd ai-math && npm install --omit=dev")
 		}
 	}
 	return nil
@@ -535,7 +540,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	}
 	renderCtx, renderCancel := context.WithTimeout(ctx, 5*time.Minute)
 	document := "# " + resource.Name + " · AI 解析\n\n" + task.Markdown
-	pdf, err := ai.RenderMarkdownPDF(renderCtx, document)
+	pdf, err := ai.RenderMarkdownPDF(renderCtx, document, a.Cfg.AIMathJaxDir)
 	renderCancel()
 	if err != nil {
 		finish("failed", "生成 PDF 失败："+err.Error())

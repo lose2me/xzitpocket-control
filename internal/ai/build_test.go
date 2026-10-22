@@ -68,7 +68,7 @@ func TestRenderMarkdownPDF(t *testing.T) {
 	if !hasBinary("weasyprint") {
 		t.Skip("weasyprint not installed")
 	}
-	pdf, err := RenderMarkdownPDF(context.Background(), "# 标题\n\n### 第 1 题\n\n**答案：** A\n\n**解析：** 因为 $x=1$。")
+	pdf, err := RenderMarkdownPDF(context.Background(), "# 标题\n\n### 第 1 题\n\n**答案：** A\n\n**解析：** 因为 $x=1$。", "")
 	if err != nil {
 		t.Fatal(err)
 	}

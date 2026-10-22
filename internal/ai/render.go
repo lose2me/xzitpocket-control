@@ -46,24 +46,41 @@ th, td { border: 0.3mm solid #999; padding: 1mm 1.5mm; font-size: 10pt; }
 th { background: #f0f0f0; }
 blockquote { margin: 2mm 0; padding-left: 3mm; border-left: 0.8mm solid #ccc; color: #444; }
 hr { border: 0; border-top: 0.3mm solid #ccc; margin: 4mm 0; }
+.math-display { text-align: center; margin: 2.5mm 0; page-break-inside: avoid; }
+.math-display svg { max-width: 100%; }
 `
 
 // RenderMarkdownPDF converts the analysis markdown into a PDF with WeasyPrint.
-func RenderMarkdownPDF(ctx context.Context, markdown string) ([]byte, error) {
+// When mathDir points at the MathJax helper, $...$ and $$...$$ are rendered to
+// SVG; otherwise the raw LaTeX is kept as text.
+func RenderMarkdownPDF(ctx context.Context, markdown, mathDir string) ([]byte, error) {
 	markdown = strings.TrimSpace(markdown)
 	if markdown == "" {
 		return nil, fmt.Errorf("解析结果为空")
 	}
-	var body bytes.Buffer
-	parser := goldmark.New(goldmark.WithExtensions(extension.GFM))
-	if err := parser.Convert([]byte(markdown), &body); err != nil {
-		return nil, fmt.Errorf("markdown 转换失败: %w", err)
+	htmlBody := []byte(nil)
+	if strings.TrimSpace(mathDir) != "" {
+		extracted, exprs := extractMath(markdown)
+		if len(exprs) > 0 {
+			if svgs, err := renderMathSVGs(ctx, mathDir, exprs); err == nil {
+				if body, err := markdownToHTML(extracted); err == nil {
+					htmlBody = injectMath(body, svgs)
+				}
+			}
+		}
+	}
+	if htmlBody == nil {
+		body, err := markdownToHTML(markdown)
+		if err != nil {
+			return nil, err
+		}
+		htmlBody = body
 	}
 	var html bytes.Buffer
 	html.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>")
 	html.WriteString(pdfCSS)
 	html.WriteString("</style></head><body>")
-	html.Write(body.Bytes())
+	html.Write(htmlBody)
 	html.WriteString("</body></html>")
 
 	cmd := exec.CommandContext(ctx, "weasyprint", "-", "-")
@@ -78,4 +95,13 @@ func RenderMarkdownPDF(ctx context.Context, markdown string) ([]byte, error) {
 		return nil, fmt.Errorf("weasyprint 未生成 PDF")
 	}
 	return stdout.Bytes(), nil
+}
+
+func markdownToHTML(markdown string) ([]byte, error) {
+	var body bytes.Buffer
+	parser := goldmark.New(goldmark.WithExtensions(extension.GFM))
+	if err := parser.Convert([]byte(markdown), &body); err != nil {
+		return nil, fmt.Errorf("markdown 转换失败: %w", err)
+	}
+	return body.Bytes(), nil
 }

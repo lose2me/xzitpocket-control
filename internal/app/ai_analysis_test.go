@@ -69,6 +69,10 @@ func TestRunAITaskPipeline(t *testing.T) {
 	a.Cfg.AIPagesPerChunk = 1
 	a.Cfg.AIMaxAttempts = 2
 	a.Cfg.AIRequestTimeout = time.Minute
+	mathDir := filepath.Join("..", "..", "ai-math")
+	if _, err := os.Stat(filepath.Join(mathDir, "node_modules", "mathjax-full")); err == nil {
+		a.Cfg.AIMathJaxDir = mathDir
+	}
 
 	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin"); err != nil {
 		t.Fatal(err)
