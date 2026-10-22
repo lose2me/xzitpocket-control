@@ -325,6 +325,11 @@ import { template } from './template.js';
       const resourceDialog = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
+      const aiTasks = ref([]);
+      const aiTotal = ref(0);
+      const aiSearch = ref('');
+      const aiPreviewDialog = ref(false);
+      const aiPreviewUrl = ref('');
       const contributorDialog = ref(false);
       const contributorKind = ref('');
       const contributorId = ref('');
@@ -426,6 +431,7 @@ import { template } from './template.js';
       const platformChartEl = ref(null);
       const eventChartEl = ref(null);
       const featureChartEl = ref(null);
+      let aiPollTimer = null;
       let chart = null;
       let collegeChart = null;
       let platformChart = null;
@@ -652,6 +658,27 @@ import { template } from './template.js';
         { title: '下载量', key: 'download_count', align: 'center', width: '8%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
+      const aiHeaders = [
+        { title: '试卷', key: 'resource_name', width: '28%' },
+        { title: '状态', key: 'status', align: 'center', width: '11%' },
+        { title: '进度', key: 'progress', align: 'center', width: '16%' },
+        { title: '模型', key: 'model', width: '10%' },
+        { title: '更新时间', key: 'updated_at', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
+      ];
+      const aiStatusLabel = (status) => ({ queued: '排队中', running: '解析中', paused: '已暂停', succeeded: '已完成', failed: '失败', skipped: '不可解答', cancelled: '已取消' }[status] || valueOrDash(status));
+      const aiStatusColor = (status) => ({ queued: 'info', running: 'primary', paused: 'warning', succeeded: 'success', failed: 'error', skipped: 'secondary', cancelled: 'secondary' }[status] || 'secondary');
+      const aiTaskForResource = (resourceId) => (aiTasks.value || []).find(task => task.resource_id === resourceId);
+      const aiActionLabel = (resourceId) => {
+        const task = aiTaskForResource(resourceId);
+        if (!task) return 'AI解析';
+        if (task.status === 'running') return '解析中';
+        if (task.status === 'queued') return '排队中';
+        if (task.status === 'succeeded') return '重新解析';
+        if (task.status === 'paused') return '继续解析';
+        if (task.status === 'failed') return '重试';
+        return 'AI解析';
+      };
       const archivedBankHeaders = [
         { title: '题库 ID', key: 'id', width: '15%' },
         { title: '名称', key: 'name', width: '23%' },
@@ -1169,6 +1196,62 @@ import { template } from './template.js';
         notify(archived ? '教材已归档' : '教材已恢复');
         await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
       });
+      const loadAITasks = async () => {
+        if (!canRead('resources')) return;
+        const out = await api('/api/v1/admin/ai-analyses?limit=100&q=' + encodeURIComponent(aiSearch.value || ''));
+        aiTasks.value = out.items || [];
+        aiTotal.value = out.total || 0;
+      };
+      const enqueueAIResources = (ids) => call(async () => {
+        if (!ids.length) throw new Error('没有可解析的 PDF 试卷');
+        const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify({ resource_ids: ids }) });
+        const created = (out.items || []).length;
+        const failed = out.failed || [];
+        if (failed.length) notify('已加入 ' + created + ' 个任务，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
+        else notify('已加入 ' + created + ' 个 AI 解析任务');
+        await loadAITasks();
+      });
+      const enqueueAIItem = (row) => {
+        const item = rawItem(row);
+        return enqueueAIResources([item.id]);
+      };
+      const enqueueCourseAI = () => {
+        const ids = (courseResources.value || []).filter(item => item.format === 'pdf').map(item => item.id);
+        return enqueueAIResources(ids);
+      };
+      const retryAITask = (row) => call(async () => {
+        const item = rawItem(row);
+        await api('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/retry', { method: 'POST' });
+        notify('已重新加入解析队列');
+        await loadAITasks();
+      });
+      const cancelAITask = (row) => call(async () => {
+        const item = rawItem(row);
+        if (!window.confirm('确定取消这份试卷的 AI 解析吗？')) return;
+        await api('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/cancel', { method: 'POST' });
+        notify('已取消解析');
+        await loadAITasks();
+      });
+      const downloadAITask = (row) => call(async () => {
+        const item = rawItem(row);
+        await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', (item.resource_name || '试卷') + '-AI解析.pdf');
+      });
+      const openAITaskPreview = (row) => call(async () => {
+        const item = rawItem(row);
+        const headers = {};
+        const access = localStorage.getItem('control_admin');
+        if (access) headers.Authorization = 'Bearer ' + access;
+        const response = await fetch('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', { credentials: 'same-origin', headers });
+        if (!response.ok) throw new Error('打开预览失败');
+        if (aiPreviewUrl.value) URL.revokeObjectURL(aiPreviewUrl.value);
+        aiPreviewUrl.value = URL.createObjectURL(await response.blob());
+        aiPreviewDialog.value = true;
+      });
+      const closeAITaskPreview = () => {
+        if (aiPreviewUrl.value) URL.revokeObjectURL(aiPreviewUrl.value);
+        aiPreviewUrl.value = '';
+        aiPreviewDialog.value = false;
+      };
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
         const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code));
@@ -1562,7 +1645,7 @@ import { template } from './template.js';
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
           else if (view.value === 'textbooks') await Promise.all([loadTextbookSubmissions(), loadTextbooks(), loadArchivedTextbooks()]);
-          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources()]);
+          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources(), loadAITasks()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
           else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
@@ -1901,7 +1984,7 @@ import { template } from './template.js';
       const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开题库', logout: '退出' }[type] || valueOrDash(type));
-      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', textbook_archive: '归档教材', textbook_restore: '恢复教材', resource_upload: '上传试卷', resource_delete: '删除试卷', resource_archive: '归档试卷', resource_restore: '恢复试卷', question_bank_archive: '归档题库', question_bank_restore: '恢复题库', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程' }[action] || valueOrDash(action));
+      const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', textbook_archive: '归档教材', textbook_restore: '恢复教材', resource_upload: '上传试卷', resource_delete: '删除试卷', resource_archive: '归档试卷', resource_restore: '恢复试卷', question_bank_archive: '归档题库', question_bank_restore: '恢复题库', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程', ai_analysis_enqueue: '加入 AI 解析', ai_analysis_retry: '重试 AI 解析', ai_analysis_cancel: '取消 AI 解析' }[action] || valueOrDash(action));
       const riskStatusColor = (risk) => risk.acknowledged_at ? 'success' : 'warning';
       const handleResize = () => { if (chart) chart.resize(); if (platformChart) platformChart.resize(); if (collegeChart) collegeChart.resize(); if (eventChart) eventChart.resize(); if (featureChart) featureChart.resize(); if (cdnChart) cdnChart.resize(); if (hostChart) hostChart.resize(); if (bucketChart) bucketChart.resize(); };
       onMounted(() => {
@@ -1912,8 +1995,11 @@ import { template } from './template.js';
         window.addEventListener('resize', handleResize);
         window.addEventListener('popstate', handlePopState);
         statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
+        aiPollTimer = setInterval(() => {
+          if (view.value === 'resources' && (aiTasks.value || []).some(task => task.status === 'running' || task.status === 'queued')) loadAITasks();
+        }, 5000);
       });
-      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (bucketPollTimer) clearTimeout(bucketPollTimer); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); });
+      onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (bucketPollTimer) clearTimeout(bucketPollTimer); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); if (aiPollTimer) clearInterval(aiPollTimer); });
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
@@ -1922,6 +2008,7 @@ import { template } from './template.js';
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiPreviewDialog, aiPreviewUrl, aiStatusLabel, aiStatusColor, aiActionLabel, loadAITasks, enqueueAIItem, enqueueCourseAI, retryAITask, cancelAITask, downloadAITask, openAITaskPreview, closeAITaskPreview,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
