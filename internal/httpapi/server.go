@@ -367,6 +367,18 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminResourceDownload(w, r, segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "contributor", "admin", "resources"):
 		s.adminResourceContributor(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && path == "/admin/ai-analyses":
+		s.adminAITasks(w, r)
+	case r.Method == http.MethodPost && path == "/admin/ai-analyses":
+		s.adminAIEnqueue(w, r)
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "ai-analyses"):
+		s.adminAITaskDownload(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "retry", "admin", "ai-analyses"):
+		s.adminAITaskRetry(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "cancel", "admin", "ai-analyses"):
+		s.adminAITaskCancel(w, r, segment(path, 2))
+	case r.Method == http.MethodGet && pathMatchesID(path, "admin", "ai-analyses"):
+		s.adminAITaskDetail(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/courses":
 		s.adminCourses(w, r)
 	case r.Method == http.MethodPost && path == "/admin/courses":
@@ -622,7 +634,8 @@ func adminPageFor(path, method string) (string, bool) {
 		return "textbooks", write
 	case path == "/admin/textbook-submissions" || strings.HasPrefix(path, "/admin/textbook-submissions/"):
 		return "textbooks", write
-	case path == "/admin/resources" || strings.HasPrefix(path, "/admin/resources/"):
+	case path == "/admin/resources" || strings.HasPrefix(path, "/admin/resources/") ||
+		path == "/admin/ai-analyses" || strings.HasPrefix(path, "/admin/ai-analyses/"):
 		return "resources", write
 	case path == "/admin/resource-submissions" || strings.HasPrefix(path, "/admin/resource-submissions/"):
 		return "resources", write
