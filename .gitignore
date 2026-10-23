@@ -6,3 +6,4 @@ data/*
 control
 *.exe
 dist/
+build/
