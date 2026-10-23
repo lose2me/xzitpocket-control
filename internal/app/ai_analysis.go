@@ -42,6 +42,7 @@ type AITaskView struct {
 	Error        string `json:"error,omitempty"`
 	Model        string `json:"model,omitempty"`
 	OutputSize   int64  `json:"output_size,omitempty"`
+	SinglePass   bool   `json:"single_pass"`
 	HasOutput    bool   `json:"has_output"`
 	Archived     bool   `json:"archived"`
 	CreatedAt    string `json:"created_at"`
@@ -50,7 +51,7 @@ type AITaskView struct {
 	FinishedAt   string `json:"finished_at,omitempty"`
 }
 
-func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool) AITaskView {
+func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) AITaskView {
 	progress := 0
 	if row.TotalPages > 0 {
 		done := row.NextPage - 1
@@ -71,7 +72,8 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool) AITaskView {
 		PrecheckNote: row.PrecheckNote, Attempt: row.Attempt, NextPage: row.NextPage,
 		TotalPages: row.TotalPages, Progress: progress, Error: row.Error, Model: row.Model,
 		OutputSize: row.OutputSize, HasOutput: row.OutputKey != "", Archived: row.ResourceArchived,
-		CreatedAt: row.CreatedAt.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Format(time.RFC3339),
+		SinglePass: row.TotalPages > 0 && (pagesPerChunk <= 0 || row.TotalPages <= pagesPerChunk),
+		CreatedAt:  row.CreatedAt.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Format(time.RFC3339),
 	}
 	if !row.StartedAt.IsZero() {
 		view.StartedAt = row.StartedAt.Format(time.RFC3339)
@@ -207,7 +209,7 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 		if err != nil {
 			return nil, nil, err
 		}
-		created = append(created, aiTaskView(row, false))
+		created = append(created, aiTaskView(row, false, a.Cfg.AIPagesPerChunk))
 	}
 	if len(created) > 0 {
 		_ = a.Store.AddAudit(ctx, actor, "ai_analysis_enqueue", "resource_ai_task", "", fmt.Sprintf(`{"count":%d}`, len(created)), time.Now().UTC())
@@ -223,7 +225,7 @@ func (a *App) ListAITasksForAdmin(ctx context.Context, status, search string, li
 	}
 	views := make([]AITaskView, 0, len(rows))
 	for _, row := range rows {
-		views = append(views, aiTaskView(row, false))
+		views = append(views, aiTaskView(row, false, a.Cfg.AIPagesPerChunk))
 	}
 	return views, total, nil
 }
@@ -237,7 +239,7 @@ func (a *App) GetAITaskForAdmin(ctx context.Context, id string) (AITaskView, err
 		}
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, true), nil
+	return aiTaskView(row, true, a.Cfg.AIPagesPerChunk), nil
 }
 
 // RetryAITask resumes a failed/paused/cancelled/skipped job from its last
@@ -277,7 +279,7 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 	if err != nil {
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, false), nil
+	return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
 }
 
 // CancelAITask stops a job and cancels any in-flight model request.
@@ -305,7 +307,7 @@ func (a *App) CancelAITask(ctx context.Context, id, actor string) (AITaskView, e
 	if err != nil {
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, false), nil
+	return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
 }
 
 // OpenAITaskOutput streams the generated analysis PDF.

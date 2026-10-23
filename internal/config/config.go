@@ -127,7 +127,7 @@ func Load() (Config, error) {
 		AIModel:              configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
 		AIWindows:            configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
 		AITimezone:           configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
-		AIPagesPerChunk:      intConfigValue(values, "CONTROL_AI_PAGES_PER_CHUNK", 5),
+		AIPagesPerChunk:      intConfigValue(values, "CONTROL_AI_PAGES_PER_CHUNK", 30),
 		AIRequestTimeout:     durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
 		AIMaxAttempts:        intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
 		AIImageQuality:       intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
@@ -136,8 +136,8 @@ func Load() (Config, error) {
 		AIMathJaxDir:         configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
 	}
 	cfg.AIAnalysisEnabled = boolConfigValue(values, "CONTROL_AI_ENABLED", cfg.AIAPIKey != "")
-	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 20 {
-		cfg.AIPagesPerChunk = 5
+	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 200 {
+		cfg.AIPagesPerChunk = 30
 	}
 	if cfg.AIMaxAttempts < 1 || cfg.AIMaxAttempts > 10 {
 		cfg.AIMaxAttempts = 3
