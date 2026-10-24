@@ -347,12 +347,17 @@ import { template } from './template.js';
           return false;
         }
       };
+      const isPrecheckRequest = (message) => {
+        if (!message || message.role !== 'user') return false;
+        const text = String(message.content || '');
+        return text.includes('请判断它是否是可用于作答的试卷') && text.includes('只输出 JSON');
+      };
       const aiPromptVisibleCalls = computed(() => {
         if (aiPromptTab.value === 'precheck') return (aiPromptCalls.value || []).filter(call => call.kind === 'precheck');
         if (aiPromptTab.value === 'analyze') {
           return (aiPromptCalls.value || [])
             .filter(call => call.kind === 'analyze' || call.kind === 'continue')
-            .map(call => Object.assign({}, call, { messages: (call.messages || []).filter(message => !isPrecheckVerdict(message)) }));
+            .map(call => Object.assign({}, call, { messages: (call.messages || []).filter(message => !isPrecheckVerdict(message) && !isPrecheckRequest(message)) }));
         }
         return [];
       });
