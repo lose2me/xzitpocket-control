@@ -284,17 +284,51 @@ body {
 }
 
 .prompt-message {
-  border-left: 3px solid #d8e4e0;
-  padding: 2px 0 2px 10px;
-  margin: 8px 0;
+  border-left: 4px solid #d8e4e0;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 10px 0;
 }
 
 .prompt-message-role {
-  font-size: 0.72rem;
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 0.7rem;
   font-weight: 700;
-  color: #6b7f79;
   text-transform: uppercase;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.prompt-role-system {
+  border-left-color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.prompt-role-system .prompt-message-role {
+  color: #5b21b6;
+  background: #ede9fe;
+}
+
+.prompt-role-user {
+  border-left-color: #176b4d;
+  background: #f0f8f5;
+}
+
+.prompt-role-user .prompt-message-role {
+  color: #14533d;
+  background: #dcf1e8;
+}
+
+.prompt-role-assistant {
+  border-left-color: #287ca8;
+  background: #f0f7fb;
+}
+
+.prompt-role-assistant .prompt-message-role {
+  color: #1d5f80;
+  background: #dceef7;
 }
 
 .prompt-message-content {

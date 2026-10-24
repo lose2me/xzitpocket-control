@@ -257,8 +257,8 @@ export const template = `
               </v-tabs>
               <div v-if="aiPromptTab === 'rendered'" ref="promptViewEl" class="prompt-render">
                 <div v-for="(call, ci) in aiPromptCalls" :key="ci" class="prompt-call">
-                  <div class="prompt-call-title">#{{ ci + 1 }} · {{ call.kind }} · {{ call.model }} · max_tokens {{ call.max_tokens }}</div>
-                  <div v-for="(message, mi) in call.messages" :key="mi" class="prompt-message">
+                  <div class="prompt-call-title">{{ call.kind }} [max_tokens {{ call.max_tokens }}]</div>
+                  <div v-for="(message, mi) in call.messages" :key="mi" class="prompt-message" :class="'prompt-role-' + message.role">
                     <div class="prompt-message-role">{{ message.role }}</div>
                     <div class="prompt-message-content">{{ message.content }}</div>
                   </div>
