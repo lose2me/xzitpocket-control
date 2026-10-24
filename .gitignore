@@ -7,3 +7,5 @@ control
 *.exe
 dist/
 build/
+
+coverage.out
