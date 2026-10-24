@@ -332,7 +332,12 @@ import { template } from './template.js';
       const aiPromptText = ref('');
       const aiPromptTitle = ref('');
       const aiPromptCalls = ref([]);
-      const aiPromptTab = ref('rendered');
+      const aiPromptTab = ref('precheck');
+      const aiPromptVisibleCalls = computed(() => {
+        if (aiPromptTab.value === 'precheck') return (aiPromptCalls.value || []).filter(call => call.kind === 'precheck');
+        if (aiPromptTab.value === 'analyze') return (aiPromptCalls.value || []).filter(call => call.kind === 'analyze' || call.kind === 'continue');
+        return [];
+      });
       const promptViewEl = ref(null);
       const contributorDialog = ref(false);
       const contributorKind = ref('');
@@ -1294,7 +1299,7 @@ import { template } from './template.js';
         return mathJaxPromise;
       };
       const renderAIPrompts = async () => {
-        if (aiPromptTab.value !== 'rendered') return;
+        if (aiPromptTab.value === 'json') return;
         await nextTick();
         const el = promptViewEl.value;
         if (!el) return;
@@ -1315,7 +1320,8 @@ import { template } from './template.js';
         aiPromptCalls.value = Array.isArray(calls) ? calls : [];
         aiPromptText.value = text;
         aiPromptTitle.value = item.resource_name || 'Prompt';
-        aiPromptTab.value = 'rendered';
+        const kinds = new Set(aiPromptCalls.value.map(call => call.kind));
+        aiPromptTab.value = kinds.has('precheck') ? 'precheck' : 'analyze';
         aiPromptDialog.value = true;
       });
       watch(aiPromptDialog, async (open) => {
@@ -2086,7 +2092,7 @@ import { template } from './template.js';
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
-        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptVisibleCalls, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
