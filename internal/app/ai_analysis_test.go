@@ -111,6 +111,12 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if !strings.Contains(final.PromptsJSON, "试卷识别助手") || !strings.Contains(final.PromptsJSON, "答案与解析") {
 		t.Fatalf("prompts were not persisted: %.300s", final.PromptsJSON)
 	}
+	if !strings.Contains(final.PromptsJSON, `"role":"assistant"`) || !strings.Contains(final.PromptsJSON, "solvable") {
+		t.Fatalf("precheck answer missing from prompts: %.300s", final.PromptsJSON)
+	}
+	if strings.Contains(final.MessagesJSON, "请判断它是否是可用于作答的试卷") {
+		t.Fatalf("precheck leaked into the analysis conversation: %.300s", final.MessagesJSON)
+	}
 	row, err := store.GetAITaskRow(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)

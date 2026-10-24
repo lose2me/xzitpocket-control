@@ -137,23 +137,25 @@ func (m *Model) Precheck(ctx context.Context, parts []openai.ChatMessagePart) (V
 		{Role: openai.ChatMessageRoleUser, MultiContent: parts},
 	}
 	call := promptCall("precheck", m.name, 4096, messages)
+	calls := []PromptCall{call}
 	resp, err := m.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:     m.name,
 		Messages:  messages,
 		MaxTokens: 4096,
 	})
 	if err != nil {
-		return Verdict{}, "", []PromptCall{call}, err
+		return Verdict{}, "", calls, err
 	}
 	if len(resp.Choices) == 0 {
-		return Verdict{}, "", []PromptCall{call}, fmt.Errorf("AI 未返回内容")
+		return Verdict{}, "", calls, fmt.Errorf("AI 未返回内容")
 	}
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	calls[0].Messages = append(calls[0].Messages, PromptMessage{Role: "assistant", Content: content})
 	verdict, err := parseVerdict(content)
 	if err != nil {
-		return Verdict{}, content, []PromptCall{call}, err
+		return Verdict{}, content, calls, err
 	}
-	return verdict, content, []PromptCall{call}, nil
+	return verdict, content, calls, nil
 }
 
 func parseVerdict(content string) (Verdict, error) {

@@ -541,7 +541,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 
 	history := ai.DecodeMessages(task.MessagesJSON)
 	if task.Solvable < 0 {
-		verdict, raw, promptCalls, err := a.precheckPaper(ctx, paper)
+		verdict, _, promptCalls, err := a.precheckPaper(ctx, paper)
 		a.saveAIPrompts(task.ID, &task.PromptsJSON, promptCalls)
 		if err != nil {
 			if ctx.Err() != nil || a.aiWindowClosed() {
@@ -576,13 +576,6 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			_ = os.RemoveAll(workDir)
 			return
 		}
-		precheckInstruction := fmt.Sprintf("下面是《%s》的前 %d 页（共 %d 页）。请判断它是否是可用于作答的试卷，并只输出 JSON。", paper.Title, minInt(aiPrecheckPages, paper.TotalPages), paper.TotalPages)
-		_, plain, buildErr := ai.BuildContent(paper, 1, minInt(aiPrecheckPages, paper.TotalPages), precheckInstruction)
-		if buildErr == nil {
-			history = append(history, ai.Message{Role: "user", Text: plain}, ai.Message{Role: "assistant", Text: raw})
-		}
-		task.MessagesJSON = ai.EncodeMessages(history)
-		_ = a.Store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{MessagesJSON: &task.MessagesJSON})
 	}
 
 	nextPage := task.NextPage
