@@ -79,7 +79,7 @@ func TestArchiveTextbookKeepsAttribution(t *testing.T) {
 	if err != nil || total != 1 || len(archivedList) != 1 {
 		t.Fatalf("archived textbooks = %#v, total = %d, err = %v", archivedList, total, err)
 	}
-	courseBooks, _, err := a.ListCourseTextbooksForUser(ctx, "C1")
+	courseBooks, _, _, err := a.ListCourseTextbooksForUser(ctx, "C1")
 	if err != nil || len(courseBooks) != 0 {
 		t.Fatalf("app textbooks = %#v, err = %v", courseBooks, err)
 	}
@@ -104,7 +104,7 @@ func TestArchiveTextbookKeepsAttribution(t *testing.T) {
 		t.Fatalf("restored textbook = %#v", stored)
 	}
 	assertUserStats(t, store, "usr-archive-book", 1, 3)
-	courseBooks, _, err = a.ListCourseTextbooksForUser(ctx, "C1")
+	courseBooks, _, _, err = a.ListCourseTextbooksForUser(ctx, "C1")
 	if err != nil || len(courseBooks) != 1 {
 		t.Fatalf("restored app textbooks = %#v, err = %v", courseBooks, err)
 	}
@@ -157,7 +157,7 @@ func TestArchiveResourceKeepsFormatAndAttribution(t *testing.T) {
 		t.Fatalf("archived resource row = %#v", stored)
 	}
 	assertUserStats(t, store, "usr-archive-paper", 1, 2)
-	if items, total, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || total != 0 || len(items) != 0 {
+	if items, total, _, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("app resources = %#v, total = %d, err = %v", items, total, err)
 	}
 	if _, err := a.ResourceURL(ctx, resource.ID, 0); err == nil {
@@ -178,7 +178,7 @@ func TestArchiveResourceKeepsFormatAndAttribution(t *testing.T) {
 		t.Fatalf("restored resource row = %#v", stored)
 	}
 	assertUserStats(t, store, "usr-archive-paper", 1, 2)
-	if items, total, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || total != 1 || len(items) != 1 {
+	if items, total, _, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("restored app resources = %#v, total = %d, err = %v", items, total, err)
 	}
 }

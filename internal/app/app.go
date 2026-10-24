@@ -55,6 +55,11 @@ type App struct {
 	bucketMu    sync.Mutex
 	bucketCache bucketStatsCache
 
+	// objectSizes caches COS HEAD results. Object keys are content hashes, so a
+	// stored size never changes for a key.
+	objectSizeMu    sync.Mutex
+	objectSizeCache map[string]int64
+
 	// AI exam analysis. The model is nil when the feature is disabled.
 	aiModel    *ai.Model
 	aiWindows  []ai.Window

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"xzitpocket-control/internal/store/sqlite"
 )
 
 // ResourceCourseView is one course entry in the app resource centre.
@@ -14,6 +16,8 @@ type ResourceCourseView struct {
 	ResourceCount     int    `json:"resource_count"`
 	TextbookCount     int    `json:"textbook_count"`
 	CoverURL          string `json:"cover_url,omitempty"`
+	CoverVersion      string `json:"cover_version,omitempty"`
+	Version           string `json:"version"`
 }
 
 func (a *App) ListResourceCourses(ctx context.Context) ([]ResourceCourseView, error) {
@@ -28,6 +32,8 @@ func (a *App) ListResourceCourses(ctx context.Context) ([]ResourceCourseView, er
 			QuestionBankCount: item.QuestionBankCount,
 			ResourceCount:     item.ResourceCount,
 			TextbookCount:     item.TextbookCount,
+			CoverVersion:      item.CoverVersion,
+			Version:           item.Version,
 		}
 		if item.CoverTextbookID != "" {
 			if cover, err := a.TextbookResourceURL(ctx, item.CoverTextbookID, "cover", 0); err == nil {
@@ -37,6 +43,12 @@ func (a *App) ListResourceCourses(ctx context.Context) ([]ResourceCourseView, er
 		views = append(views, view)
 	}
 	return views, nil
+}
+
+// ResourceCenterVersion returns the revision shared by every resource-centre
+// response, so clients can skip a full refresh when nothing changed.
+func (a *App) ResourceCenterVersion(ctx context.Context) (string, error) {
+	return a.Store.ResourceCenterRevision(ctx)
 }
 
 func normalizeCourseCode(code string) (string, error) {
@@ -49,18 +61,33 @@ func normalizeCourseCode(code string) (string, error) {
 
 // ListCourseResourcesForUser returns the resources of one course for a signed-in
 // app user. The rows carry metadata only; a signed URL is issued on demand.
-func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string) ([]ResourceView, int, error) {
+func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string) ([]ResourceView, int, string, error) {
 	code, err := normalizeCourseCode(courseCode)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
-	items, err := a.Store.ListResources(ctx, 200, 0, "", code, "", "", false)
+	// Read the version before the rows: a concurrent write then leaves the
+	// version older than the payload, so the client refreshes next time instead
+	// of caching stale rows under a newer version.
+	version, err := a.Store.CourseContentRevision(ctx, code)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
+	}
+	items := make([]sqlite.Resource, 0, 64)
+	const pageSize = 200
+	for offset := 0; ; offset += pageSize {
+		page, err := a.Store.ListResources(ctx, pageSize, offset, "", code, "", "", false)
+		if err != nil {
+			return nil, 0, "", err
+		}
+		items = append(items, page...)
+		if len(page) < pageSize {
+			break
+		}
 	}
 	total, err := a.Store.CountResources(ctx, "", code, false)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	views := make([]ResourceView, 0, len(items))
 	for _, item := range items {
@@ -68,19 +95,23 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
 		views = append(views, view)
 	}
-	return views, total, nil
+	return views, total, version, nil
 }
 
 // ListCourseTextbooksForUser returns the textbooks of one course for a signed-in
 // app user. A textbook associated with several courses appears in each.
-func (a *App) ListCourseTextbooksForUser(ctx context.Context, courseCode string) ([]TextbookView, int, error) {
+func (a *App) ListCourseTextbooksForUser(ctx context.Context, courseCode string) ([]TextbookView, int, string, error) {
 	code, err := normalizeCourseCode(courseCode)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
+	}
+	version, err := a.Store.CourseContentRevision(ctx, code)
+	if err != nil {
+		return nil, 0, "", err
 	}
 	grouped, err := a.Store.ListTextbooksForCourses(ctx, []string{code})
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	items := grouped[code]
 	views := make([]TextbookView, 0, len(items))
@@ -89,7 +120,7 @@ func (a *App) ListCourseTextbooksForUser(ctx context.Context, courseCode string)
 		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
 		views = append(views, view)
 	}
-	return views, len(views), nil
+	return views, len(views), version, nil
 }
 
 // objectSize returns the stored PDF's byte size for the app file rows. A
@@ -98,6 +129,12 @@ func (a *App) objectSize(ctx context.Context, key string) int64 {
 	if key == "" {
 		return 0
 	}
+	a.objectSizeMu.Lock()
+	if size, ok := a.objectSizeCache[key]; ok {
+		a.objectSizeMu.Unlock()
+		return size
+	}
+	a.objectSizeMu.Unlock()
 	client := a.cosClient()
 	if !client.Configured() {
 		return 0
@@ -107,5 +144,11 @@ func (a *App) objectSize(ctx context.Context, key string) int64 {
 		a.Logger.Warn("read object size failed", "error", err, "key", key)
 		return 0
 	}
+	a.objectSizeMu.Lock()
+	if a.objectSizeCache == nil {
+		a.objectSizeCache = make(map[string]int64)
+	}
+	a.objectSizeCache[key] = size
+	a.objectSizeMu.Unlock()
 	return size
 }

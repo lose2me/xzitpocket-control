@@ -304,7 +304,7 @@ func (s *Store) UpdateTextbook(ctx context.Context, id string, input TextbookInp
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `UPDATE textbooks SET name = ?, tags = ?, course_code = ?, updated_at = ? WHERE id = ?`,
+	result, err := tx.ExecContext(ctx, `UPDATE textbooks SET name = ?, tags = ?, course_code = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`,
 		input.Name, input.Tags, primary, millis(now), id)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -411,7 +411,7 @@ func scanTextbook(row rowScannerTextbook) (Textbook, error) {
 
 // SetTextbookPdfKey records the COS key of the textbook's PDF.
 func (s *Store) SetTextbookPdfKey(ctx context.Context, id, key string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET pdf_key = ?, updated_at = ? WHERE id = ?`, key, millis(now), id)
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET pdf_key = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`, key, millis(now), id)
 	if err != nil {
 		return err
 	}
@@ -472,7 +472,7 @@ func (s *Store) SetTextbookArchive(ctx context.Context, id, pdfKey, coverKey str
 
 // SetTextbookCoverKey records the COS key of the textbook's WebP cover.
 func (s *Store) SetTextbookCoverKey(ctx context.Context, id, key string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET cover_key = ?, updated_at = ? WHERE id = ?`, key, millis(now), id)
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET cover_key = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`, key, millis(now), id)
 	if err != nil {
 		return err
 	}

@@ -13,36 +13,43 @@ func (s *Server) userResourceCourses(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authSession(w, r); !ok {
 		return
 	}
+	// Fetch the revision first so a concurrent write cannot pair stale rows
+	// with a newer version, which would make the client keep the stale cache.
+	version, err := s.App.ResourceCenterVersion(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	items, err := s.App.ListResourceCourses(r.Context())
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": version})
 }
 
 func (s *Server) userCourseResources(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authSession(w, r); !ok {
 		return
 	}
-	items, total, err := s.App.ListCourseResourcesForUser(r.Context(), r.URL.Query().Get("course_code"))
+	items, total, version, err := s.App.ListCourseResourcesForUser(r.Context(), r.URL.Query().Get("course_code"))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "version": version})
 }
 
 func (s *Server) userCourseTextbooks(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authSession(w, r); !ok {
 		return
 	}
-	items, total, err := s.App.ListCourseTextbooksForUser(r.Context(), r.URL.Query().Get("course_code"))
+	items, total, version, err := s.App.ListCourseTextbooksForUser(r.Context(), r.URL.Query().Get("course_code"))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "version": version})
 }
 
 func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id string) {

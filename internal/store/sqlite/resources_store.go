@@ -252,7 +252,7 @@ func (s *Store) SetResourceArchive(ctx context.Context, id, pdfKey string, archi
 
 // SetResourcePdfKey records the COS key of the resource's PDF.
 func (s *Store) SetResourcePdfKey(ctx context.Context, id, key string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE resources SET pdf_key = ?, updated_at = ? WHERE id = ?`, key, millis(now), id)
+	result, err := s.DB.ExecContext(ctx, `UPDATE resources SET pdf_key = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`, key, millis(now), id)
 	if err != nil {
 		return err
 	}
