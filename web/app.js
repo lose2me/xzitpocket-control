@@ -333,9 +333,27 @@ import { template } from './template.js';
       const aiPromptTitle = ref('');
       const aiPromptCalls = ref([]);
       const aiPromptTab = ref('precheck');
+      const isPrecheckVerdict = (message) => {
+        if (!message || message.role !== 'assistant') return false;
+        let text = String(message.content || '').trim();
+        text = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) return false;
+        try {
+          const verdict = JSON.parse(text.slice(start, end + 1));
+          return typeof verdict.solvable === 'boolean' && typeof verdict.reason === 'string';
+        } catch (_) {
+          return false;
+        }
+      };
       const aiPromptVisibleCalls = computed(() => {
         if (aiPromptTab.value === 'precheck') return (aiPromptCalls.value || []).filter(call => call.kind === 'precheck');
-        if (aiPromptTab.value === 'analyze') return (aiPromptCalls.value || []).filter(call => call.kind === 'analyze' || call.kind === 'continue');
+        if (aiPromptTab.value === 'analyze') {
+          return (aiPromptCalls.value || [])
+            .filter(call => call.kind === 'analyze' || call.kind === 'continue')
+            .map(call => Object.assign({}, call, { messages: (call.messages || []).filter(message => !isPrecheckVerdict(message)) }));
+        }
         return [];
       });
       const promptViewEl = ref(null);
