@@ -136,6 +136,70 @@ func (s *Store) CreateAITask(ctx context.Context, resourceID, actor string) (AIT
 	return created, true, nil
 }
 
+// CreateAITasksForMissingResources queues up to limit PDF resources that have
+// never had an AI analysis row. Resources already skipped/failed/succeeded or
+// currently queued are left untouched, so the scanner never loops on the same
+// paper.
+func (s *Store) CreateAITasksForMissingResources(ctx context.Context, limit int, actor string) ([]AITask, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `SELECT r.id FROM resources r
+		WHERE r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0
+		  AND NOT EXISTS (SELECT 1 FROM resource_ai_tasks t WHERE t.resource_id = r.id)
+		ORDER BY r.created_at ASC, r.id ASC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	resourceIDs := make([]string, 0, limit)
+	for rows.Next() {
+		var resourceID string
+		if err := rows.Scan(&resourceID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC().Unix()
+	created := make([]AITask, 0, len(resourceIDs))
+	for _, resourceID := range resourceIDs {
+		id, err := newStoreID("ai")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_by, created_at, updated_at)
+			VALUES (?, ?, 'queued', ?, ?, ?)`, id, resourceID, actor, now, now); err != nil {
+			return nil, err
+		}
+		item, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE id = ?`, id))
+		if err != nil {
+			return nil, err
+		}
+		created = append(created, item)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
 // GetAITask returns one task by id.
 func (s *Store) GetAITask(ctx context.Context, id string) (AITask, error) {
 	item, err := scanAITask(s.DB.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE id = ?`, id))

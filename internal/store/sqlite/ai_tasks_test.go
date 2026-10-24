@@ -219,3 +219,45 @@ func TestDeleteOlderAITasksKeepsNewest(t *testing.T) {
 		t.Fatalf("remaining tasks = %#v err=%v", all, err)
 	}
 }
+
+func TestCreateAITasksForMissingResources(t *testing.T) {
+	store, resourceID := newAITestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	skipped, err := store.CreateResource(ctx, ResourceInput{Name: "跳过.pdf"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourcePdfKey(ctx, skipped.ID, "published/papers/skip.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	skippedTask, _, err := store.CreateAITask(ctx, skipped.ID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := "skipped"
+	if err := store.UpdateAITask(ctx, skippedTask.ID, AITaskPatch{Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.CreateResource(ctx, ResourceInput{Name: "无 PDF.pdf"}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := store.CreateAITasksForMissingResources(ctx, 10, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 1 || created[0].ResourceID != resourceID || created[0].Status != "queued" || created[0].CreatedBy != "auto" {
+		t.Fatalf("created = %#v", created)
+	}
+	again, err := store.CreateAITasksForMissingResources(ctx, 10, "auto")
+	if err != nil || len(again) != 0 {
+		t.Fatalf("second scan = %#v err=%v", again, err)
+	}
+	all, err := store.ListAITasksByResource(ctx, skipped.ID)
+	if err != nil || len(all) != 1 || all[0].Status != "skipped" {
+		t.Fatalf("skipped resource tasks = %#v err=%v", all, err)
+	}
+}

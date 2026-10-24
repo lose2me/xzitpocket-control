@@ -23,6 +23,8 @@ const (
 	aiRetryBaseDelay = 30 * time.Second
 	aiPollIdle       = 20 * time.Second
 	aiPollBusy       = 3 * time.Second
+	aiScanInterval   = 10 * time.Second
+	aiScanBatch      = 20
 )
 
 // AITaskView is the administrator-facing job row.
@@ -194,6 +196,33 @@ func (a *App) StartAIAnalysis(ctx context.Context) {
 			}
 		}
 	}()
+	go a.scanAIResources(ctx)
+}
+
+// scanAIResources periodically queues PDFs that have never been analysed.
+// Papers already marked skipped/failed/succeeded, or with an active run, are
+// left alone.
+func (a *App) scanAIResources(ctx context.Context) {
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		tasks, err := a.Store.CreateAITasksForMissingResources(ctx, aiScanBatch, "auto")
+		if err != nil {
+			if ctx.Err() == nil {
+				a.Logger.Error("scan AI resources", "error", err)
+			}
+		} else if len(tasks) > 0 {
+			a.wakeAIWorker()
+			a.Logger.Info("auto-enqueued AI tasks", "count", len(tasks))
+			_ = a.Store.AddAudit(ctx, "auto", "ai_analysis_enqueue", "resource_ai_task", "", fmt.Sprintf(`{"count":%d,"source":"scan"}`, len(tasks)), time.Now().UTC())
+		}
+		timer.Reset(aiScanInterval)
+	}
 }
 
 // EnqueueAIAnalyses creates a new run for each resource. Earlier runs are kept
