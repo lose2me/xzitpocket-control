@@ -2,11 +2,14 @@
 
 # XzitPocket Control - 掌上徐工控制台
 
+[![codecov](https://codecov.io/github/lose2me/xzitpocket-control/graph/badge.svg?token=H8G1IF0RKQ)](https://codecov.io/github/lose2me/xzitpocket-control)
 [![License: GPL](https://img.shields.io/badge/License-GPLv3-yellow.svg)](https://opensource.org/licenses/gpl-3-0)
+
+[![Codecov](https://codecov.io/github/lose2me/xzitpocket-control/graphs/icicle.svg?token=H8G1IF0RKQ)](https://codecov.io/github/lose2me/xzitpocket-control/graphs/icicle.svg?token=H8G1IF0RKQ)
 
 </div>
 
-[掌上徐工控制台](https://github.com/lose2me/xzitpocket-control) 是一个开源、模块化的 Go + SQLite 单体服务，内置 Vue 3 管理后台，为 [掌上徐工](https://github.com/lose2me/xzitpocket) 提供设备登记、用户会话、活跃统计、风控记录和内置文库。
+[**掌上徐工控制台**](https://github.com/lose2me/xzitpocket-control) 是一个开源、模块化的 Go + SQLite 单体服务，内置 Vue 3 管理后台，为 [掌上徐工](https://github.com/lose2me/xzitpocket) 提供设备登记、用户会话、活跃统计、风控记录和内置文库。
 
 > OA 登录始终由 xzitpocket 客户端完成。control 只接收客户端提交的学号、固定伪名和设备断言，不读取、不转发、不保存 OA 凭据。
 
