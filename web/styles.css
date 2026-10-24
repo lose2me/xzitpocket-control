@@ -285,7 +285,6 @@ body {
 
 .prompt-message {
   border-left: 4px solid #d8e4e0;
-  border-radius: 4px;
   padding: 8px 10px;
   margin: 10px 0;
 }
@@ -293,7 +292,7 @@ body {
 .prompt-message-role {
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 3px;
+  border-radius: 0;
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
