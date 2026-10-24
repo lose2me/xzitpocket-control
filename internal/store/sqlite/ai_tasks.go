@@ -31,6 +31,7 @@ type AITask struct {
 	UpdatedAt    time.Time
 	StartedAt    time.Time
 	FinishedAt   time.Time
+	PromptsJSON  string
 }
 
 // AITaskRow is an administrator-facing task joined with its resource.
@@ -44,23 +45,25 @@ type AITaskRow struct {
 // AITaskPatch updates only the fields that are set. It is used both by the
 // worker (progress) and by administrator actions (cancel/retry).
 type AITaskPatch struct {
-	Status       *string
-	Solvable     *int
-	PrecheckNote *string
-	Attempt      *int
-	NextPage     *int
-	TotalPages   *int
-	MessagesJSON *string
-	Markdown     *string
-	OutputKey    *string
-	OutputSize   *int64
-	Error        *string
-	Model        *string
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
+	Status          *string
+	Solvable        *int
+	PrecheckNote    *string
+	Attempt         *int
+	NextPage        *int
+	TotalPages      *int
+	MessagesJSON    *string
+	Markdown        *string
+	OutputKey       *string
+	OutputSize      *int64
+	Error           *string
+	Model           *string
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	PromptsJSON     *string
+	SkipIfCancelled bool
 }
 
-const aiTaskColumns = "id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at"
+const aiTaskColumns = "id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json"
 
 func scanAITask(row rowScanner) (AITask, error) {
 	var item AITask
@@ -69,7 +72,7 @@ func scanAITask(row rowScanner) (AITask, error) {
 		&item.ID, &item.ResourceID, &item.Status, &item.Solvable, &item.PrecheckNote,
 		&item.Attempt, &item.NextPage, &item.TotalPages, &item.MessagesJSON,
 		&item.Markdown, &item.OutputKey, &item.OutputSize, &item.Error, &item.Model,
-		&item.CreatedBy, &createdAt, &updatedAt, &startedAt, &finishedAt,
+		&item.CreatedBy, &createdAt, &updatedAt, &startedAt, &finishedAt, &item.PromptsJSON,
 	)
 	if err != nil {
 		return AITask{}, err
@@ -85,63 +88,52 @@ func scanAITask(row rowScanner) (AITask, error) {
 	return item, nil
 }
 
-// CreateOrResetAITask makes sure a task exists for the resource. An existing
-// task is reset to the initial state unless it is currently running.
-func (s *Store) CreateOrResetAITask(ctx context.Context, resourceID, actor string) (AITask, error) {
+// CreateAITask inserts a new queued run for the resource and keeps earlier
+// rows as history. If the resource already has an unfinished run, that row is
+// returned instead so the same PDF is never analysed twice at the same time.
+func (s *Store) CreateAITask(ctx context.Context, resourceID, actor string) (AITask, bool, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return AITask{}, err
+		return AITask{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var exists string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM resources WHERE id = ? AND pdf_key <> '' AND LOWER(pdf_key) LIKE '%.pdf' AND archived_at = 0`, resourceID).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
-		return AITask{}, sql.ErrNoRows
+		return AITask{}, false, sql.ErrNoRows
 	}
 	if err != nil {
-		return AITask{}, err
+		return AITask{}, false, err
+	}
+
+	existing, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks
+		WHERE resource_id = ? AND status IN ('queued', 'running', 'paused')
+		ORDER BY created_at DESC LIMIT 1`, resourceID))
+	switch {
+	case err == nil:
+		return existing, false, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return AITask{}, false, err
 	}
 
 	now := time.Now().UTC().Unix()
-	existing, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE resource_id = ?`, resourceID))
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		id, idErr := newStoreID("ai")
-		if idErr != nil {
-			return AITask{}, idErr
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_by, created_at, updated_at)
-			VALUES (?, ?, 'queued', ?, ?, ?)`, id, resourceID, actor, now, now); err != nil {
-			return AITask{}, err
-		}
-		existing, err = scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE id = ?`, id))
-		if err != nil {
-			return AITask{}, err
-		}
-	case err != nil:
-		return AITask{}, err
-	case existing.Status == "running":
-		// The worker owns the row; the caller reports "already running"
-		// instead of fighting it for the same PDF.
-	case existing.Status == "succeeded" || existing.Status == "skipped" || existing.Status == "failed" ||
-		existing.Status == "cancelled" || existing.Status == "paused" || existing.Status == "queued":
-		if _, err := tx.ExecContext(ctx, `UPDATE resource_ai_tasks SET
-			status = 'queued', solvable = -1, precheck_note = '', attempt = 0, next_page = 1,
-			total_pages = 0, messages_json = '[]', markdown = '', output_key = '', output_size = 0,
-			error = '', model = '', created_by = ?, started_at = 0, finished_at = 0, updated_at = ?
-			WHERE id = ?`, actor, now, existing.ID); err != nil {
-			return AITask{}, err
-		}
-		existing, err = scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE id = ?`, existing.ID))
-		if err != nil {
-			return AITask{}, err
-		}
+	id, err := newStoreID("ai")
+	if err != nil {
+		return AITask{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_by, created_at, updated_at)
+		VALUES (?, ?, 'queued', ?, ?, ?)`, id, resourceID, actor, now, now); err != nil {
+		return AITask{}, false, err
+	}
+	created, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE id = ?`, id))
+	if err != nil {
+		return AITask{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return AITask{}, err
+		return AITask{}, false, err
 	}
-	return existing, nil
+	return created, true, nil
 }
 
 // GetAITask returns one task by id.
@@ -153,13 +145,18 @@ func (s *Store) GetAITask(ctx context.Context, id string) (AITask, error) {
 	return item, err
 }
 
-// GetAITaskByResource returns the task for a resource, if any.
-func (s *Store) GetAITaskByResource(ctx context.Context, resourceID string) (AITask, error) {
-	item, err := scanAITask(s.DB.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE resource_id = ?`, resourceID))
+// GetActiveAITaskByResource returns the newest unfinished run for a resource.
+func (s *Store) GetActiveAITaskByResource(ctx context.Context, resourceID string) (AITask, bool, error) {
+	item, err := scanAITask(s.DB.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks
+		WHERE resource_id = ? AND status IN ('queued', 'running', 'paused')
+		ORDER BY created_at DESC LIMIT 1`, resourceID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return AITask{}, sql.ErrNoRows
+		return AITask{}, false, nil
 	}
-	return item, err
+	if err != nil {
+		return AITask{}, false, err
+	}
+	return item, true, nil
 }
 
 // GetAITaskRow returns a task joined with its resource.
@@ -170,13 +167,13 @@ func (s *Store) GetAITaskRow(ctx context.Context, id string) (AITaskRow, error) 
 			t.id, t.resource_id, t.status, t.solvable, t.precheck_note, t.attempt, t.next_page,
 			t.total_pages, t.messages_json, t.markdown, t.output_key, t.output_size, t.error,
 			t.model, t.created_by, t.created_at, t.updated_at, t.started_at, t.finished_at,
-			r.name, r.course_code, r.archived_at
+			t.prompts_json, r.name, r.course_code, r.archived_at
 		FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
 		WHERE t.id = ?`, id).Scan(
 		&item.ID, &item.ResourceID, &item.Status, &item.Solvable, &item.PrecheckNote, &item.Attempt,
 		&item.NextPage, &item.TotalPages, &item.MessagesJSON, &item.Markdown, &item.OutputKey,
 		&item.OutputSize, &item.Error, &item.Model, &item.CreatedBy, &createdAt, &updatedAt,
-		&startedAt, &finishedAt, &item.ResourceName, &item.CourseCode, &archivedAt,
+		&startedAt, &finishedAt, &item.PromptsJSON, &item.ResourceName, &item.CourseCode, &archivedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AITaskRow{}, sql.ErrNoRows
@@ -221,7 +218,7 @@ func (s *Store) ListAITasks(ctx context.Context, status, search string, limit, o
 			t.id, t.resource_id, t.status, t.solvable, t.precheck_note, t.attempt, t.next_page,
 			t.total_pages, t.messages_json, t.markdown, t.output_key, t.output_size, t.error,
 			t.model, t.created_by, t.created_at, t.updated_at, t.started_at, t.finished_at,
-			r.name, r.course_code, r.archived_at
+			t.prompts_json, r.name, r.course_code, r.archived_at
 		FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
 		WHERE `+clause+` ORDER BY t.updated_at DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -236,7 +233,7 @@ func (s *Store) ListAITasks(ctx context.Context, status, search string, limit, o
 			&item.ID, &item.ResourceID, &item.Status, &item.Solvable, &item.PrecheckNote, &item.Attempt,
 			&item.NextPage, &item.TotalPages, &item.MessagesJSON, &item.Markdown, &item.OutputKey,
 			&item.OutputSize, &item.Error, &item.Model, &item.CreatedBy, &createdAt, &updatedAt,
-			&startedAt, &finishedAt, &item.ResourceName, &item.CourseCode, &archivedAt,
+			&startedAt, &finishedAt, &item.PromptsJSON, &item.ResourceName, &item.CourseCode, &archivedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -252,6 +249,61 @@ func (s *Store) ListAITasks(ctx context.Context, status, search string, limit, o
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+// ListAITasksByResource returns every run for a resource, oldest first.
+func (s *Store) ListAITasksByResource(ctx context.Context, resourceID string) ([]AITask, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks WHERE resource_id = ? ORDER BY created_at ASC`, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]AITask, 0)
+	for rows.Next() {
+		item, err := scanAITask(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// DeleteOlderAITasks removes earlier runs for a resource and returns their
+// output keys. The current run is identified by keepID and is never removed.
+func (s *Store) DeleteOlderAITasks(ctx context.Context, resourceID, keepID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT output_key FROM resource_ai_tasks
+		WHERE resource_id = ? AND id <> ? AND rowid < (SELECT rowid FROM resource_ai_tasks WHERE id = ?)`,
+		resourceID, keepID, keepID)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0)
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if key != "" && !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM resource_ai_tasks
+		WHERE resource_id = ? AND id <> ? AND rowid < (SELECT rowid FROM resource_ai_tasks WHERE id = ?)`,
+		resourceID, keepID, keepID); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 // ClaimNextAITask atomically moves the oldest queued/paused task to running.
@@ -354,8 +406,15 @@ func (s *Store) UpdateAITask(ctx context.Context, id string, p AITaskPatch) erro
 			add("finished_at", p.FinishedAt.UTC().Unix())
 		}
 	}
+	if p.PromptsJSON != nil {
+		add("prompts_json", *p.PromptsJSON)
+	}
 	args = append(args, id)
-	res, err := s.DB.ExecContext(ctx, `UPDATE resource_ai_tasks SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+	where := "id = ?"
+	if p.SkipIfCancelled {
+		where += " AND status <> 'cancelled'"
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE resource_ai_tasks SET `+strings.Join(sets, ", ")+` WHERE `+where, args...)
 	if err != nil {
 		return err
 	}

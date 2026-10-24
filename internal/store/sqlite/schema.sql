@@ -356,14 +356,15 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_kind ON resource_submissions(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissions(status, kind, created_at);
 
--- AI analysis of an exam PDF. One row per resource; the row is also the
--- resumable job state so a restart can continue from the last finished page.
--- messages_json keeps the whole paper's conversation (text only) so later
--- pages are answered in the same context; images for the current page are
--- rebuilt from the PDF and are not stored here.
+-- AI analysis of an exam PDF. One row per analysis run; older rows are kept
+-- as history so re-analysing a paper never overwrites a previous result. The
+-- row is also the resumable job state so a restart can continue from the last
+-- finished page. messages_json keeps the whole paper's conversation (text
+-- only) so later pages are answered in the same context; images for the
+-- current page are rebuilt from the PDF and are not stored here.
 CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     id TEXT PRIMARY KEY,
-    resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
     solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
     precheck_note TEXT NOT NULL DEFAULT '',
@@ -380,7 +381,10 @@ CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     started_at INTEGER NOT NULL DEFAULT 0,
-    finished_at INTEGER NOT NULL DEFAULT 0
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    prompts_json TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_resource_ai_tasks_status ON resource_ai_tasks(status, created_at);
+-- At most one unfinished run per paper; completed/failed rows are history.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_ai_tasks_active ON resource_ai_tasks(resource_id) WHERE status IN ('queued', 'running', 'paused');

@@ -85,7 +85,7 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/abc.pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateOrResetAITask(ctx, resource.ID, "admin")
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +102,22 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if final.Status != "succeeded" {
 		t.Fatalf("status = %s, error = %s", final.Status, final.Error)
 	}
-	if final.OutputKey != aiOutputPrefix+resource.ID+".pdf" || final.OutputSize == 0 {
+	if final.OutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+".pdf" || final.OutputSize == 0 {
 		t.Fatalf("output = %q size=%d", final.OutputKey, final.OutputSize)
 	}
 	if !strings.Contains(final.Markdown, "答案") || !sawPrecheck || !sawAnalysis {
 		t.Fatalf("markdown=%q precheck=%v analysis=%v", final.Markdown, sawPrecheck, sawAnalysis)
+	}
+	if !strings.Contains(final.PromptsJSON, "试卷识别助手") || !strings.Contains(final.PromptsJSON, "答案与解析") {
+		t.Fatalf("prompts were not persisted: %.300s", final.PromptsJSON)
+	}
+	row, err := store.GetAITaskRow(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := aiTaskView(row, true, 1)
+	if !view.HasPrompts || view.Prompts == "" {
+		t.Fatalf("prompt detail missing: has=%v len=%d", view.HasPrompts, len(view.Prompts))
 	}
 }
 
@@ -146,4 +157,72 @@ func makeAITestPDF(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return pdf
+}
+
+func TestEnqueueRestartsActiveAITask(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	a.aiModel = &ai.Model{}
+	now := time.Now().UTC()
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "重解.pdf"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/restart.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	first, inserted, err := store.CreateAITask(ctx, resource.ID, "admin")
+	if err != nil || !inserted {
+		t.Fatalf("create: %#v inserted=%v err=%v", first, inserted, err)
+	}
+	claimed, ok, err := store.ClaimNextAITask(ctx)
+	if err != nil || !ok || claimed.ID != first.ID {
+		t.Fatalf("claim: %#v ok=%v err=%v", claimed, ok, err)
+	}
+
+	created, failed, err := a.EnqueueAIAnalyses(ctx, []string{resource.ID}, "admin")
+	if err != nil || len(failed) != 0 || len(created) != 1 {
+		t.Fatalf("enqueue: created=%#v failed=%#v err=%v", created, failed, err)
+	}
+	if created[0].ID == first.ID || created[0].Status != "queued" {
+		t.Fatalf("new run = %#v", created[0])
+	}
+	old, err := store.GetAITask(ctx, first.ID)
+	if err != nil || old.Status != "cancelled" {
+		t.Fatalf("previous run = %#v err=%v", old, err)
+	}
+	all, err := store.ListAITasksByResource(ctx, resource.ID)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("history = %#v err=%v", all, err)
+	}
+}
+
+func TestAITaskViewElapsedUsesServerTime(t *testing.T) {
+	now := time.Now().UTC()
+	queued := sqlite.AITaskRow{AITask: sqlite.AITask{CreatedAt: now.Add(-100 * time.Second), Status: "queued"}}
+	if got := aiTaskView(queued, false, 1).ElapsedSeconds; got != 0 {
+		t.Fatalf("queued elapsed = %d, want 0", got)
+	}
+	running := sqlite.AITaskRow{AITask: sqlite.AITask{CreatedAt: now.Add(-100 * time.Second), StartedAt: now.Add(-10 * time.Second), Status: "running"}}
+	if got := aiTaskView(running, false, 1).ElapsedSeconds; got < 9 || got > 11 {
+		t.Fatalf("running elapsed = %d", got)
+	}
+	finished := sqlite.AITaskRow{AITask: sqlite.AITask{
+		CreatedAt:  now.Add(-100 * time.Second),
+		StartedAt:  now.Add(-90 * time.Second),
+		FinishedAt: now.Add(-20 * time.Second),
+		Status:     "succeeded",
+	}}
+	if got := aiTaskView(finished, false, 1).ElapsedSeconds; got != 70 {
+		t.Fatalf("finished elapsed = %d, want 70", got)
+	}
+	paused := sqlite.AITaskRow{AITask: sqlite.AITask{
+		CreatedAt: now.Add(-100 * time.Second),
+		StartedAt: now.Add(-90 * time.Second),
+		UpdatedAt: now.Add(-30 * time.Second),
+		Status:    "paused",
+	}}
+	if got := aiTaskView(paused, false, 1).ElapsedSeconds; got != 60 {
+		t.Fatalf("paused elapsed = %d, want 60", got)
+	}
 }

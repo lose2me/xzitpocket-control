@@ -32,6 +32,65 @@ type Message struct {
 	Text string `json:"text"`
 }
 
+// PromptMessage is the text representation of one message sent to the model.
+// Images are recorded as [图片] markers; their base64 bytes are not persisted
+// because they can be rebuilt from the source PDF.
+type PromptMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// PromptCall is one API request made for a task.
+type PromptCall struct {
+	Kind      string          `json:"kind"`
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	Messages  []PromptMessage `json:"messages"`
+}
+
+func promptCall(kind, model string, maxTokens int, messages []openai.ChatCompletionMessage) PromptCall {
+	call := PromptCall{Kind: kind, Model: model, MaxTokens: maxTokens, Messages: make([]PromptMessage, 0, len(messages))}
+	for _, message := range messages {
+		var text strings.Builder
+		if len(message.MultiContent) > 0 {
+			for _, part := range message.MultiContent {
+				switch part.Type {
+				case openai.ChatMessagePartTypeText:
+					if text.Len() > 0 {
+						text.WriteString("\n")
+					}
+					text.WriteString(part.Text)
+				case openai.ChatMessagePartTypeImageURL:
+					text.WriteString("[图片]")
+				}
+			}
+		} else {
+			text.WriteString(message.Content)
+		}
+		call.Messages = append(call.Messages, PromptMessage{Role: message.Role, Content: text.String()})
+	}
+	return call
+}
+
+// AppendPromptCalls appends new calls to the JSON array stored on a task.
+func AppendPromptCalls(existing string, calls []PromptCall) string {
+	if len(calls) == 0 {
+		return existing
+	}
+	all := make([]PromptCall, 0)
+	if strings.TrimSpace(existing) != "" {
+		if err := json.Unmarshal([]byte(existing), &all); err != nil {
+			all = nil
+		}
+	}
+	all = append(all, calls...)
+	raw, err := json.Marshal(all)
+	if err != nil {
+		return existing
+	}
+	return string(raw)
+}
+
 // Verdict is the precheck answer.
 type Verdict struct {
 	Solvable      bool   `json:"solvable"`
@@ -72,28 +131,29 @@ func IsPermanentError(err error) bool {
 }
 
 // Precheck asks the model whether the extracted pages form a solvable exam.
-func (m *Model) Precheck(ctx context.Context, parts []openai.ChatMessagePart) (Verdict, string, error) {
+func (m *Model) Precheck(ctx context.Context, parts []openai.ChatMessagePart) (Verdict, string, []PromptCall, error) {
 	messages := []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleSystem, Content: precheckSystemPrompt},
 		{Role: openai.ChatMessageRoleUser, MultiContent: parts},
 	}
+	call := promptCall("precheck", m.name, 4096, messages)
 	resp, err := m.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:     m.name,
 		Messages:  messages,
 		MaxTokens: 4096,
 	})
 	if err != nil {
-		return Verdict{}, "", err
+		return Verdict{}, "", []PromptCall{call}, err
 	}
 	if len(resp.Choices) == 0 {
-		return Verdict{}, "", fmt.Errorf("AI 未返回内容")
+		return Verdict{}, "", []PromptCall{call}, fmt.Errorf("AI 未返回内容")
 	}
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
 	verdict, err := parseVerdict(content)
 	if err != nil {
-		return Verdict{}, content, err
+		return Verdict{}, content, []PromptCall{call}, err
 	}
-	return verdict, content, nil
+	return verdict, content, []PromptCall{call}, nil
 }
 
 func parseVerdict(content string) (Verdict, error) {
@@ -118,7 +178,7 @@ func parseVerdict(content string) (Verdict, error) {
 
 // Analyze sends one page range in the paper's conversation and returns the
 // markdown answer. Long answers are continued in the same conversation.
-func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.ChatMessagePart) (string, error) {
+func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
 	messages := make([]openai.ChatCompletionMessage, 0, len(history)+2)
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: analysisSystemPrompt})
 	for _, message := range history {
@@ -130,24 +190,30 @@ func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.C
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
 
+	calls := make([]PromptCall, 0, 4)
 	var output strings.Builder
 	for attempt := 0; attempt < 4; attempt++ {
+		kind := "analyze"
+		if attempt > 0 {
+			kind = "continue"
+		}
+		calls = append(calls, promptCall(kind, m.name, 32000, messages))
 		resp, err := m.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 			Model:     m.name,
 			Messages:  messages,
 			MaxTokens: 32000,
 		})
 		if err != nil {
-			return "", err
+			return "", calls, err
 		}
 		if len(resp.Choices) == 0 {
-			return "", fmt.Errorf("AI 未返回内容")
+			return "", calls, fmt.Errorf("AI 未返回内容")
 		}
 		choice := resp.Choices[0]
 		content := strings.TrimSpace(choice.Message.Content)
 		output.WriteString(content)
 		if choice.FinishReason != "length" {
-			return strings.TrimSpace(output.String()), nil
+			return strings.TrimSpace(output.String()), calls, nil
 		}
 		// The response was cut off; keep going in the same conversation.
 		messages = append(messages,
@@ -155,7 +221,7 @@ func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.C
 			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "继续输出，从上次中断的位置接着写，不要重复已经输出的内容。"},
 		)
 	}
-	return strings.TrimSpace(output.String()), nil
+	return strings.TrimSpace(output.String()), calls, nil
 }
 
 // BuildContent renders a page range as multimodal parts and as the plain text

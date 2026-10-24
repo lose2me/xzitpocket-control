@@ -50,7 +50,7 @@ var currentSchemaTables = []struct {
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
-	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at"}},
+	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
 	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
 
@@ -130,6 +130,7 @@ var additiveMigrations = []struct {
 	{"textbooks", "archived_at", `ALTER TABLE textbooks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"resources", "archived_at", `ALTER TABLE resources ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"question_banks", "archived_at", `ALTER TABLE question_banks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
+	{"resource_ai_tasks", "prompts_json", `ALTER TABLE resource_ai_tasks ADD COLUMN prompts_json TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -307,6 +308,85 @@ func (s *Store) dropQuestionBankOrderColumn(ctx context.Context) error {
 	return rows.Err()
 }
 
+// allowMultipleAITasksPerResource rebuilds resource_ai_tasks without the
+// legacy UNIQUE(resource_id) constraint. Re-analysing a paper must create a
+// new history row instead of resetting (and destroying) the previous result.
+func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
+	var ddl string
+	err := s.DB.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'resource_ai_tasks'`).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(ddl, "resource_id TEXT NOT NULL UNIQUE") {
+		return nil
+	}
+	if s.lastMigrationBackup == "" {
+		backup, backupErr := s.backupIncompatibleDatabase(ctx)
+		if backupErr != nil {
+			return fmt.Errorf("snapshot before rebuilding resource_ai_tasks: %w", backupErr)
+		}
+		s.lastMigrationBackup = backup
+	}
+	if _, err := s.DB.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer func() { _, _ = s.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = ON") }()
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		`CREATE TABLE resource_ai_tasks_new (
+			id TEXT PRIMARY KEY,
+			resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+			status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
+			solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
+			precheck_note TEXT NOT NULL DEFAULT '',
+			attempt INTEGER NOT NULL DEFAULT 0,
+			next_page INTEGER NOT NULL DEFAULT 1,
+			total_pages INTEGER NOT NULL DEFAULT 0,
+			messages_json TEXT NOT NULL DEFAULT '[]',
+			markdown TEXT NOT NULL DEFAULT '',
+			output_key TEXT NOT NULL DEFAULT '',
+			output_size INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			started_at INTEGER NOT NULL DEFAULT 0,
+			finished_at INTEGER NOT NULL DEFAULT 0,
+			prompts_json TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO resource_ai_tasks_new(id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json)
+			SELECT id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json FROM resource_ai_tasks`,
+		`DROP TABLE resource_ai_tasks`,
+		`ALTER TABLE resource_ai_tasks_new RENAME TO resource_ai_tasks`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("rebuild resource_ai_tasks: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("check resource_ai_tasks foreign keys: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return errors.New("resource_ai_tasks rebuild left foreign key violations")
+	}
+	return rows.Err()
+}
+
 func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
 	rows, err := s.DB.QueryContext(ctx, `PRAGMA table_info("`+table+`")`)
 	if err != nil {
@@ -336,6 +416,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if err := s.applyColumnRemovals(ctx); err != nil {
 		return fmt.Errorf("apply column removals: %w", err)
+	}
+	if err := s.allowMultipleAITasksPerResource(ctx); err != nil {
+		return fmt.Errorf("allow multiple AI tasks: %w", err)
 	}
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)

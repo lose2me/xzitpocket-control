@@ -27,28 +27,31 @@ const (
 
 // AITaskView is the administrator-facing job row.
 type AITaskView struct {
-	ID           string `json:"id"`
-	ResourceID   string `json:"resource_id"`
-	ResourceName string `json:"resource_name"`
-	CourseCode   string `json:"course_code"`
-	Status       string `json:"status"`
-	Solvable     int    `json:"solvable"`
-	PrecheckNote string `json:"precheck_note,omitempty"`
-	Attempt      int    `json:"attempt"`
-	NextPage     int    `json:"next_page"`
-	TotalPages   int    `json:"total_pages"`
-	Progress     int    `json:"progress"`
-	Markdown     string `json:"markdown,omitempty"`
-	Error        string `json:"error,omitempty"`
-	Model        string `json:"model,omitempty"`
-	OutputSize   int64  `json:"output_size,omitempty"`
-	SinglePass   bool   `json:"single_pass"`
-	HasOutput    bool   `json:"has_output"`
-	Archived     bool   `json:"archived"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	StartedAt    string `json:"started_at,omitempty"`
-	FinishedAt   string `json:"finished_at,omitempty"`
+	ID             string `json:"id"`
+	ResourceID     string `json:"resource_id"`
+	ResourceName   string `json:"resource_name"`
+	CourseCode     string `json:"course_code"`
+	Status         string `json:"status"`
+	Solvable       int    `json:"solvable"`
+	PrecheckNote   string `json:"precheck_note,omitempty"`
+	Attempt        int    `json:"attempt"`
+	NextPage       int    `json:"next_page"`
+	TotalPages     int    `json:"total_pages"`
+	Progress       int    `json:"progress"`
+	Markdown       string `json:"markdown,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Model          string `json:"model,omitempty"`
+	OutputSize     int64  `json:"output_size,omitempty"`
+	SinglePass     bool   `json:"single_pass"`
+	HasOutput      bool   `json:"has_output"`
+	HasPrompts     bool   `json:"has_prompts"`
+	Archived       bool   `json:"archived"`
+	ElapsedSeconds int64  `json:"elapsed_seconds"`
+	Prompts        string `json:"prompts,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	StartedAt      string `json:"started_at,omitempty"`
+	FinishedAt     string `json:"finished_at,omitempty"`
 }
 
 func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) AITaskView {
@@ -66,14 +69,25 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) A
 	if row.Status == "succeeded" {
 		progress = 100
 	}
+	end := time.Now().UTC()
+	if !row.FinishedAt.IsZero() {
+		end = row.FinishedAt
+	} else if row.Status == "paused" && !row.UpdatedAt.IsZero() {
+		end = row.UpdatedAt
+	}
+	elapsedSeconds := int64(0)
+	if !row.StartedAt.IsZero() && end.After(row.StartedAt) {
+		elapsedSeconds = int64(end.Sub(row.StartedAt).Seconds())
+	}
 	view := AITaskView{
 		ID: row.ID, ResourceID: row.ResourceID, ResourceName: row.ResourceName,
 		CourseCode: row.CourseCode, Status: row.Status, Solvable: row.Solvable,
 		PrecheckNote: row.PrecheckNote, Attempt: row.Attempt, NextPage: row.NextPage,
 		TotalPages: row.TotalPages, Progress: progress, Error: row.Error, Model: row.Model,
-		OutputSize: row.OutputSize, HasOutput: row.OutputKey != "", Archived: row.ResourceArchived,
+		OutputSize: row.OutputSize, HasOutput: row.OutputKey != "", HasPrompts: row.PromptsJSON != "", Archived: row.ResourceArchived,
 		SinglePass: row.TotalPages > 0 && (pagesPerChunk <= 0 || row.TotalPages <= pagesPerChunk),
 		CreatedAt:  row.CreatedAt.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Format(time.RFC3339),
+		ElapsedSeconds: elapsedSeconds,
 	}
 	if !row.StartedAt.IsZero() {
 		view.StartedAt = row.StartedAt.Format(time.RFC3339)
@@ -83,6 +97,7 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) A
 	}
 	if includeMarkdown {
 		view.Markdown = row.Markdown
+		view.Prompts = row.PromptsJSON
 	}
 	return view
 }
@@ -114,6 +129,7 @@ func (a *App) initAIAnalysis() error {
 	a.aiWindows = windows
 	a.aiLocation = location
 	a.aiCancel = make(map[string]context.CancelFunc)
+	a.aiWake = make(chan struct{}, 1)
 	for _, binary := range []string{"pdftohtml", "cwebp", "weasyprint", "node"} {
 		if _, err := exec.LookPath(binary); err != nil {
 			a.Logger.Warn("AI analysis dependency missing", "binary", binary, "hint", "apt-get install -y poppler-utils webp weasyprint fonts-noto-cjk nodejs npm")
@@ -153,6 +169,13 @@ func (a *App) StartAIAnalysis(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
+			case <-a.aiWake:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 			}
 			processed := false
 			if ai.InWindow(a.aiWindows, a.aiNow()) {
@@ -173,7 +196,8 @@ func (a *App) StartAIAnalysis(ctx context.Context) {
 	}()
 }
 
-// EnqueueAIAnalyses creates or resets one task per resource.
+// EnqueueAIAnalyses creates a new run for each resource. Earlier runs are kept
+// as history.
 func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor string) ([]AITaskView, []map[string]string, error) {
 	if a.aiModel == nil {
 		return nil, nil, Err("ai_disabled", "AI 解析未启用", 503)
@@ -193,7 +217,19 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 			continue
 		}
 		seen[id] = true
-		task, err := a.Store.CreateOrResetAITask(ctx, id, actor)
+		// An explicit re-parse restarts the paper: stop any queued/running
+		// attempt (it stays in history as cancelled) and start a fresh run.
+		if active, ok, err := a.Store.GetActiveAITaskByResource(ctx, id); err != nil {
+			return nil, nil, err
+		} else if ok && (active.Status == "queued" || active.Status == "running") {
+			if _, err := a.CancelAITask(ctx, active.ID, actor); err != nil {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Code != "ai_inactive" {
+					return nil, nil, err
+				}
+			}
+		}
+		task, inserted, err := a.Store.CreateAITask(ctx, id, actor)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				failed = append(failed, map[string]string{"resource_id": id, "reason": "试卷不存在、已归档或不是 PDF"})
@@ -201,8 +237,17 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 			}
 			return nil, nil, err
 		}
-		if task.Status == "running" {
-			failed = append(failed, map[string]string{"resource_id": id, "reason": "该试卷正在解析中"})
+		if !inserted {
+			reason := "该试卷已有未完成的解析任务"
+			switch task.Status {
+			case "running":
+				reason = "该试卷正在解析中"
+			case "queued":
+				reason = "该试卷已在解析队列中"
+			case "paused":
+				reason = "该试卷有暂停中的解析任务，请先继续解析"
+			}
+			failed = append(failed, map[string]string{"resource_id": id, "reason": reason})
 			continue
 		}
 		row, err := a.Store.GetAITaskRow(ctx, task.ID)
@@ -212,9 +257,22 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 		created = append(created, aiTaskView(row, false, a.Cfg.AIPagesPerChunk))
 	}
 	if len(created) > 0 {
+		a.wakeAIWorker()
 		_ = a.Store.AddAudit(ctx, actor, "ai_analysis_enqueue", "resource_ai_task", "", fmt.Sprintf(`{"count":%d}`, len(created)), time.Now().UTC())
 	}
 	return created, failed, nil
+}
+
+// wakeAIWorker asks the single worker loop to check the queue immediately
+// instead of waiting for the next idle poll.
+func (a *App) wakeAIWorker() {
+	if a.aiWake == nil {
+		return
+	}
+	select {
+	case a.aiWake <- struct{}{}:
+	default:
+	}
 }
 
 // ListAITasksForAdmin lists jobs with their resource names.
@@ -242,8 +300,8 @@ func (a *App) GetAITaskForAdmin(ctx context.Context, id string) (AITaskView, err
 	return aiTaskView(row, true, a.Cfg.AIPagesPerChunk), nil
 }
 
-// RetryAITask resumes a failed/paused/cancelled/skipped job from its last
-// completed page.
+// RetryAITask resumes a paused job in place. Failed, cancelled and skipped
+// jobs get a new history row so the previous attempt is never overwritten.
 func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, error) {
 	task, err := a.Store.GetAITask(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -255,27 +313,47 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 	if task.Status == "running" {
 		return AITaskView{}, Err("ai_running", "该试卷正在解析中", 409)
 	}
-	status := "queued"
-	attempt := 0
-	zero := int64(0)
-	patch := sqlite.AITaskPatch{
-		Status: &status, Attempt: &attempt, Error: stringPtr(""), FinishedAt: timePtr(time.Time{}), OutputSize: &zero,
+	if task.Status == "paused" {
+		status := "queued"
+		attempt := 0
+		zero := int64(0)
+		patch := sqlite.AITaskPatch{
+			Status: &status, Attempt: &attempt, Error: stringPtr(""), FinishedAt: timePtr(time.Time{}), OutputSize: &zero,
+		}
+		if task.Solvable == 0 {
+			unknown := -1
+			empty := "[]"
+			one := 1
+			markdown := ""
+			patch.Solvable = &unknown
+			patch.MessagesJSON = &empty
+			patch.NextPage = &one
+			patch.Markdown = &markdown
+		}
+		if err := a.Store.UpdateAITask(ctx, task.ID, patch); err != nil {
+			return AITaskView{}, err
+		}
+		a.wakeAIWorker()
+		_ = a.Store.AddAudit(ctx, actor, "ai_analysis_retry", "resource_ai_task", task.ID, "{}", time.Now().UTC())
+		row, err := a.Store.GetAITaskRow(ctx, task.ID)
+		if err != nil {
+			return AITaskView{}, err
+		}
+		return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
 	}
-	if task.Solvable == 0 {
-		unknown := -1
-		empty := "[]"
-		one := 1
-		markdown := ""
-		patch.Solvable = &unknown
-		patch.MessagesJSON = &empty
-		patch.NextPage = &one
-		patch.Markdown = &markdown
-	}
-	if err := a.Store.UpdateAITask(ctx, task.ID, patch); err != nil {
+	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, actor)
+	if err != nil {
 		return AITaskView{}, err
 	}
-	_ = a.Store.AddAudit(ctx, actor, "ai_analysis_retry", "resource_ai_task", task.ID, "{}", time.Now().UTC())
-	row, err := a.Store.GetAITaskRow(ctx, task.ID)
+	if !inserted {
+		if created.Status == "running" {
+			return AITaskView{}, Err("ai_running", "该试卷正在解析中", 409)
+		}
+		return AITaskView{}, Err("ai_active", "该试卷已有未完成的解析任务", 409)
+	}
+	a.wakeAIWorker()
+	_ = a.Store.AddAudit(ctx, actor, "ai_analysis_retry", "resource_ai_task", created.ID, "{}", time.Now().UTC())
+	row, err := a.Store.GetAITaskRow(ctx, created.ID)
 	if err != nil {
 		return AITaskView{}, err
 	}
@@ -356,13 +434,22 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	defer a.unregisterAIRequest(task.ID)
 	defer cancel()
 
+	isCancelled := func() bool {
+		current, err := a.Store.GetAITask(context.Background(), task.ID)
+		return err == nil && current.Status == "cancelled"
+	}
+
 	finish := func(status, reason string) {
+		// A user cancel wins over any worker completion or failure path.
+		if isCancelled() {
+			return
+		}
 		// Use a background context: the worker context may already be
 		// cancelled by a shutdown or a cancel request.
 		writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer writeCancel()
 		now := time.Now().UTC()
-		patch := sqlite.AITaskPatch{Status: &status, Error: &reason}
+		patch := sqlite.AITaskPatch{Status: &status, Error: &reason, SkipIfCancelled: true}
 		if status != "paused" && status != "queued" {
 			patch.FinishedAt = &now
 		}
@@ -378,7 +465,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 		writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer writeCancel()
 		_ = a.Store.UpdateAITask(writeCtx, task.ID, sqlite.AITaskPatch{
-			Status: stringPtr("paused"), Attempt: intPtr(0), Error: &reason,
+			Status: stringPtr("paused"), Attempt: intPtr(0), Error: &reason, SkipIfCancelled: true,
 		})
 	}
 
@@ -425,7 +512,8 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 
 	history := ai.DecodeMessages(task.MessagesJSON)
 	if task.Solvable < 0 {
-		verdict, raw, err := a.precheckPaper(ctx, paper)
+		verdict, raw, promptCalls, err := a.precheckPaper(ctx, paper)
+		a.saveAIPrompts(task.ID, &task.PromptsJSON, promptCalls)
 		if err != nil {
 			if ctx.Err() != nil || a.aiWindowClosed() {
 				pause("等待下一个解析时间窗")
@@ -444,10 +532,14 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			a.Logger.Error("save AI precheck", "error", err, "task", task.ID)
 		}
 		if !verdict.Solvable {
+			if isCancelled() {
+				_ = os.RemoveAll(workDir)
+				return
+			}
 			markdown := ""
 			finishPatch := sqlite.AITaskPatch{
 				Status: stringPtr("skipped"), Error: stringPtr("预判为不可解答：" + verdict.Reason),
-				Markdown: &markdown, FinishedAt: timePtr(time.Now().UTC()),
+				Markdown: &markdown, FinishedAt: timePtr(time.Now().UTC()), SkipIfCancelled: true,
 			}
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = a.Store.UpdateAITask(cleanupCtx, task.ID, finishPatch)
@@ -482,8 +574,9 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			return
 		}
 		callCtx, callCancel, windowEnd := a.aiCallContext(ctx)
-		content, err := a.aiModel.Analyze(callCtx, history, parts)
+		content, promptCalls, err := a.aiModel.Analyze(callCtx, history, parts)
 		callCancel()
+		a.saveAIPrompts(task.ID, &task.PromptsJSON, promptCalls)
 		if err != nil {
 			if ctx.Err() != nil {
 				pause("服务停止，等待恢复")
@@ -553,52 +646,104 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 		finish("failed", "对象存储不可用")
 		return
 	}
-	outputKey := aiOutputPrefix + task.ResourceID + ".pdf"
+	outputKey := aiOutputPrefix + task.ResourceID + "/" + task.ID + ".pdf"
+	if isCancelled() {
+		_ = os.RemoveAll(workDir)
+		return
+	}
 	if err := client.PutObject(ctx, outputKey, "application/pdf", pdf); err != nil {
 		finish("failed", "上传解析 PDF 失败："+err.Error())
 		return
 	}
 	outputSize := int64(len(pdf))
 	succeeded := "succeeded"
-	_ = a.Store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
+	if isCancelled() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.DeleteObject(cleanupCtx, outputKey)
+		cleanupCancel()
+		_ = os.RemoveAll(workDir)
+		return
+	}
+	if err := a.Store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
 		Status: &succeeded, OutputKey: &outputKey, OutputSize: &outputSize,
 		Error: stringPtr(""), FinishedAt: timePtr(time.Now().UTC()), NextPage: &nextPage,
-		Markdown: &task.Markdown,
-	})
+		Markdown: &task.Markdown, SkipIfCancelled: true,
+	}); err == nil {
+		a.cleanupOlderAITasks(task)
+	}
 	_ = os.RemoveAll(workDir)
 }
 
-func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, string, error) {
+// cleanupOlderAITasks keeps only the newest successful run for a paper. Older
+// rows and their PDFs are removed once the new result is safely stored.
+func (a *App) cleanupOlderAITasks(task sqlite.AITask) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	keys, err := a.Store.DeleteOlderAITasks(ctx, task.ResourceID, task.ID)
+	if err != nil {
+		a.Logger.Warn("delete older AI tasks", "error", err, "task", task.ID)
+		return
+	}
+	if len(keys) == 0 {
+		return
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		a.Logger.Warn("delete older AI outputs", "error", err, "task", task.ID)
+		return
+	}
+	for _, key := range keys {
+		if err := client.DeleteObject(ctx, key); err != nil {
+			a.Logger.Warn("delete older AI output", "error", err, "key", key)
+		}
+	}
+}
+
+func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, string, []ai.PromptCall, error) {
 	attempts := 0
+	calls := make([]ai.PromptCall, 0)
 	for {
 		if !a.aiInWindow() {
-			return ai.Verdict{}, "", fmt.Errorf("等待解析时间窗")
+			return ai.Verdict{}, "", calls, fmt.Errorf("等待解析时间窗")
 		}
 		instruction := fmt.Sprintf("下面是《%s》的前 %d 页（共 %d 页）。请判断它是否是可用于作答的试卷，并只输出 JSON。",
 			paper.Title, minInt(aiPrecheckPages, paper.TotalPages), paper.TotalPages)
 		parts, _, err := ai.BuildContent(paper, 1, minInt(aiPrecheckPages, paper.TotalPages), instruction)
 		if err != nil {
-			return ai.Verdict{}, "", err
+			return ai.Verdict{}, "", calls, err
 		}
 		callCtx, callCancel, windowEnd := a.aiCallContext(ctx)
-		verdict, raw, err := a.aiModel.Precheck(callCtx, parts)
+		verdict, raw, promptCalls, err := a.aiModel.Precheck(callCtx, parts)
 		callCancel()
+		calls = append(calls, promptCalls...)
 		if err == nil {
-			return verdict, raw, nil
+			return verdict, raw, calls, nil
 		}
 		if ai.IsPermanentError(err) {
-			return ai.Verdict{}, "", err
+			return ai.Verdict{}, "", calls, err
 		}
 		if ctx.Err() != nil || !time.Now().Before(windowEnd) || a.aiWindowClosed() {
-			return ai.Verdict{}, "", err
+			return ai.Verdict{}, "", calls, err
 		}
 		attempts++
 		if attempts >= a.Cfg.AIMaxAttempts {
-			return ai.Verdict{}, "", err
+			return ai.Verdict{}, "", calls, err
 		}
 		if !a.sleepInWindow(ctx, aiRetryDelay(attempts)) {
-			return ai.Verdict{}, "", err
+			return ai.Verdict{}, "", calls, err
 		}
+	}
+}
+
+func (a *App) saveAIPrompts(taskID string, prompts *string, calls []ai.PromptCall) {
+	if len(calls) == 0 {
+		return
+	}
+	*prompts = ai.AppendPromptCalls(*prompts, calls)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Store.UpdateAITask(ctx, taskID, sqlite.AITaskPatch{PromptsJSON: prompts}); err != nil {
+		a.Logger.Warn("save AI prompts", "error", err, "task", taskID)
 	}
 }
 

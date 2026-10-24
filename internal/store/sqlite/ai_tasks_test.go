@@ -33,12 +33,17 @@ func TestAITaskLifecycle(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
-	task, err := store.CreateOrResetAITask(ctx, resourceID, "admin")
+	task, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != "queued" || task.NextPage != 1 || task.Solvable != -1 {
-		t.Fatalf("new task = %#v", task)
+	if !inserted || task.Status != "queued" || task.NextPage != 1 || task.Solvable != -1 {
+		t.Fatalf("new task = %#v inserted=%v", task, inserted)
+	}
+
+	same, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
+	if err != nil || inserted || same.ID != task.ID {
+		t.Fatalf("active task should be reused: %#v inserted=%v err=%v", same, inserted, err)
 	}
 
 	claimed, ok, err := store.ClaimNextAITask(ctx)
@@ -71,25 +76,39 @@ func TestAITaskLifecycle(t *testing.T) {
 		t.Fatalf("reloaded = %#v err=%v", reloaded, err)
 	}
 
-	// Re-enqueueing an existing task resets progress.
-	if _, err := store.CreateOrResetAITask(ctx, resourceID, "admin"); err != nil {
+	// An unfinished run is never duplicated.
+	if _, inserted, err := store.CreateAITask(ctx, resourceID, "admin"); err != nil || inserted {
+		t.Fatalf("active task should not be duplicated: inserted=%v err=%v", inserted, err)
+	}
+
+	// Once the first run finishes, re-analysing keeps it and starts a new row.
+	succeeded := "succeeded"
+	if err := store.UpdateAITask(ctx, task.ID, AITaskPatch{Status: &succeeded}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, _ = store.GetAITask(ctx, task.ID)
-	if reloaded.NextPage != 1 || reloaded.Markdown != "" {
-		t.Fatalf("reset task = %#v", reloaded)
+	newTask, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
+	if err != nil || !inserted || newTask.ID == task.ID {
+		t.Fatalf("re-analysis should create a new row: %#v inserted=%v err=%v", newTask, inserted, err)
+	}
+	old, err := store.GetAITask(ctx, task.ID)
+	if err != nil || old.Status != "succeeded" || old.Markdown != markdown {
+		t.Fatalf("previous run was not preserved: %#v err=%v", old, err)
 	}
 
 	list, total, err := store.ListAITasks(ctx, "queued", "高数", 10, 0)
-	if err != nil || total != 1 || len(list) != 1 {
+	if err != nil || total != 1 || len(list) != 1 || list[0].ID != newTask.ID {
 		t.Fatalf("list = %#v total=%d err=%v", list, total, err)
+	}
+	all, err := store.ListAITasksByResource(ctx, resourceID)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("history = %#v err=%v", all, err)
 	}
 }
 
 func TestAITaskZeroFinishedAt(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
-	task, err := store.CreateOrResetAITask(ctx, resourceID, "admin")
+	task, _, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,5 +126,96 @@ func TestAITaskZeroFinishedAt(t *testing.T) {
 	}
 	if !reloaded.FinishedAt.IsZero() {
 		t.Fatalf("finished_at = %v", reloaded.FinishedAt)
+	}
+}
+
+func TestAllowMultipleAITasksPerResource(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resources (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
+		id TEXT PRIMARY KEY,
+		resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE,
+		status TEXT NOT NULL DEFAULT 'queued',
+		solvable INTEGER NOT NULL DEFAULT -1,
+		precheck_note TEXT NOT NULL DEFAULT '',
+		attempt INTEGER NOT NULL DEFAULT 0,
+		next_page INTEGER NOT NULL DEFAULT 1,
+		total_pages INTEGER NOT NULL DEFAULT 0,
+		messages_json TEXT NOT NULL DEFAULT '[]',
+		markdown TEXT NOT NULL DEFAULT '',
+		output_key TEXT NOT NULL DEFAULT '',
+		output_size INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		created_by TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		started_at INTEGER NOT NULL DEFAULT 0,
+		finished_at INTEGER NOT NULL DEFAULT 0,
+		prompts_json TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resources(id) VALUES ('res_1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_at, updated_at)
+		VALUES ('ai_old', 'res_1', 'succeeded', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.allowMultipleAITasksPerResource(ctx); err != nil {
+		t.Fatalf("allow multiple AI tasks: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_at, updated_at)
+		VALUES ('ai_new', 'res_1', 'queued', 2, 2)`); err != nil {
+		t.Fatalf("second task for the same resource: %v", err)
+	}
+	var count int
+	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_ai_tasks WHERE resource_id = 'res_1'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("task count = %d, want 2", count)
+	}
+}
+
+func TestDeleteOlderAITasksKeepsNewest(t *testing.T) {
+	store, resourceID := newAITestStore(t)
+	ctx := context.Background()
+	first, _, err := store.CreateAITask(ctx, resourceID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstKey := "ai/papers/" + resourceID + "/" + first.ID + ".pdf"
+	succeeded := "succeeded"
+	if err := store.UpdateAITask(ctx, first.ID, AITaskPatch{Status: &succeeded, OutputKey: &firstKey}); err != nil {
+		t.Fatal(err)
+	}
+	second, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
+	if err != nil || !inserted {
+		t.Fatalf("second task: %#v inserted=%v err=%v", second, inserted, err)
+	}
+	secondKey := "ai/papers/" + resourceID + "/" + second.ID + ".pdf"
+	if err := store.UpdateAITask(ctx, second.ID, AITaskPatch{Status: &succeeded, OutputKey: &secondKey}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := store.DeleteOlderAITasks(ctx, resourceID, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0] != firstKey {
+		t.Fatalf("output keys = %#v", keys)
+	}
+	all, err := store.ListAITasksByResource(ctx, resourceID)
+	if err != nil || len(all) != 1 || all[0].ID != second.ID {
+		t.Fatalf("remaining tasks = %#v err=%v", all, err)
 	}
 }

@@ -66,6 +66,7 @@ type App struct {
 	aiLocation *time.Location
 	aiCancelMu sync.Mutex
 	aiCancel   map[string]context.CancelFunc
+	aiWake     chan struct{}
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {
