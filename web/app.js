@@ -328,8 +328,12 @@ import { template } from './template.js';
       const aiTasks = ref([]);
       const aiTotal = ref(0);
       const aiSearch = ref('');
-      const aiPreviewDialog = ref(false);
-      const aiPreviewUrl = ref('');
+      const aiPromptDialog = ref(false);
+      const aiPromptText = ref('');
+      const aiPromptTitle = ref('');
+      const aiPromptCalls = ref([]);
+      const aiPromptTab = ref('rendered');
+      const promptViewEl = ref(null);
       const contributorDialog = ref(false);
       const contributorKind = ref('');
       const contributorId = ref('');
@@ -432,6 +436,7 @@ import { template } from './template.js';
       const eventChartEl = ref(null);
       const featureChartEl = ref(null);
       let aiPollTimer = null;
+      let mathJaxPromise = null;
       let chart = null;
       let collegeChart = null;
       let platformChart = null;
@@ -659,22 +664,48 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
       const aiHeaders = [
-        { title: '试卷', key: 'resource_name', width: '28%' },
-        { title: '状态', key: 'status', align: 'center', width: '11%' },
-        { title: '进度', key: 'progress', align: 'center', width: '16%' },
-        { title: '模型', key: 'model', width: '10%' },
-        { title: '更新时间', key: 'updated_at', width: '14%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
+        { title: '试卷', key: 'resource_name', width: '26%' },
+        { title: '课程号', key: 'course_code', width: '12%' },
+        { title: '状态', key: 'status', align: 'center', width: '10%' },
+        { title: '耗时', key: 'elapsed', align: 'center', width: '12%' },
+        { title: '更新时间', key: 'updated_at', width: '16%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '24%' }
       ];
-      const aiStatusLabel = (status) => ({ queued: '排队中', running: '解析中', paused: '已暂停', succeeded: '已完成', failed: '失败', skipped: '不可解答', cancelled: '已取消' }[status] || valueOrDash(status));
-      const aiStatusColor = (status) => ({ queued: 'info', running: 'primary', paused: 'warning', succeeded: 'success', failed: 'error', skipped: 'secondary', cancelled: 'secondary' }[status] || 'secondary');
-      const aiTaskForResource = (resourceId) => (aiTasks.value || []).find(task => task.resource_id === resourceId);
+      const aiStatusLabel = (status) => ({ queued: '排队中', running: '解析中', paused: '已暂停', succeeded: '已完成', failed: '失败', skipped: '不可解答', cancelled: '取消' }[status] || valueOrDash(status));
+      const aiElapsedLabel = (row) => {
+        const seconds = rawItem(row).elapsed_seconds;
+        return Number.isFinite(seconds) ? Math.max(0, seconds) + 's' : '—';
+      };
+      const aiTaskForResource = (resourceId) => (aiTasks.value || []).reduce((latest, task) => {
+        if (task.resource_id !== resourceId) return latest;
+        if (!latest) return task;
+        const current = Date.parse(task.created_at || '') || 0;
+        const previous = Date.parse(latest.created_at || '') || 0;
+        return current > previous || (current === previous && task.id > latest.id) ? task : latest;
+      }, null);
+      const aiIsLatestTask = (row) => {
+        const item = rawItem(row);
+        const latest = aiTaskForResource(item.resource_id);
+        return latest ? latest.id === item.id : false;
+      };
+      const aiLatestOutputTask = (resourceId) => (aiTasks.value || []).reduce((latest, task) => {
+        if (task.resource_id !== resourceId || !task.has_output) return latest;
+        if (!latest) return task;
+        const current = Date.parse(task.created_at || '') || 0;
+        const previous = Date.parse(latest.created_at || '') || 0;
+        return current > previous || (current === previous && task.id > latest.id) ? task : latest;
+      }, null);
+      const aiIsLatestOutput = (row) => {
+        const item = rawItem(row);
+        const latest = aiLatestOutputTask(item.resource_id);
+        return latest ? latest.id === item.id : false;
+      };
       const aiActionLabel = (resourceId) => {
         const task = aiTaskForResource(resourceId);
         if (!task) return 'AI解析';
         if (task.status === 'running') return '解析中';
         if (task.status === 'queued') return '排队中';
-        if (task.status === 'succeeded') return '重新解析';
+        if (task.status === 'succeeded') return '重解';
         if (task.status === 'paused') return '继续解析';
         if (task.status === 'failed') return '重试';
         return 'AI解析';
@@ -1213,11 +1244,13 @@ import { template } from './template.js';
       });
       const enqueueAIItem = (row) => {
         const item = rawItem(row);
+        const task = aiTaskForResource(item.id);
+        if (task && task.status === 'paused') return retryAITask(task);
         return enqueueAIResources([item.id]);
       };
-      const enqueueCourseAI = () => {
-        const ids = (courseResources.value || []).filter(item => item.format === 'pdf').map(item => item.id);
-        return enqueueAIResources(ids);
+      const reanalyzeAITask = (row) => {
+        const item = rawItem(row);
+        return enqueueAIResources([item.resource_id]);
       };
       const retryAITask = (row) => call(async () => {
         const item = rawItem(row);
@@ -1236,22 +1269,61 @@ import { template } from './template.js';
         const item = rawItem(row);
         await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', (item.resource_name || '试卷') + '-AI解析.pdf');
       });
-      const openAITaskPreview = (row) => call(async () => {
-        const item = rawItem(row);
-        const headers = {};
-        const access = localStorage.getItem('control_admin');
-        if (access) headers.Authorization = 'Bearer ' + access;
-        const response = await fetch('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', { credentials: 'same-origin', headers });
-        if (!response.ok) throw new Error('打开预览失败');
-        if (aiPreviewUrl.value) URL.revokeObjectURL(aiPreviewUrl.value);
-        aiPreviewUrl.value = URL.createObjectURL(await response.blob());
-        aiPreviewDialog.value = true;
-      });
-      const closeAITaskPreview = () => {
-        if (aiPreviewUrl.value) URL.revokeObjectURL(aiPreviewUrl.value);
-        aiPreviewUrl.value = '';
-        aiPreviewDialog.value = false;
+      const loadMathJax = () => {
+        if (window.MathJax && window.MathJax.typesetPromise) return Promise.resolve();
+        if (mathJaxPromise) return mathJaxPromise;
+        mathJaxPromise = new Promise((resolve) => {
+          window.MathJax = {
+            tex: {
+              inlineMath: [['$', '$'], ['\\(', '\\)']],
+              displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: { fontCache: 'global' },
+            options: { enableMenu: false },
+            startup: { typeset: false }
+          };
+          const script = document.createElement('script');
+          script.src = '/vendor/js/mathjax-tex-svg.js';
+          script.onload = () => {
+            const ready = window.MathJax && window.MathJax.startup && window.MathJax.startup.promise;
+            if (ready) ready.then(resolve).catch(resolve); else resolve();
+          };
+          script.onerror = () => resolve();
+          document.head.appendChild(script);
+        });
+        return mathJaxPromise;
       };
+      const renderAIPrompts = async () => {
+        if (aiPromptTab.value !== 'rendered') return;
+        await nextTick();
+        const el = promptViewEl.value;
+        if (!el) return;
+        try {
+          await loadMathJax();
+          if (window.MathJax && window.MathJax.typesetPromise) await window.MathJax.typesetPromise([el]);
+        } catch (_) {}
+      };
+      const openAIPrompts = (row) => call(async () => {
+        const item = rawItem(row);
+        const out = await api('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id));
+        let text = out.prompts || '';
+        let calls = [];
+        try {
+          calls = JSON.parse(text);
+          text = JSON.stringify(calls, null, 2);
+        } catch (_) {}
+        aiPromptCalls.value = Array.isArray(calls) ? calls : [];
+        aiPromptText.value = text;
+        aiPromptTitle.value = item.resource_name || 'Prompt';
+        aiPromptTab.value = 'rendered';
+        aiPromptDialog.value = true;
+      });
+      watch(aiPromptDialog, async (open) => {
+        if (!open) return;
+        await nextTick();
+        await nextTick();
+        await renderAIPrompts();
+      });
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
         const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code));
@@ -1996,8 +2068,14 @@ import { template } from './template.js';
         window.addEventListener('popstate', handlePopState);
         statsTimer = setInterval(refreshStatsSilently, 10 * 60 * 1000);
         aiPollTimer = setInterval(() => {
-          if (view.value === 'resources' && (aiTasks.value || []).some(task => task.status === 'running' || task.status === 'queued')) loadAITasks();
-        }, 5000);
+          if (view.value !== 'resources') return;
+          if (!(aiTasks.value || []).some(task => ['running', 'queued', 'paused'].includes(task.status))) return;
+          loadAITasks().catch((e) => {
+            if (e && e.status === 401 && logged.value) {
+              clearAdminSession();
+            }
+          });
+        }, 1000);
       });
       onBeforeUnmount(() => { window.removeEventListener('resize', handleResize); window.removeEventListener('popstate', handlePopState); if (chart) chart.dispose(); if (platformChart) platformChart.dispose(); if (collegeChart) collegeChart.dispose(); if (eventChart) eventChart.dispose(); if (featureChart) featureChart.dispose(); if (cdnChart) cdnChart.dispose(); if (hostChart) hostChart.dispose(); if (bucketChart) bucketChart.dispose(); if (bucketPollTimer) clearTimeout(bucketPollTimer); if (cdnPollTimer) clearTimeout(cdnPollTimer); if (statsTimer) clearInterval(statsTimer); if (aiPollTimer) clearInterval(aiPollTimer); });
 
@@ -2008,7 +2086,7 @@ import { template } from './template.js';
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
-        aiTasks, aiTotal, aiSearch, aiHeaders, aiPreviewDialog, aiPreviewUrl, aiStatusLabel, aiStatusColor, aiActionLabel, loadAITasks, enqueueAIItem, enqueueCourseAI, retryAITask, cancelAITask, downloadAITask, openAITaskPreview, closeAITaskPreview,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
