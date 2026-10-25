@@ -243,9 +243,10 @@ import { template } from './template.js';
       const adminForm = ref({ key: '' });
       const adminPermsForm = ref({});
       const drawer = ref(false);
-      const VIEW_ROUTES = ['overview', 'users', 'admins', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'config', 'audit'];
+      const VIEW_ROUTES = ['overview', 'users', 'admins', 'devices', 'risk', 'error-reports', 'library', 'textbooks', 'resources', 'courses', 'share-codes', 'app-config', 'web-config', 'audit'];
       const viewForPath = (pathname) => {
         const name = String(pathname || '').replace(/^\/+|\/+$/g, '');
+        if (name === 'config') return 'app-config';
         return VIEW_ROUTES.includes(name) ? name : 'overview';
       };
       const view = ref(viewForPath(window.location.pathname));
@@ -482,11 +483,16 @@ import { template } from './template.js';
         { key: 'resources', label: '试卷', icon: 'mdi-file-document-multiple-outline' },
         { key: 'courses', label: '课程', icon: 'mdi-book-open-variant' },
         { key: 'share-codes', label: '分享码', icon: 'mdi-share-variant-outline' },
-        { key: 'config', label: '配置', icon: 'mdi-cog-outline' },
+        { key: 'app-config', label: 'APP 配置', icon: 'mdi-cellphone-cog' },
+        { key: 'web-config', label: 'WEB 配置', icon: 'mdi-cog-outline' },
         { key: 'audit', label: '审计', icon: 'mdi-history' }
       ];
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
+      // The console splits configuration into two pages but keeps one grant:
+      // existing rows store "config=r/rw", so both pages share it.
+      const PAGE_PERMISSION = { 'app-config': 'config', 'web-config': 'config' };
       const canAccess = (page, write) => {
+        page = PAGE_PERMISSION[page] || page;
         const perms = adminPerms.value || {};
         if (perms['*'] === 'rw') return true;
         const access = perms[page];
@@ -507,7 +513,7 @@ import { template } from './template.js';
         { key: 'resources', label: '试卷' },
         { key: 'courses', label: '课程' },
         { key: 'share-codes', label: '分享码' },
-        { key: 'config', label: '配置' },
+        { key: 'config', label: 'APP/WEB 配置' },
         { key: 'audit', label: '审计' }
       ];
       const adminPageKeys = adminPageOptions.map((page) => page.key);
@@ -1783,7 +1789,8 @@ import { template } from './template.js';
           else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources(), loadAITasks()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
-          else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar(), loadSettings()]);
+          else if (view.value === 'app-config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
+          else if (view.value === 'web-config') await loadSettings();
           else if (view.value === 'audit') audit.value = ((await api('/api/v1/admin/audit?limit=100')).items || []).map(item => Object.assign({}, item, { target_text: [item.target_type, item.target_id].filter(Boolean).join(' ') }));
         });
       };
