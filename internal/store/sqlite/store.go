@@ -180,6 +180,24 @@ func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
 // dropped before validation so an existing database is not rebuilt.
 var removedTables = []string{"question_bank_order_counter"}
 
+// removedIndexes lists obsolete indexes that the embedded schema no longer
+// creates. They are dropped on open so an existing database stops paying the
+// write cost; indexes are derivable, so no snapshot is written.
+var removedIndexes = []string{
+	"idx_question_banks_archived",
+	"idx_textbooks_archived",
+	"idx_resources_archived",
+}
+
+func (s *Store) dropRemovedIndexes(ctx context.Context) error {
+	for _, name := range removedIndexes {
+		if _, err := s.DB.ExecContext(ctx, `DROP INDEX IF EXISTS "`+name+`"`); err != nil {
+			return fmt.Errorf("remove index %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 var removedColumns = []struct {
 	table  string
 	column string
@@ -416,6 +434,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if err := s.applyColumnRemovals(ctx); err != nil {
 		return fmt.Errorf("apply column removals: %w", err)
+	}
+	if err := s.dropRemovedIndexes(ctx); err != nil {
+		return fmt.Errorf("apply index removals: %w", err)
 	}
 	if err := s.allowMultipleAITasksPerResource(ctx); err != nil {
 		return fmt.Errorf("allow multiple AI tasks: %w", err)

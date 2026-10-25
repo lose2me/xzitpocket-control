@@ -263,8 +263,12 @@ CREATE INDEX IF NOT EXISTS idx_events_user_time ON activity_events(user_id, occu
 CREATE INDEX IF NOT EXISTS idx_error_reports_student_time ON error_reports(student_id_hash, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_error_reports_user_time ON error_reports(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_device ON sessions(user_id, device_id, revoked_at);
+-- Batch revocation by device (device ban, force logout) filters on device_id only.
+CREATE INDEX IF NOT EXISTS idx_sessions_device ON sessions(device_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_risk_time_type ON risk_events(created_at, type);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at);
+-- Login-attempt risk counting filters on action + a time window.
+CREATE INDEX IF NOT EXISTS idx_audit_action_time ON audit_logs(action, created_at);
 CREATE INDEX IF NOT EXISTS idx_questions_bank_order ON questions(bank_id, question_number, sort_order);
 CREATE INDEX IF NOT EXISTS idx_question_options_question_order ON question_options(question_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bank_status ON library_cdks(question_bank_id, status);
@@ -329,9 +333,6 @@ CREATE TABLE IF NOT EXISTS resources (
 
 CREATE INDEX IF NOT EXISTS idx_resources_name ON resources(name);
 CREATE INDEX IF NOT EXISTS idx_resources_course ON resources(course_code);
-CREATE INDEX IF NOT EXISTS idx_question_banks_archived ON question_banks(archived_at);
-CREATE INDEX IF NOT EXISTS idx_textbooks_archived ON textbooks(archived_at);
-CREATE INDEX IF NOT EXISTS idx_resources_archived ON resources(archived_at);
 
 -- PDFs uploaded by app users and waiting for administrator review. An
 -- approved submission becomes a textbooks/resources row that keeps pdf_key;
