@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"xzitpocket-control/internal/config"
 	"xzitpocket-control/internal/store/sqlite"
@@ -139,5 +140,69 @@ func TestLoadSettingsSeedsFromConfig(t *testing.T) {
 	}
 	if raw := stored[config.SettingCOSSecretKey]; !strings.HasPrefix(raw, settingSecretPrefix) || strings.Contains(raw, "seed-secret") {
 		t.Fatalf("seeded secret is not encrypted: %q", raw)
+	}
+}
+
+// TestAIEnablementFollowsAPIKey covers the removal of the enable switch: a
+// configured key starts the worker, clearing the key stops it.
+func TestAIEnablementFollowsAPIKey(t *testing.T) {
+	a, _ := newCourseApp(t)
+	ctx := context.Background()
+
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		config.SettingAIAPIKey:         "sk-test",
+		config.SettingAIBaseURL:        "https://api.example.com/v1",
+		config.SettingAIModel:          "test-model",
+		config.SettingAIWindows:        "00:00-24:00",
+		config.SettingAITimezone:       "UTC",
+		config.SettingAIPagesPerChunk:  "30",
+		config.SettingAIRequestTimeout: "10m",
+		config.SettingAIMaxAttempts:    "3",
+		config.SettingAIImageQuality:   "80",
+		config.SettingAIImageMaxEdge:   "1600",
+	}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.cfg().AIAnalysisEnabled || a.ai().model == nil {
+		t.Fatalf("AI should be enabled once a key is stored: %+v", a.cfg().AIAnalysisEnabled)
+	}
+
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Clear: []string{config.SettingAIAPIKey}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if a.cfg().AIAnalysisEnabled || a.ai().model != nil {
+		t.Fatal("AI must stop when the API key is cleared")
+	}
+}
+
+// TestLoadSettingsDropsObsoleteToggle removes CONTROL_AI_ENABLED rows left in
+// databases created before the switch was dropped.
+func TestLoadSettingsDropsObsoleteToggle(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateSettings(ctx, map[string]string{"CONTROL_AI_ENABLED": "false"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(config.Config{
+		TokenPepper:   []byte("token"),
+		IDPepper:      []byte("id"),
+		EncryptionKey: []byte("01234567890123456789012345678901"),
+		AdminKey:      "test",
+	}, store, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored["CONTROL_AI_ENABLED"]; ok {
+		t.Fatalf("obsolete toggle was not removed: %#v", stored)
 	}
 }

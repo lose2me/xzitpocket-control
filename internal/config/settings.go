@@ -29,7 +29,6 @@ const (
 	SettingCDNURLTTL            = "CONTROL_CDN_URL_TTL"
 	SettingMonitorSecretID      = "CONTROL_MONITOR_SECRET_ID"
 	SettingMonitorSecretKey     = "CONTROL_MONITOR_SECRET_KEY"
-	SettingAIEnabled            = "CONTROL_AI_ENABLED"
 	SettingAIAPIKey             = "CONTROL_AI_API_KEY"
 	SettingAIBaseURL            = "CONTROL_AI_BASE_URL"
 	SettingAIModel              = "CONTROL_AI_MODEL"
@@ -103,7 +102,6 @@ var SettingSpecs = []SettingSpec{
 	{Key: SettingMonitorSecretID, Group: "monitoring", Label: "SecretId", Kind: SettingKindSecret},
 	{Key: SettingMonitorSecretKey, Group: "monitoring", Label: "SecretKey", Kind: SettingKindSecret},
 
-	{Key: SettingAIEnabled, Group: "ai", Label: "启用 AI 解析", Kind: SettingKindBool},
 	{Key: SettingAIAPIKey, Group: "ai", Label: "API Key", Kind: SettingKindSecret},
 	{Key: SettingAIBaseURL, Group: "ai", Label: "API 地址", Kind: SettingKindURL},
 	{Key: SettingAIModel, Group: "ai", Label: "模型", Kind: SettingKindString},
@@ -148,7 +146,6 @@ func RuntimeValues(cfg Config) map[string]string {
 		SettingCDNURLTTL:            cfg.CDNURLTTL.String(),
 		SettingMonitorSecretID:      cfg.MonitorSecretID,
 		SettingMonitorSecretKey:     cfg.MonitorSecretKey,
-		SettingAIEnabled:            strconv.FormatBool(cfg.AIAnalysisEnabled),
 		SettingAIAPIKey:             cfg.AIAPIKey,
 		SettingAIBaseURL:            cfg.AIBaseURL,
 		SettingAIModel:              cfg.AIModel,
@@ -256,13 +253,6 @@ func ApplyRuntime(cfg *Config, values map[string]string) error {
 	if err := parseDuration(SettingCDNURLTTL, &cfg.CDNURLTTL); err != nil {
 		return err
 	}
-	if raw, ok := get(SettingAIEnabled); ok {
-		value, err := strconv.ParseBool(raw)
-		if err != nil {
-			return fmt.Errorf("%s 需要是 true 或 false", SettingAIEnabled)
-		}
-		cfg.AIAnalysisEnabled = value
-	}
 	if err := parseInt(SettingAIPagesPerChunk, 1, 200, &cfg.AIPagesPerChunk); err != nil {
 		return err
 	}
@@ -278,5 +268,7 @@ func ApplyRuntime(cfg *Config, values map[string]string) error {
 	if err := parseInt(SettingAIImageMaxEdge, 320, 4096, &cfg.AIImageMaxEdge); err != nil {
 		return err
 	}
+	// No separate switch: AI runs whenever an API key is configured.
+	cfg.AIAnalysisEnabled = strings.TrimSpace(cfg.AIAPIKey) != ""
 	return nil
 }

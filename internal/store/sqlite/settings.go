@@ -51,6 +51,23 @@ func (s *Store) SeedSettings(ctx context.Context, values map[string]string, now 
 	return tx.Commit()
 }
 
+// DeleteSettings removes stored keys and reports how many rows were deleted.
+func (s *Store) DeleteSettings(ctx context.Context, keys []string) (int64, error) {
+	var deleted int64
+	for _, key := range keys {
+		result, err := s.DB.ExecContext(ctx, "DELETE FROM app_settings WHERE key = ?", key)
+		if err != nil {
+			return deleted, fmt.Errorf("delete setting %s: %w", key, err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return deleted, err
+		}
+		deleted += count
+	}
+	return deleted, nil
+}
+
 // UpdateSettings upserts the given keys. Values are stored as provided; secret
 // encryption happens in the application layer.
 func (s *Store) UpdateSettings(ctx context.Context, values map[string]string, now time.Time) error {

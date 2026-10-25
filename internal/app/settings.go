@@ -10,6 +10,10 @@ import (
 	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
+// removedSettings are keys that no longer exist as settings. They are deleted
+// on open so an upgraded database does not keep dead rows.
+var removedSettings = []string{"CONTROL_AI_ENABLED"}
+
 // settingSecretPrefix marks values encrypted with CONTROL_ENCRYPTION_KEY. Cloud
 // credentials (and the AI key) must not be readable from a database backup.
 const settingSecretPrefix = "enc:v1:"
@@ -66,6 +70,11 @@ func (a *App) LoadSettings(ctx context.Context) error {
 	}
 	if err := a.Store.SeedSettings(ctx, seed, time.Now().UTC()); err != nil {
 		return err
+	}
+	if deleted, err := a.Store.DeleteSettings(ctx, removedSettings); err != nil {
+		return err
+	} else if deleted > 0 {
+		a.Logger.Info("removed obsolete settings", "count", deleted, "keys", removedSettings)
 	}
 	stored, err := a.Store.Settings(ctx)
 	if err != nil {

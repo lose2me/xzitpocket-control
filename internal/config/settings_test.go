@@ -40,7 +40,6 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 		CDNURLTTL:            time.Hour,
 		MonitorSecretID:      "mid",
 		MonitorSecretKey:     "mkey",
-		AIAnalysisEnabled:    true,
 		AIAPIKey:             "ai-key",
 		AIBaseURL:            "https://api.example.com/v1/",
 		AIModel:              "model",
@@ -70,12 +69,27 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRuntimeDerivesAIEnabledFromKey(t *testing.T) {
+	var cfg Config
+	if err := ApplyRuntime(&cfg, map[string]string{SettingAIAPIKey: "sk-test"}); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AIAnalysisEnabled {
+		t.Fatal("a configured API key must enable AI")
+	}
+	if err := ApplyRuntime(&cfg, map[string]string{SettingAIAPIKey: ""}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AIAnalysisEnabled {
+		t.Fatal("clearing the API key must disable AI")
+	}
+}
+
 func TestApplyRuntimeRejectsInvalid(t *testing.T) {
 	for key, value := range map[string]string{
 		SettingEventRetentionDays:   "0",
 		SettingOverviewScalePercent: "-1",
 		SettingRiskLoginWindow:      "soon",
-		SettingAIEnabled:            "maybe",
 		SettingAIPagesPerChunk:      "999",
 		SettingAIImageMaxEdge:       "10",
 	} {

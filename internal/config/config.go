@@ -122,7 +122,8 @@ func Load() (Config, error) {
 		AIWorkDir:            configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
 		AIMathJaxDir:         configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
 	}
-	cfg.AIAnalysisEnabled = boolConfigValue(values, "CONTROL_AI_ENABLED", cfg.AIAPIKey != "")
+	// AI is enabled whenever a key is configured; there is no separate switch.
+	cfg.AIAnalysisEnabled = strings.TrimSpace(cfg.AIAPIKey) != ""
 	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 200 {
 		cfg.AIPagesPerChunk = 30
 	}
@@ -408,20 +409,6 @@ func intConfigValue(values map[string]string, key string, fallback int) int {
 		return fallback
 	}
 	return value
-}
-
-func boolConfigValue(values map[string]string, key string, fallback bool) bool {
-	value := strings.ToLower(strings.TrimSpace(values[key]))
-	switch value {
-	case "":
-		return fallback
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return fallback
-	}
 }
 
 func durationConfigValue(values map[string]string, key string, fallback time.Duration) time.Duration {

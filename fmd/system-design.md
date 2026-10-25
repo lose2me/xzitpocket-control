@@ -226,7 +226,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | `CONTROL_AI_WORK_DIR` | `<db 目录>/ai-work` | AI 临时目录 |
 | `CONTROL_AI_MATHJAX_DIR` | `ai-math` | MathJax 渲染目录 |
 
-其余运行配置存在 `app_settings` 表，由后台「WEB 配置」页读写，保存后立即生效（`app.Config.UpdateSettings` → `applyRuntimeUpdates`），不需要重启：对外地址、事件/审计保留天数、概览显示比例、风控阈值、COS/CDN/监控凭证、AI 开关与全部 AI 参数。
+其余运行配置存在 `app_settings` 表，由后台「WEB 配置」页读写，保存后立即生效（`app.Config.UpdateSettings` → `applyRuntimeUpdates`），不需要重启：对外地址、事件/审计保留天数、概览显示比例、风控阈值、COS/CDN/监控凭证和全部 AI 参数（配置 API Key 即启用 AI，没有单独开关）。
 
 - 首次启动时用 `.env` 里的同名值（或默认值）播种 `app_settings`，之后数据库是唯一来源；再改 `.env` 不会覆盖已保存的值。
 - Secret 类配置（COS/CDN/监控凭证、AI API Key）写入前用 `CONTROL_ENCRYPTION_KEY` 加密，前缀 `enc:v1:`；`GET /admin/settings` 只返回 `set: true`，不回显明文。
