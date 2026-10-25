@@ -516,61 +516,26 @@ body {
   }
 }
 
-/* 表格页脚与分页：统一的条数、位置和页码控件。 */
+/* 表格页脚：左侧条数，右侧 Vuetify 官方分页。 */
 .table-footer {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 12px;
-  padding: 8px 16px;
+  padding: 6px 12px 6px 16px;
   border-top: 1px solid #dfe7ea;
   background: #fbfcfd;
 }
 
-.table-footer__count,
-.table-footer__position {
+.table-footer__count {
   font-size: 0.82rem;
   color: #5e6d76;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.pager {
-  margin-left: auto;
-  gap: 2px;
-}
-
-.pager__page,
-.pager__gap,
-.pager__nav {
-  min-width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.84rem;
-}
-
-.pager__page.v-btn--variant-flat {
-  box-shadow: 0 1px 2px rgba(23, 107, 77, 0.28);
-  font-weight: 600;
-}
-
-.pager__gap {
-  min-width: 26px;
-  color: #6b7f88;
-}
-
-.pager__gap:hover {
-  background: #eef4f2;
-}
-
-.pager__jump {
-  width: 88px;
-  margin-left: 6px;
-}
-
-.pager__jump input {
-  text-align: center;
+.table-footer .v-pagination {
+  margin-inline-start: 0;
 }
 
 @media (max-width: 600px) {
@@ -578,8 +543,7 @@ body {
     padding: 8px 12px;
   }
 
-  .pager {
-    margin-left: 0;
+  .table-footer .v-pagination {
     width: 100%;
     justify-content: flex-end;
   }
