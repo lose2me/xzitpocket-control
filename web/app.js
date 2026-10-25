@@ -250,6 +250,8 @@ import { template } from './template.js';
         return VIEW_ROUTES.includes(name) ? name : 'overview';
       };
       const view = ref(viewForPath(window.location.pathname));
+      // 运行配置按「小分类」分 tab：常规 / 风控 / 存储 / CDN / 监控 / AI。
+      const settingTab = ref('general');
       const loading = ref(false);
       const error = ref('');
       const overview = ref({});
@@ -489,8 +491,8 @@ import { template } from './template.js';
         { key: 'web-config', label: 'WEB 配置', icon: 'mdi-cog-outline' }
       ];
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
-      // The console splits configuration into two pages but keeps one grant:
-      // existing rows store "config=r/rw", so both pages share it.
+      // The two configuration pages share the single "config" grant stored in
+      // admin_users.permissions, so existing rows keep working.
       const PAGE_PERMISSION = { 'app-config': 'config', 'web-config': 'config' };
       const canAccess = (page, write) => {
         page = PAGE_PERMISSION[page] || page;
@@ -514,7 +516,7 @@ import { template } from './template.js';
         { key: 'resources', label: '试卷' },
         { key: 'courses', label: '课程' },
         { key: 'share-codes', label: '分享码' },
-        { key: 'config', label: 'APP/WEB 配置' },
+        { key: 'config', label: '配置' },
         { key: 'audit', label: '审计' }
       ];
       const adminPageKeys = adminPageOptions.map((page) => page.key);
@@ -1547,6 +1549,9 @@ import { template } from './template.js';
         }));
         settingGroups.value = groups;
         settingsForm.value = form;
+        if (!groups.some(group => group.key === settingTab.value)) {
+          settingTab.value = groups.length ? groups[0].key : 'general';
+        }
       };
       const loadSettings = async () => {
         applySettingsView(await api('/api/v1/admin/settings'));
@@ -2152,7 +2157,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, settingTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,

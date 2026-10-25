@@ -197,7 +197,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 ## 7.1 APP 发布配置
 
-管理后台的「APP 配置」页只维护当前 APP 的最新版版本号和下载 URL（另有「WEB 配置」页管理运行配置）。配置保存在 `app_release_config` 单例表中，更新操作写入 `audit_logs`，动作名为 `app_release_update`。客户端未来可通过无需登录的 `GET /api/v1/app/release` 读取：
+管理后台「APP 配置」页只维护当前 APP 的最新版版本号和下载 URL。配置保存在 `app_release_config` 单例表中，更新操作写入 `audit_logs`，动作名为 `app_release_update`。客户端未来可通过无需登录的 `GET /api/v1/app/release` 读取：
 
 ```json
 {
@@ -232,7 +232,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 - Secret 类配置（COS/CDN/监控凭证、AI API Key）写入前用 `CONTROL_ENCRYPTION_KEY` 加密，前缀 `enc:v1:`；`GET /admin/settings` 只返回 `set: true`，不回显明文。
 - 页面权限复用 `config` 页（读写分离），写操作记录 `audit_logs.settings_update`（只记 key 名）。
 
-后台把配置拆成两页：「APP 配置」= APP 发布配置（正式/测试）+ 学校校历；「WEB 配置」= 运行配置（`app_settings`）。两页共用同一个 `config` 页面授权，`admin_users.permissions` 里的 `config=r/rw` 不需要迁移。
+侧边栏把配置分成两页：「APP 配置」= APP 发布配置（正式/测试）+ 学校校历；「WEB 配置」= 运行配置（`app_settings`），页内再按「常规 / 风控 / 对象存储 / CDN / 主机监控 / AI 试卷解析」分类用 tab 切换。两页共用同一个 `config` 页面授权，`admin_users.permissions` 里的 `config=r/rw` 不需要迁移；旧地址 `/config` 打开「APP 配置」。
 
 当前数据库唯一结构来源为 `internal/store/sqlite/schema.sql`，启动时直接创建表和索引。SQLite 开启外键、WAL 和 `busy_timeout=5000`。
 
