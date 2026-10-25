@@ -23,6 +23,35 @@ import { template } from './template.js';
     return items;
   };
 
+  const TABLE_PAGE_SIZE = 25;
+  const pageCount = (items, perPage = TABLE_PAGE_SIZE) =>
+    Math.max(1, Math.ceil(((items || []).length) / perPage));
+  const pagedSlice = (items, page, perPage = TABLE_PAGE_SIZE) => {
+    const list = items || [];
+    const size = perPage || TABLE_PAGE_SIZE;
+    const pages = Math.max(1, Math.ceil(list.length / size));
+    const current = Math.min(Math.max(1, page || 1), pages);
+    const start = (current - 1) * size;
+    return list.slice(start, start + size);
+  };
+
+  // 统一表格页脚：左侧条数，右侧分页；只有一页时只显示条数。
+  const TableFooter = {
+    name: 'TableFooter',
+    props: {
+      total: { type: Number, default: 0 },
+      page: { type: Number, default: 1 },
+      length: { type: Number, default: 1 },
+      unit: { type: String, default: '条' },
+    },
+    emits: ['update:page'],
+    template: `<div class="table-footer d-flex align-center flex-wrap ga-3 pa-3">
+      <span class="text-body-2 text-medium-emphasis">共 {{ total }} {{ unit }}</span>
+      <v-spacer />
+      <page-pager v-if="length > 1" :model-value="page" :length="length" @update:model-value="$emit('update:page', $event)" />
+    </div>`,
+  };
+
   const PagePager = {
     name: 'PagePager',
     props: {
@@ -332,6 +361,18 @@ import { template } from './template.js';
       const errorReportsTotal = ref(0);
       const errorReportsPage = ref(1);
       const errorReportsPerPage = ref(25);
+      // 本地分页（接口一次返回全部/上限 100 条的表）
+      const adminPage = ref(1);
+      const devicePage = ref(1);
+      const riskPage = ref(1);
+      const auditPage = ref(1);
+      const calendarPage = ref(1);
+      const archivedBankPage = ref(1);
+      const archivedTextbookPage = ref(1);
+      const archivedResourcePage = ref(1);
+      const textbookSubmissionPage = ref(1);
+      const resourceSubmissionPage = ref(1);
+      const aiPage = ref(1);
       const errorReportSortBy = ref([]);
       const banks = ref([]);
       const bankTotal = ref(0);
@@ -2204,7 +2245,7 @@ import { template } from './template.js';
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
         banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, settingTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
-        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
+        cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
@@ -2223,5 +2264,5 @@ import { template } from './template.js';
       };
     },
     template,
-  }).use(vuetify).component('page-pager', PagePager).mount('#app');
+  }).use(vuetify).component('page-pager', PagePager).component('table-footer', TableFooter).mount('#app');
 })();
