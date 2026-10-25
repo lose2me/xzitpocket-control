@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"xzitpocket-control/internal/ai"
 	"xzitpocket-control/internal/config"
 	"xzitpocket-control/internal/store/sqlite"
 )
@@ -204,5 +205,28 @@ func TestLoadSettingsDropsObsoleteToggle(t *testing.T) {
 	}
 	if _, ok := stored["CONTROL_AI_ENABLED"]; ok {
 		t.Fatalf("obsolete toggle was not removed: %#v", stored)
+	}
+}
+
+// TestAIPromptSettingsHotApply covers the prompt settings: saving them updates
+// the running config immediately and clearing falls back to the default.
+func TestAIPromptSettingsHotApply(t *testing.T) {
+	a, _ := newCourseApp(t)
+	ctx := context.Background()
+
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		config.SettingAIChunkInstruction:    "自定义分段 %s %d-%d/%d",
+		config.SettingAIPrecheckInstruction: "自定义预检 %s %d/%d",
+	}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if a.cfg().AIChunkInstruction != "自定义分段 %s %d-%d/%d" || a.cfg().AIPrecheckInstruction != "自定义预检 %s %d/%d" {
+		t.Fatalf("prompts not applied: %+v", a.cfg().AIChunkInstruction)
+	}
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Clear: []string{config.SettingAIChunkInstruction}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if a.cfg().AIChunkInstruction != ai.DefaultChunkInstruction {
+		t.Fatalf("cleared prompt must fall back to default: %q", a.cfg().AIChunkInstruction)
 	}
 }

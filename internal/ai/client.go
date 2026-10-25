@@ -17,12 +17,21 @@ type ModelOptions struct {
 	APIKey  string
 	BaseURL string
 	Name    string
+	// Prompts default to the built-in templates when empty. The console stores
+	// them as runtime settings so operators can tune the analysis without a
+	// deploy.
+	PrecheckSystem string
+	AnalysisSystem string
+	ContinuePrompt string
 }
 
 // Model talks to the DeepSeek-compatible chat completions API.
 type Model struct {
-	client *openai.Client
-	name   string
+	client         *openai.Client
+	name           string
+	precheckSystem string
+	analysisSystem string
+	continuePrompt string
 }
 
 // Message is a stored, text-only conversation turn. Images are not persisted:
@@ -114,7 +123,21 @@ func NewModel(opts ModelOptions) (*Model, error) {
 	}
 	cfg := openai.DefaultConfig(opts.APIKey)
 	cfg.BaseURL = baseURL
-	return &Model{client: openai.NewClientWithConfig(cfg), name: name}, nil
+	return &Model{
+		client:         openai.NewClientWithConfig(cfg),
+		name:           name,
+		precheckSystem: promptOr(opts.PrecheckSystem, DefaultPrecheckSystem),
+		analysisSystem: promptOr(opts.AnalysisSystem, DefaultAnalysisSystem),
+		continuePrompt: promptOr(opts.ContinuePrompt, DefaultContinuePrompt),
+	}, nil
+}
+
+// promptOr falls back to the built-in template when the setting is blank.
+func promptOr(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 // Name is the model id recorded on the task row.
@@ -133,7 +156,7 @@ func IsPermanentError(err error) bool {
 // Precheck asks the model whether the extracted pages form a solvable exam.
 func (m *Model) Precheck(ctx context.Context, parts []openai.ChatMessagePart) (Verdict, string, []PromptCall, error) {
 	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: precheckSystemPrompt},
+		{Role: openai.ChatMessageRoleSystem, Content: m.precheckSystem},
 		{Role: openai.ChatMessageRoleUser, MultiContent: parts},
 	}
 	call := promptCall("precheck", m.name, 4096, messages)
@@ -182,7 +205,7 @@ func parseVerdict(content string) (Verdict, error) {
 // markdown answer. Long answers are continued in the same conversation.
 func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
 	messages := make([]openai.ChatCompletionMessage, 0, len(history)+2)
-	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: analysisSystemPrompt})
+	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: m.analysisSystem})
 	for _, message := range history {
 		role := message.Role
 		if role != openai.ChatMessageRoleAssistant {
@@ -220,7 +243,7 @@ func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.C
 		// The response was cut off; keep going in the same conversation.
 		messages = append(messages,
 			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: choice.Message.Content},
-			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "继续输出，从上次中断的位置接着写，不要重复已经输出的内容。"},
+			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: m.continuePrompt},
 		)
 	}
 	return strings.TrimSpace(output.String()), calls, nil

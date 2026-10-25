@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"xzitpocket-control/internal/ai"
 )
 
 // Setting keys stored in the database. Bootstrap settings (listen address,
@@ -12,33 +14,38 @@ import (
 // admin key and the AI work directories) stay in data/.env because the process
 // needs them before the database is open.
 const (
-	SettingPublicBaseURL        = "CONTROL_PUBLIC_BASE_URL"
-	SettingEventRetentionDays   = "CONTROL_EVENT_RETENTION_DAYS"
-	SettingAuditRetentionDays   = "CONTROL_AUDIT_RETENTION_DAYS"
-	SettingOverviewScalePercent = "CONTROL_OVERVIEW_SCALE_PERCENT"
-	SettingRiskLoginWindow      = "CONTROL_RISK_LOGIN_WINDOW"
-	SettingRiskLoginCount       = "CONTROL_RISK_LOGIN_COUNT"
-	SettingRiskDeviceCount      = "CONTROL_RISK_DEVICE_COUNT"
-	SettingCOSRegion            = "CONTROL_COS_REGION"
-	SettingCOSBucket            = "CONTROL_COS_BUCKET"
-	SettingCOSSecretID          = "CONTROL_COS_SECRET_ID"
-	SettingCOSSecretKey         = "CONTROL_COS_SECRET_KEY"
-	SettingCOSWebsiteBucket     = "CONTROL_COS_WEBSITE_BUCKET"
-	SettingCDNDomain            = "CONTROL_CDN_DOMAIN"
-	SettingCDNAuthKey           = "CONTROL_CDN_AUTH_KEY"
-	SettingCDNURLTTL            = "CONTROL_CDN_URL_TTL"
-	SettingMonitorSecretID      = "CONTROL_MONITOR_SECRET_ID"
-	SettingMonitorSecretKey     = "CONTROL_MONITOR_SECRET_KEY"
-	SettingAIAPIKey             = "CONTROL_AI_API_KEY"
-	SettingAIBaseURL            = "CONTROL_AI_BASE_URL"
-	SettingAIModel              = "CONTROL_AI_MODEL"
-	SettingAIWindows            = "CONTROL_AI_WINDOWS"
-	SettingAITimezone           = "CONTROL_AI_TIMEZONE"
-	SettingAIPagesPerChunk      = "CONTROL_AI_PAGES_PER_CHUNK"
-	SettingAIRequestTimeout     = "CONTROL_AI_REQUEST_TIMEOUT"
-	SettingAIMaxAttempts        = "CONTROL_AI_MAX_ATTEMPTS"
-	SettingAIImageQuality       = "CONTROL_AI_IMAGE_QUALITY"
-	SettingAIImageMaxEdge       = "CONTROL_AI_IMAGE_MAX_EDGE"
+	SettingPublicBaseURL         = "CONTROL_PUBLIC_BASE_URL"
+	SettingEventRetentionDays    = "CONTROL_EVENT_RETENTION_DAYS"
+	SettingAuditRetentionDays    = "CONTROL_AUDIT_RETENTION_DAYS"
+	SettingOverviewScalePercent  = "CONTROL_OVERVIEW_SCALE_PERCENT"
+	SettingRiskLoginWindow       = "CONTROL_RISK_LOGIN_WINDOW"
+	SettingRiskLoginCount        = "CONTROL_RISK_LOGIN_COUNT"
+	SettingRiskDeviceCount       = "CONTROL_RISK_DEVICE_COUNT"
+	SettingCOSRegion             = "CONTROL_COS_REGION"
+	SettingCOSBucket             = "CONTROL_COS_BUCKET"
+	SettingCOSSecretID           = "CONTROL_COS_SECRET_ID"
+	SettingCOSSecretKey          = "CONTROL_COS_SECRET_KEY"
+	SettingCOSWebsiteBucket      = "CONTROL_COS_WEBSITE_BUCKET"
+	SettingCDNDomain             = "CONTROL_CDN_DOMAIN"
+	SettingCDNAuthKey            = "CONTROL_CDN_AUTH_KEY"
+	SettingCDNURLTTL             = "CONTROL_CDN_URL_TTL"
+	SettingMonitorSecretID       = "CONTROL_MONITOR_SECRET_ID"
+	SettingMonitorSecretKey      = "CONTROL_MONITOR_SECRET_KEY"
+	SettingAIAPIKey              = "CONTROL_AI_API_KEY"
+	SettingAIBaseURL             = "CONTROL_AI_BASE_URL"
+	SettingAIModel               = "CONTROL_AI_MODEL"
+	SettingAIWindows             = "CONTROL_AI_WINDOWS"
+	SettingAITimezone            = "CONTROL_AI_TIMEZONE"
+	SettingAIPagesPerChunk       = "CONTROL_AI_PAGES_PER_CHUNK"
+	SettingAIRequestTimeout      = "CONTROL_AI_REQUEST_TIMEOUT"
+	SettingAIMaxAttempts         = "CONTROL_AI_MAX_ATTEMPTS"
+	SettingAIImageQuality        = "CONTROL_AI_IMAGE_QUALITY"
+	SettingAIImageMaxEdge        = "CONTROL_AI_IMAGE_MAX_EDGE"
+	SettingAIPrecheckSystem      = "CONTROL_AI_PROMPT_PRECHECK_SYSTEM"
+	SettingAIAnalysisSystem      = "CONTROL_AI_PROMPT_ANALYSIS_SYSTEM"
+	SettingAIPrecheckInstruction = "CONTROL_AI_PROMPT_PRECHECK"
+	SettingAIChunkInstruction    = "CONTROL_AI_PROMPT_CHUNK"
+	SettingAIContinuePrompt      = "CONTROL_AI_PROMPT_CONTINUE"
 )
 
 // Setting kinds understood by the console form.
@@ -112,6 +119,12 @@ var SettingSpecs = []SettingSpec{
 	{Key: SettingAIMaxAttempts, Group: "ai", Label: "最大重试次数", Kind: SettingKindInt, Min: 1, Max: 10},
 	{Key: SettingAIImageQuality, Group: "ai", Label: "图片质量", Kind: SettingKindInt, Min: 10, Max: 100},
 	{Key: SettingAIImageMaxEdge, Group: "ai", Label: "图片最长边", Kind: SettingKindInt, Min: 320, Max: 4096},
+
+	{Key: SettingAIPrecheckSystem, Group: "ai", Label: "预检系统提示词", Kind: SettingKindText, Hint: "留空则用内置模板"},
+	{Key: SettingAIPrecheckInstruction, Group: "ai", Label: "预检指令", Kind: SettingKindText, Hint: "占位符依次为：试卷标题、检查页数、总页数（%s %d %d）"},
+	{Key: SettingAIAnalysisSystem, Group: "ai", Label: "解析系统提示词", Kind: SettingKindText, Hint: "留空则用内置模板"},
+	{Key: SettingAIChunkInstruction, Group: "ai", Label: "分段解析指令", Kind: SettingKindText, Hint: "占位符依次为：试卷标题、起始页、结束页、总页数（%s %d %d %d）"},
+	{Key: SettingAIContinuePrompt, Group: "ai", Label: "续写指令", Kind: SettingKindText, Hint: "输出被截断时追加，留空则用内置模板"},
 }
 
 // SettingSpecByKey returns the spec for a setting key.
@@ -129,33 +142,38 @@ func SettingSpecByKey(key string) (SettingSpec, bool) {
 // and never exposes them through the API.
 func RuntimeValues(cfg Config) map[string]string {
 	return map[string]string{
-		SettingPublicBaseURL:        cfg.PublicBaseURL,
-		SettingEventRetentionDays:   strconv.Itoa(cfg.EventRetentionDays),
-		SettingAuditRetentionDays:   strconv.Itoa(cfg.AuditRetentionDays),
-		SettingOverviewScalePercent: strconv.Itoa(cfg.OverviewScalePercent),
-		SettingRiskLoginWindow:      cfg.RiskLoginWindow.String(),
-		SettingRiskLoginCount:       strconv.Itoa(cfg.RiskLoginCount),
-		SettingRiskDeviceCount:      strconv.Itoa(cfg.RiskDeviceCount),
-		SettingCOSRegion:            cfg.COSRegion,
-		SettingCOSBucket:            cfg.COSBucket,
-		SettingCOSSecretID:          cfg.COSSecretID,
-		SettingCOSSecretKey:         cfg.COSSecretKey,
-		SettingCOSWebsiteBucket:     cfg.COSWebsiteBucket,
-		SettingCDNDomain:            cfg.CDNDomain,
-		SettingCDNAuthKey:           cfg.CDNAuthKey,
-		SettingCDNURLTTL:            cfg.CDNURLTTL.String(),
-		SettingMonitorSecretID:      cfg.MonitorSecretID,
-		SettingMonitorSecretKey:     cfg.MonitorSecretKey,
-		SettingAIAPIKey:             cfg.AIAPIKey,
-		SettingAIBaseURL:            cfg.AIBaseURL,
-		SettingAIModel:              cfg.AIModel,
-		SettingAIWindows:            cfg.AIWindows,
-		SettingAITimezone:           cfg.AITimezone,
-		SettingAIPagesPerChunk:      strconv.Itoa(cfg.AIPagesPerChunk),
-		SettingAIRequestTimeout:     cfg.AIRequestTimeout.String(),
-		SettingAIMaxAttempts:        strconv.Itoa(cfg.AIMaxAttempts),
-		SettingAIImageQuality:       strconv.Itoa(cfg.AIImageQuality),
-		SettingAIImageMaxEdge:       strconv.Itoa(cfg.AIImageMaxEdge),
+		SettingPublicBaseURL:         cfg.PublicBaseURL,
+		SettingEventRetentionDays:    strconv.Itoa(cfg.EventRetentionDays),
+		SettingAuditRetentionDays:    strconv.Itoa(cfg.AuditRetentionDays),
+		SettingOverviewScalePercent:  strconv.Itoa(cfg.OverviewScalePercent),
+		SettingRiskLoginWindow:       cfg.RiskLoginWindow.String(),
+		SettingRiskLoginCount:        strconv.Itoa(cfg.RiskLoginCount),
+		SettingRiskDeviceCount:       strconv.Itoa(cfg.RiskDeviceCount),
+		SettingCOSRegion:             cfg.COSRegion,
+		SettingCOSBucket:             cfg.COSBucket,
+		SettingCOSSecretID:           cfg.COSSecretID,
+		SettingCOSSecretKey:          cfg.COSSecretKey,
+		SettingCOSWebsiteBucket:      cfg.COSWebsiteBucket,
+		SettingCDNDomain:             cfg.CDNDomain,
+		SettingCDNAuthKey:            cfg.CDNAuthKey,
+		SettingCDNURLTTL:             cfg.CDNURLTTL.String(),
+		SettingMonitorSecretID:       cfg.MonitorSecretID,
+		SettingMonitorSecretKey:      cfg.MonitorSecretKey,
+		SettingAIAPIKey:              cfg.AIAPIKey,
+		SettingAIBaseURL:             cfg.AIBaseURL,
+		SettingAIModel:               cfg.AIModel,
+		SettingAIWindows:             cfg.AIWindows,
+		SettingAITimezone:            cfg.AITimezone,
+		SettingAIPagesPerChunk:       strconv.Itoa(cfg.AIPagesPerChunk),
+		SettingAIRequestTimeout:      cfg.AIRequestTimeout.String(),
+		SettingAIMaxAttempts:         strconv.Itoa(cfg.AIMaxAttempts),
+		SettingAIImageQuality:        strconv.Itoa(cfg.AIImageQuality),
+		SettingAIImageMaxEdge:        strconv.Itoa(cfg.AIImageMaxEdge),
+		SettingAIPrecheckSystem:      cfg.AIPrecheckSystem,
+		SettingAIAnalysisSystem:      cfg.AIAnalysisSystem,
+		SettingAIPrecheckInstruction: cfg.AIPrecheckInstruction,
+		SettingAIChunkInstruction:    cfg.AIChunkInstruction,
+		SettingAIContinuePrompt:      cfg.AIContinuePrompt,
 	}
 }
 
@@ -225,18 +243,23 @@ func ApplyRuntime(cfg *Config, values map[string]string) error {
 	}
 
 	for key, target := range map[string]*string{
-		SettingCOSRegion:        &cfg.COSRegion,
-		SettingCOSBucket:        &cfg.COSBucket,
-		SettingCOSSecretID:      &cfg.COSSecretID,
-		SettingCOSSecretKey:     &cfg.COSSecretKey,
-		SettingCOSWebsiteBucket: &cfg.COSWebsiteBucket,
-		SettingCDNAuthKey:       &cfg.CDNAuthKey,
-		SettingMonitorSecretID:  &cfg.MonitorSecretID,
-		SettingMonitorSecretKey: &cfg.MonitorSecretKey,
-		SettingAIAPIKey:         &cfg.AIAPIKey,
-		SettingAIModel:          &cfg.AIModel,
-		SettingAIWindows:        &cfg.AIWindows,
-		SettingAITimezone:       &cfg.AITimezone,
+		SettingAIPrecheckSystem:      &cfg.AIPrecheckSystem,
+		SettingAIAnalysisSystem:      &cfg.AIAnalysisSystem,
+		SettingAIPrecheckInstruction: &cfg.AIPrecheckInstruction,
+		SettingAIChunkInstruction:    &cfg.AIChunkInstruction,
+		SettingAIContinuePrompt:      &cfg.AIContinuePrompt,
+		SettingCOSRegion:             &cfg.COSRegion,
+		SettingCOSBucket:             &cfg.COSBucket,
+		SettingCOSSecretID:           &cfg.COSSecretID,
+		SettingCOSSecretKey:          &cfg.COSSecretKey,
+		SettingCOSWebsiteBucket:      &cfg.COSWebsiteBucket,
+		SettingCDNAuthKey:            &cfg.CDNAuthKey,
+		SettingMonitorSecretID:       &cfg.MonitorSecretID,
+		SettingMonitorSecretKey:      &cfg.MonitorSecretKey,
+		SettingAIAPIKey:              &cfg.AIAPIKey,
+		SettingAIModel:               &cfg.AIModel,
+		SettingAIWindows:             &cfg.AIWindows,
+		SettingAITimezone:            &cfg.AITimezone,
 	} {
 		if raw, ok := get(key); ok {
 			*target = raw
@@ -267,6 +290,21 @@ func ApplyRuntime(cfg *Config, values map[string]string) error {
 	}
 	if err := parseInt(SettingAIImageMaxEdge, 320, 4096, &cfg.AIImageMaxEdge); err != nil {
 		return err
+	}
+	// Blank prompts fall back to the built-in templates.
+	for _, item := range []struct {
+		value    *string
+		fallback string
+	}{
+		{&cfg.AIPrecheckSystem, ai.DefaultPrecheckSystem},
+		{&cfg.AIAnalysisSystem, ai.DefaultAnalysisSystem},
+		{&cfg.AIPrecheckInstruction, ai.DefaultPrecheckInstruction},
+		{&cfg.AIChunkInstruction, ai.DefaultChunkInstruction},
+		{&cfg.AIContinuePrompt, ai.DefaultContinuePrompt},
+	} {
+		if strings.TrimSpace(*item.value) == "" {
+			*item.value = item.fallback
+		}
 	}
 	// No separate switch: AI runs whenever an API key is configured.
 	cfg.AIAnalysisEnabled = strings.TrimSpace(cfg.AIAPIKey) != ""

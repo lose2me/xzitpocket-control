@@ -160,9 +160,12 @@ func aiStateFromConfig(cfg config.Config, logger *slog.Logger) (*aiRuntime, erro
 		location = time.FixedZone("CST", 8*3600)
 	}
 	model, err := ai.NewModel(ai.ModelOptions{
-		APIKey:  cfg.AIAPIKey,
-		BaseURL: cfg.AIBaseURL,
-		Name:    cfg.AIModel,
+		APIKey:         cfg.AIAPIKey,
+		BaseURL:        cfg.AIBaseURL,
+		Name:           cfg.AIModel,
+		PrecheckSystem: cfg.AIPrecheckSystem,
+		AnalysisSystem: cfg.AIAnalysisSystem,
+		ContinuePrompt: cfg.AIContinuePrompt,
 	})
 	if err != nil {
 		return nil, err
@@ -625,7 +628,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			return
 		}
 		chunkEnd := minInt(nextPage+a.cfg().AIPagesPerChunk-1, paper.TotalPages)
-		instruction := fmt.Sprintf(ai.ChunkInstruction, paper.Title, nextPage, chunkEnd, paper.TotalPages)
+		instruction := fmt.Sprintf(chunkInstruction(a.cfg()), paper.Title, nextPage, chunkEnd, paper.TotalPages)
 		parts, plain, err := ai.BuildContent(paper, nextPage, chunkEnd, instruction)
 		if err != nil {
 			finish("failed", "构建请求失败："+err.Error())
@@ -757,6 +760,23 @@ func (a *App) cleanupOlderAITasks(task sqlite.AITask) {
 	}
 }
 
+// chunkInstruction returns the configured page-range instruction, falling back
+// to the built-in template when the setting is blank.
+func chunkInstruction(cfg config.Config) string {
+	if strings.TrimSpace(cfg.AIChunkInstruction) == "" {
+		return ai.DefaultChunkInstruction
+	}
+	return cfg.AIChunkInstruction
+}
+
+// precheckInstruction returns the configured verdict request.
+func precheckInstruction(cfg config.Config) string {
+	if strings.TrimSpace(cfg.AIPrecheckInstruction) == "" {
+		return ai.DefaultPrecheckInstruction
+	}
+	return cfg.AIPrecheckInstruction
+}
+
 func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, string, []ai.PromptCall, error) {
 	attempts := 0
 	calls := make([]ai.PromptCall, 0)
@@ -764,8 +784,7 @@ func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, s
 		if !a.aiInWindow() {
 			return ai.Verdict{}, "", calls, fmt.Errorf("等待解析时间窗")
 		}
-		instruction := fmt.Sprintf("下面是《%s》的前 %d 页（共 %d 页）。请判断它是否是可用于作答的试卷，并只输出 JSON。",
-			paper.Title, minInt(aiPrecheckPages, paper.TotalPages), paper.TotalPages)
+		instruction := fmt.Sprintf(precheckInstruction(a.cfg()), paper.Title, minInt(aiPrecheckPages, paper.TotalPages), paper.TotalPages)
 		parts, _, err := ai.BuildContent(paper, 1, minInt(aiPrecheckPages, paper.TotalPages), instruction)
 		if err != nil {
 			return ai.Verdict{}, "", calls, err
