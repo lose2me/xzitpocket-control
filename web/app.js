@@ -288,6 +288,11 @@ import { template } from './template.js';
       const settingTab = ref('general');
       // APP 配置页的两个小项：发布配置 / 学校校历。
       const appConfigTab = ref('release');
+      // 发布区 / 审核区 / 解析区 / 归档区 等区块用 tab 切换，默认停在发布区。
+      const libraryTab = ref('publish');
+      const textbookTab = ref('publish');
+      const resourceTab = ref('publish');
+      const courseTab = ref('publish');
       const loading = ref(false);
       const error = ref('');
       const overview = ref({});
@@ -1851,6 +1856,12 @@ import { template } from './template.js';
           else if (view.value === 'audit') audit.value = ((await api('/api/v1/admin/audit?limit=100')).items || []).map(item => Object.assign({}, item, { target_text: [item.target_type, item.target_id].filter(Boolean).join(' ') }));
         });
       };
+      // 每次进入内容页都回到发布区。
+      watch(view, (name) => {
+        if (name === 'library') libraryTab.value = 'publish';
+        else if (name === 'textbooks') textbookTab.value = 'publish';
+        else if (name === 'resources') resourceTab.value = 'publish';
+      });
       const switchView = (name) => {
         if (!canRead(name)) {
           const first = visibleNav.value[0];
@@ -2208,7 +2219,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, settingTab, appConfigTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, courseTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
