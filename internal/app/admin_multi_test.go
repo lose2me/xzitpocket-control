@@ -11,7 +11,8 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-func TestAdminLoginMultiAccountPermissions(t *testing.T) {
+func newAdminTestApp(t *testing.T) (*App, *sqlite.Store) {
+	t.Helper()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -25,15 +26,22 @@ func TestAdminLoginMultiAccountPermissions(t *testing.T) {
 		IDPepper:      []byte("id"),
 		EncryptionKey: []byte("01234567890123456789012345678901"),
 		AdminKey:      "super-key",
-		Admins: []config.AdminAccount{
-			{Name: "admin", Key: "super-key", All: true},
-			{Name: "viewer", Key: "viewer-key", Perms: map[string]string{"overview": "r", "users": "rw"}},
-		},
 	}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return a, store
+}
+
+func TestAdminLoginMultiAccountPermissions(t *testing.T) {
+	a, _ := newAdminTestApp(t)
 	ctx := context.Background()
+
+	if _, err := a.CreateAdminForAdmin(ctx, AdminWriteInput{
+		Name: "viewer", Key: "viewer-key", Permissions: "overview=r,users=rw",
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
 
 	_, viewer, err := a.AdminLogin(ctx, "viewer-key")
 	if err != nil {
@@ -56,5 +64,21 @@ func TestAdminLoginMultiAccountPermissions(t *testing.T) {
 
 	if _, _, err := a.AdminLogin(ctx, "wrong-key"); err == nil {
 		t.Fatal("wrong key should fail")
+	}
+}
+
+func TestFreshDatabaseHasOnlySuperAdmin(t *testing.T) {
+	a, store := newAdminTestApp(t)
+	ctx := context.Background()
+
+	if _, _, err := a.AdminLogin(ctx, "super-key"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := store.CountAdmins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("admins = %d, want only the super admin", count)
 	}
 }

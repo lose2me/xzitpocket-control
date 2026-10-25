@@ -14,7 +14,10 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-const superAdminName = "admin"
+const (
+	superAdminName  = "admin"
+	superAdminPerms = "*=rw"
+)
 
 var adminNamePattern = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
@@ -45,14 +48,9 @@ func (a *App) adminSummary(item sqlite.Admin) AdminSummaryView {
 }
 
 // adminKey returns the plaintext key for the super-admin-only account list.
-// .env accounts are read from config so the value always matches the running
-// configuration; console-created accounts are decrypted from the stored copy.
+// The super admin's key comes from the running config; console-created accounts
+// are decrypted from the stored copy.
 func (a *App) adminKey(item sqlite.Admin) string {
-	for _, account := range a.Cfg.Admins {
-		if account.Name == item.Name {
-			return account.Key
-		}
-	}
 	if item.Name == superAdminName {
 		return strings.TrimSpace(a.Cfg.AdminKey)
 	}
@@ -126,7 +124,7 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	}
 	now := time.Now().UTC()
 	item := sqlite.Admin{
-		ID: id, Name: name, Permissions: adminPermsString(config.AdminAccount{Perms: perms}),
+		ID: id, Name: name, Permissions: adminPermsString(perms),
 		PasswordHash: hash, KeyCiphertext: ciphertext, CreatedAt: now, LastLoginAt: now,
 	}
 	if err := a.Store.CreateAdmin(ctx, item); err != nil {
@@ -170,7 +168,7 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 		}
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateAdminAuth(ctx, item.ID, hash, adminPermsString(config.AdminAccount{Perms: perms}), ciphertext); err != nil {
+	if err := a.Store.UpdateAdminAuth(ctx, item.ID, hash, adminPermsString(perms), ciphertext); err != nil {
 		return AdminSummaryView{}, err
 	}
 	_ = a.Store.AddAudit(ctx, actor, "admin_update", "admin", item.ID, "{}", now)

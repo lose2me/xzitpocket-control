@@ -60,19 +60,6 @@ type Config struct {
 	AIImageMaxEdge    int
 	AIWorkDir         string
 	AIMathJaxDir      string
-
-	// Admins are the console administrator accounts configured in .env. The
-	// first entry is the legacy CONTROL_ADMIN_KEY (super admin).
-	Admins []AdminAccount
-}
-
-// AdminAccount is one console administrator configured in .env. Perms maps a
-// page to "r" or "rw"; the special page "*" grants all pages rw.
-type AdminAccount struct {
-	Name  string
-	Key   string
-	Perms map[string]string
-	All   bool
 }
 
 // AdminPages are the console pages that can be granted read/write access.
@@ -176,52 +163,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.Admins, err = parseAdminAccounts(values)
-	if err != nil {
-		return Config{}, err
-	}
 	return cfg, nil
-}
-
-// parseAdminAccounts reads CONTROL_ADMIN_KEY (legacy super admin) and every
-// CONTROL_ADMIN_<NAME>_KEY / CONTROL_ADMIN_<NAME>_PERMS pair from .env.
-func parseAdminAccounts(values map[string]string) ([]AdminAccount, error) {
-	accounts := make([]AdminAccount, 0, 4)
-	seen := make(map[string]bool, 4)
-	legacy := strings.TrimSpace(values["CONTROL_ADMIN_KEY"])
-	if legacy != "" {
-		accounts = append(accounts, AdminAccount{Name: "admin", Key: legacy, All: true})
-		seen["admin"] = true
-	}
-	const prefix = "CONTROL_ADMIN_"
-	const suffix = "_KEY"
-	for key, raw := range values {
-		if key == "CONTROL_ADMIN_KEY" || !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(key, prefix), suffix))
-		if name == "" {
-			continue
-		}
-		if seen[name] {
-			return nil, fmt.Errorf("duplicate admin account %q", name)
-		}
-		keyValue := strings.TrimSpace(raw)
-		if keyValue == "" {
-			return nil, fmt.Errorf("admin %q has an empty key", name)
-		}
-		perms, err := ParseAdminPerms(values["CONTROL_ADMIN_"+strings.ToUpper(name)+"_PERMS"])
-		if err != nil {
-			return nil, fmt.Errorf("admin %q: %w", name, err)
-		}
-		if perms["*"] == "rw" {
-			accounts = append(accounts, AdminAccount{Name: name, Key: keyValue, All: true})
-		} else {
-			accounts = append(accounts, AdminAccount{Name: name, Key: keyValue, Perms: perms})
-		}
-		seen[name] = true
-	}
-	return accounts, nil
 }
 
 func ParseAdminPerms(raw string) (map[string]string, error) {

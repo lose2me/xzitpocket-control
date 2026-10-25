@@ -38,9 +38,12 @@ var (
 )
 
 type App struct {
+	// Cfg holds the bootstrap settings plus the current runtime snapshot. Read
+	// it through cfg(); write it only through applySettings.
 	Cfg    config.Config
 	Store  *sqlite.Store
 	Logger *slog.Logger
+	cfgMu  sync.RWMutex
 
 	// cosClientOverride lets tests point object-storage calls at a stub while
 	// production always builds a client from Cfg.
@@ -83,66 +86,48 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 	return a, nil
 }
 
-// ensureAdmins keeps the .env super administrator in sync. Additional admins
-// are managed in the console: the database is authoritative once any exist, so
-// deleting an admin in the console is never undone by a restart. .env accounts
-// are only seeded into a fresh database.
+// ensureAdmins keeps the .env super administrator in sync. Other admins live in
+// the database and are managed in the console only: .env never seeds them.
 func (a *App) ensureAdmins(ctx context.Context) error {
+	key := strings.TrimSpace(a.Cfg.AdminKey)
+	if key == "" {
+		a.Logger.Warn("no admin account configured; the console has no super admin")
+		return nil
+	}
 	now := time.Now().UTC()
-	accounts := make([]config.AdminAccount, 0, len(a.Cfg.Admins)+1)
-	if key := strings.TrimSpace(a.Cfg.AdminKey); key != "" {
-		accounts = append(accounts, config.AdminAccount{Name: "admin", Key: key, All: true})
-	}
-	count, err := a.Store.CountAdmins(ctx)
+	hash, err := controlcrypto.Argon2idHash(key)
 	if err != nil {
+		return fmt.Errorf("hash admin %q: %w", superAdminName, err)
+	}
+	existing, err := a.Store.GetAdminByName(ctx, superAdminName)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Adopt the legacy administrator row created before names existed.
+		if first, firstErr := a.Store.GetAdmin(ctx); firstErr == nil && first.Name == "" {
+			existing, err = first, nil
+		}
+	}
+	switch {
+	case err == nil:
+		if existing.Name != superAdminName {
+			if err := a.Store.SetAdminName(ctx, existing.ID, superAdminName); err != nil {
+				return fmt.Errorf("rename admin %q: %w", superAdminName, err)
+			}
+		}
+		if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, superAdminPerms, ""); err != nil {
+			return fmt.Errorf("update admin %q: %w", superAdminName, err)
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		id, idErr := controlcrypto.NewID("adm")
+		if idErr != nil {
+			return idErr
+		}
+		if createErr := a.Store.CreateAdmin(ctx, sqlite.Admin{
+			ID: id, Name: superAdminName, Permissions: superAdminPerms, PasswordHash: hash, CreatedAt: now, LastLoginAt: now,
+		}); createErr != nil {
+			return fmt.Errorf("create admin %q: %w", superAdminName, createErr)
+		}
+	default:
 		return err
-	}
-	if count == 0 {
-		for _, account := range a.Cfg.Admins {
-			if account.Name != "admin" {
-				accounts = append(accounts, account)
-			}
-		}
-	}
-	for _, account := range accounts {
-		hash, err := controlcrypto.Argon2idHash(account.Key)
-		if err != nil {
-			return fmt.Errorf("hash admin %q: %w", account.Name, err)
-		}
-		perms := adminPermsString(account)
-		existing, err := a.Store.GetAdminByName(ctx, account.Name)
-		if errors.Is(err, sql.ErrNoRows) && account.Name == "admin" {
-			// Adopt the legacy administrator row created before names existed.
-			if first, firstErr := a.Store.GetAdmin(ctx); firstErr == nil && first.Name == "" {
-				existing, err = first, nil
-			}
-		}
-		switch {
-		case err == nil:
-			if existing.Name != account.Name {
-				if err := a.Store.SetAdminName(ctx, existing.ID, account.Name); err != nil {
-					return fmt.Errorf("rename admin %q: %w", account.Name, err)
-				}
-			}
-			if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, perms, ""); err != nil {
-				return fmt.Errorf("update admin %q: %w", account.Name, err)
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			id, idErr := controlcrypto.NewID("adm")
-			if idErr != nil {
-				return idErr
-			}
-			if createErr := a.Store.CreateAdmin(ctx, sqlite.Admin{
-				ID: id, Name: account.Name, Permissions: perms, PasswordHash: hash, CreatedAt: now, LastLoginAt: now,
-			}); createErr != nil {
-				return fmt.Errorf("create admin %q: %w", account.Name, createErr)
-			}
-		default:
-			return err
-		}
-	}
-	if len(accounts) == 0 {
-		a.Logger.Warn("no admin accounts configured; the console has no super admin")
 	}
 	if a.Cfg.AdminKey == "change-me" {
 		a.Logger.Warn("using default admin management key; edit data/.env")
@@ -150,12 +135,9 @@ func (a *App) ensureAdmins(ctx context.Context) error {
 	return nil
 }
 
-func adminPermsString(account config.AdminAccount) string {
-	if account.All {
-		return "*=rw"
-	}
-	parts := make([]string, 0, len(account.Perms))
-	for page, access := range account.Perms {
+func adminPermsString(perms map[string]string) string {
+	parts := make([]string, 0, len(perms))
+	for page, access := range perms {
 		parts = append(parts, page+"="+access)
 	}
 	sort.Strings(parts)
