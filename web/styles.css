@@ -515,3 +515,72 @@ body {
     font-size: 10px;
   }
 }
+
+/* 表格页脚与分页：统一的条数、位置和页码控件。 */
+.table-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 16px;
+  border-top: 1px solid #dfe7ea;
+  background: #fbfcfd;
+}
+
+.table-footer__count,
+.table-footer__position {
+  font-size: 0.82rem;
+  color: #5e6d76;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  margin-left: auto;
+  gap: 2px;
+}
+
+.pager__page,
+.pager__gap,
+.pager__nav {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+}
+
+.pager__page.v-btn--variant-flat {
+  box-shadow: 0 1px 2px rgba(23, 107, 77, 0.28);
+  font-weight: 600;
+}
+
+.pager__gap {
+  min-width: 26px;
+  color: #6b7f88;
+}
+
+.pager__gap:hover {
+  background: #eef4f2;
+}
+
+.pager__jump {
+  width: 88px;
+  margin-left: 6px;
+}
+
+.pager__jump input {
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .table-footer {
+    padding: 8px 12px;
+  }
+
+  .pager {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

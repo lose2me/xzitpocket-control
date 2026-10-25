@@ -35,7 +35,7 @@ import { template } from './template.js';
     return list.slice(start, start + size);
   };
 
-  // 统一表格页脚：左侧条数，右侧分页；只有一页时只显示条数。
+  // 统一表格页脚：左侧条数，右侧当前页/总页数 + 分页 + 跳页输入。
   const TableFooter = {
     name: 'TableFooter',
     props: {
@@ -45,9 +45,15 @@ import { template } from './template.js';
       unit: { type: String, default: '条' },
     },
     emits: ['update:page'],
-    template: `<div class="table-footer d-flex align-center flex-wrap ga-3 pa-3">
-      <span class="text-body-2 text-medium-emphasis">共 {{ total }} {{ unit }}</span>
+    setup(props) {
+      const count = computed(() => Number(props.total || 0).toLocaleString('zh-CN'));
+      const current = computed(() => Math.min(Math.max(1, props.page || 1), Math.max(1, props.length || 1)));
+      return { count, current };
+    },
+    template: `<div class="table-footer d-flex align-center flex-wrap">
+      <span class="table-footer__count">共 {{ count }} {{ unit }}</span>
       <v-spacer />
+      <span v-if="length > 1" class="table-footer__position d-none d-sm-inline">第 {{ current }} / {{ length }} 页</span>
       <page-pager v-if="length > 1" :model-value="page" :length="length" @update:model-value="$emit('update:page', $event)" />
     </div>`,
   };
@@ -63,20 +69,31 @@ import { template } from './template.js';
       const total = computed(() => Math.max(1, parseInt(props.length, 10) || 1));
       const page = computed(() => Math.min(Math.max(1, props.modelValue || 1), total.value));
       const items = computed(() => pagerItems(page.value, total.value));
+      const jump = ref('');
       const go = (target) => {
         const next = Math.min(Math.max(1, target), total.value);
         if (next !== page.value) emit('update:modelValue', next);
       };
-      return { page, total, items, go };
+      const submitJump = () => {
+        const value = parseInt(jump.value, 10);
+        if (Number.isFinite(value)) go(value);
+        jump.value = '';
+      };
+      return { page, total, items, jump, go, submitJump };
     },
-    template: `<nav class="v-pagination d-flex align-center justify-end flex-wrap ga-1" aria-label="分页">
-      <v-btn size="small" variant="text" :disabled="page <= 1" aria-label="上一页" @click="go(page - 1)"><v-icon>mdi-chevron-left</v-icon></v-btn>
+    template: `<div class="pager d-flex align-center flex-wrap">
+      <v-btn class="pager__nav" size="small" variant="text" :disabled="page <= 1" aria-label="上一页" @click="go(page - 1)"><v-icon size="18">mdi-chevron-left</v-icon></v-btn>
       <template v-for="(item, index) in items" :key="index">
-        <v-btn v-if="typeof item === 'number'" size="small" :variant="item === page ? 'flat' : 'text'" :color="item === page ? 'primary' : undefined" @click="go(item)">{{ item }}</v-btn>
-        <v-btn v-else size="small" variant="text" aria-label="更多页码" @click="go(item.side === 'left' ? page - 5 : page + 5)">…</v-btn>
+        <v-btn v-if="typeof item === 'number'" class="pager__page" size="small" :variant="item === page ? 'flat' : 'text'" :color="item === page ? 'primary' : undefined" @click="go(item)">{{ item }}</v-btn>
+        <v-tooltip v-else :text="item.side === 'left' ? '向前跳 5 页' : '向后跳 5 页'" location="top">
+          <template #activator="{ props: tip }">
+            <v-btn v-bind="tip" class="pager__gap" size="small" variant="text" @click="go(item.side === 'left' ? page - 5 : page + 5)">…</v-btn>
+          </template>
+        </v-tooltip>
       </template>
-      <v-btn size="small" variant="text" :disabled="page >= total" aria-label="下一页" @click="go(page + 1)"><v-icon>mdi-chevron-right</v-icon></v-btn>
-    </nav>`,
+      <v-btn class="pager__nav" size="small" variant="text" :disabled="page >= total" aria-label="下一页" @click="go(page + 1)"><v-icon size="18">mdi-chevron-right</v-icon></v-btn>
+      <v-text-field v-if="total > 5" v-model="jump" class="pager__jump d-none d-sm-block" density="compact" variant="outlined" hide-details type="number" placeholder="跳页" aria-label="跳转到页码" @keyup.enter="submitJump" @blur="submitJump" />
+    </div>`,
   };
 
       const vuetify = createVuetify({
