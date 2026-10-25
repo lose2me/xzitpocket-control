@@ -542,55 +542,20 @@ body {
   }
 }
 
-/* 页面级 tab：分段控件样式，选中项实心，未选中项留浅底，避免看不清。 */
+/* 页面级 tab：保留 Vuetify 原生样式和滑动动画，只加一层浅色背景。 */
 .page-tabs {
   display: inline-flex;
   width: auto;
   max-width: 100%;
-  padding: 3px;
-  border: 1px solid #dfe7ea;
+  padding: 0 12px;
+  border: 1px solid #e7eeeb;
   border-radius: 10px;
   background: #eef3f1;
-}
-
-.page-tabs .v-slide-group__content {
-  gap: 2px;
-}
-
-.page-tabs .v-tab {
-  min-width: 92px;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 8px;
-  font-size: 0.84rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: #43555e;
-}
-
-.page-tabs .v-tab.v-tab--selected {
-  background: #176b4d;
-  color: #fff;
-  box-shadow: 0 1px 3px rgba(23, 107, 77, 0.35);
-}
-
-.page-tabs .v-tab__slider {
-  display: none;
-}
-
-.page-tabs .v-tab.v-tab--selected .v-icon {
-  color: #fff;
 }
 
 @media (max-width: 600px) {
   .page-tabs {
     display: flex;
     width: 100%;
-  }
-
-  .page-tabs .v-tab {
-    min-width: 0;
-    flex: 1 1 auto;
   }
 }
