@@ -276,13 +276,6 @@ body {
   margin-bottom: 20px;
 }
 
-.prompt-call-title {
-  font-weight: 700;
-  font-size: 0.82rem;
-  color: #176b4d;
-  margin-bottom: 8px;
-}
-
 .prompt-message {
   border-left: 4px solid #d8e4e0;
   padding: 8px 10px;

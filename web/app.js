@@ -403,14 +403,18 @@ import { template } from './template.js';
         const text = String(message.content || '');
         return text.includes('请判断它是否是可用于作答的试卷') && text.includes('只输出 JSON');
       };
-      const aiPromptVisibleCalls = computed(() => {
-        if (aiPromptTab.value === 'precheck') return (aiPromptCalls.value || []).filter(call => call.kind === 'precheck');
-        if (aiPromptTab.value === 'analyze') {
-          return (aiPromptCalls.value || [])
-            .filter(call => call.kind === 'analyze' || call.kind === 'continue')
-            .map(call => Object.assign({}, call, { messages: (call.messages || []).filter(message => !isPrecheckVerdict(message) && !isPrecheckRequest(message)) }));
+      // 每一次 API 调用单独一个 tab；analyze/continue 里会带上 precheck 的历史，
+      // 展示时仍把 precheck 的请求和判定过滤掉。
+      const aiPromptActiveCall = computed(() => {
+        const index = Number.parseInt(aiPromptTab.value, 10);
+        const call = (aiPromptCalls.value || [])[index];
+        if (!call) return null;
+        if (call.kind === 'analyze' || call.kind === 'continue') {
+          return Object.assign({}, call, {
+            messages: (call.messages || []).filter(message => !isPrecheckVerdict(message) && !isPrecheckRequest(message)),
+          });
         }
-        return [];
+        return call;
       });
       const promptViewEl = ref(null);
       const contributorDialog = ref(false);
@@ -1400,8 +1404,7 @@ import { template } from './template.js';
         aiPromptCalls.value = Array.isArray(calls) ? calls : [];
         aiPromptText.value = text;
         aiPromptTitle.value = item.resource_name || 'Prompt';
-        const kinds = new Set(aiPromptCalls.value.map(call => call.kind));
-        aiPromptTab.value = kinds.has('precheck') ? 'precheck' : 'analyze';
+        aiPromptTab.value = aiPromptCalls.value.length ? '0' : 'json';
         aiPromptDialog.value = true;
       });
       watch(aiPromptDialog, async (open) => {
@@ -2210,7 +2213,7 @@ import { template } from './template.js';
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
-        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptVisibleCalls, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,

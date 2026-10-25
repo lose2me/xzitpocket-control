@@ -251,20 +251,18 @@ export const template = `
             </v-card-title>
             <v-divider />
             <v-card-text>
-              <v-tabs v-model="aiPromptTab" density="compact" color="primary" class="mb-2" @update:model-value="renderAIPrompts">
-                <v-tab value="precheck">precheck</v-tab>
-                <v-tab value="analyze">analyze</v-tab>
+              <v-tabs v-model="aiPromptTab" density="compact" color="primary" class="mb-2" show-arrows @update:model-value="renderAIPrompts">
+                <v-tab v-for="(call, ci) in aiPromptCalls" :key="ci" :value="String(ci)">{{ call.kind }} [max_tokens {{ call.max_tokens }}]</v-tab>
                 <v-tab value="json">JSON</v-tab>
               </v-tabs>
               <div v-if="aiPromptTab !== 'json'" :key="aiPromptTab" ref="promptViewEl" class="prompt-render">
-                <div v-for="(call, ci) in aiPromptVisibleCalls" :key="ci" class="prompt-call">
-                  <div class="prompt-call-title">{{ call.kind }} [max_tokens {{ call.max_tokens }}]</div>
-                  <div v-for="(message, mi) in call.messages" :key="mi" class="prompt-message" :class="'prompt-role-' + message.role">
+                <div v-if="aiPromptActiveCall" class="prompt-call">
+                  <div v-for="(message, mi) in aiPromptActiveCall.messages" :key="mi" class="prompt-message" :class="'prompt-role-' + message.role">
                     <div class="prompt-message-role">{{ message.role }}</div>
                     <div class="prompt-message-content">{{ message.content }}</div>
                   </div>
                 </div>
-                <div v-if="!aiPromptVisibleCalls.length" class="text-medium-emphasis">该类型暂无 Prompt 数据</div>
+                <div v-else class="text-medium-emphasis">该类型暂无 Prompt 数据</div>
               </div>
               <v-textarea v-else :model-value="aiPromptText" readonly variant="outlined" rows="24" hide-details class="mono prompt-preview" />
             </v-card-text>
