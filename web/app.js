@@ -4,6 +4,52 @@ import { template } from './template.js';
   const { createApp, ref, computed, nextTick, watch, onMounted, onBeforeUnmount } = Vue;
   const { createVuetify, useDisplay } = Vuetify;
 
+
+  // 分页控件：Vuetify 自带的 v-pagination 把中间页藏在不可点击的省略号里，
+  // 往回翻只能一页页点箭头。这里用可点击的省略号，左右各跳 5 页。
+  const pagerItems = (page, length) => {
+    const total = Math.max(1, Number(length) || 1);
+    const current = Math.min(Math.max(1, Number(page) || 1), total);
+    if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+    const wanted = new Set([1, total]);
+    for (let p = current - 2; p <= current + 2; p += 1) {
+      if (p >= 1 && p <= total) wanted.add(p);
+    }
+    const items = [];
+    [...wanted].sort((a, b) => a - b).forEach((value, index, all) => {
+      if (index > 0 && value - all[index - 1] > 1) items.push({ gap: true, side: 'left' });
+      items.push(value);
+    });
+    return items;
+  };
+
+  const PagePager = {
+    name: 'PagePager',
+    props: {
+      modelValue: { type: Number, default: 1 },
+      length: { type: [Number, String], default: 1 },
+    },
+    emits: ['update:modelValue'],
+    setup(props, { emit }) {
+      const total = computed(() => Math.max(1, parseInt(props.length, 10) || 1));
+      const page = computed(() => Math.min(Math.max(1, props.modelValue || 1), total.value));
+      const items = computed(() => pagerItems(page.value, total.value));
+      const go = (target) => {
+        const next = Math.min(Math.max(1, target), total.value);
+        if (next !== page.value) emit('update:modelValue', next);
+      };
+      return { page, total, items, go };
+    },
+    template: `<nav class="v-pagination d-flex align-center justify-end flex-wrap ga-1" aria-label="分页">
+      <v-btn size="small" variant="text" :disabled="page <= 1" aria-label="上一页" @click="go(page - 1)"><v-icon>mdi-chevron-left</v-icon></v-btn>
+      <template v-for="(item, index) in items" :key="index">
+        <v-btn v-if="typeof item === 'number'" size="small" :variant="item === page ? 'flat' : 'text'" :color="item === page ? 'primary' : undefined" @click="go(item)">{{ item }}</v-btn>
+        <v-btn v-else size="small" variant="text" aria-label="更多页码" @click="go(item.side === 'left' ? page - 5 : page + 5)">…</v-btn>
+      </template>
+      <v-btn size="small" variant="text" :disabled="page >= total" aria-label="下一页" @click="go(page + 1)"><v-icon>mdi-chevron-right</v-icon></v-btn>
+    </nav>`,
+  };
+
       const vuetify = createVuetify({
     theme: {
       defaultTheme: 'control',
@@ -2177,5 +2223,5 @@ import { template } from './template.js';
       };
     },
     template,
-  }).use(vuetify).mount('#app');
+  }).use(vuetify).component('page-pager', PagePager).mount('#app');
 })();
