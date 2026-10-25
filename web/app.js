@@ -472,20 +472,21 @@ import { template } from './template.js';
       let eventChart = null;
       let featureChart = null;
 
+      // 侧边栏按「账户 → 内容 → 运营 → 配置」分组，组内按使用频率排列。
       const nav = [
         { key: 'overview', label: '总览', icon: 'mdi-chart-line' },
         { key: 'users', label: '用户', icon: 'mdi-account-group-outline' },
         { key: 'admins', label: '管理员', icon: 'mdi-account-cog-outline' },
-        { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
-        { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
         { key: 'library', label: '题库', icon: 'mdi-book-open-page-variant' },
         { key: 'textbooks', label: '书单', icon: 'mdi-bookshelf' },
         { key: 'resources', label: '试卷', icon: 'mdi-file-document-multiple-outline' },
         { key: 'courses', label: '课程', icon: 'mdi-book-open-variant' },
         { key: 'share-codes', label: '分享码', icon: 'mdi-share-variant-outline' },
+        { key: 'risk', label: '风控', icon: 'mdi-shield-alert-outline' },
+        { key: 'error-reports', label: '错误', icon: 'mdi-bug-outline' },
+        { key: 'audit', label: '审计', icon: 'mdi-history' },
         { key: 'app-config', label: 'APP 配置', icon: 'mdi-cellphone-cog' },
-        { key: 'web-config', label: 'WEB 配置', icon: 'mdi-cog-outline' },
-        { key: 'audit', label: '审计', icon: 'mdi-history' }
+        { key: 'web-config', label: 'WEB 配置', icon: 'mdi-cog-outline' }
       ];
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
       // The console splits configuration into two pages but keeps one grant:
