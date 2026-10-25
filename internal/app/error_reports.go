@@ -83,7 +83,7 @@ func (a *App) ListErrorReports(ctx context.Context, limit, offset int, sort, ord
 		if item.UserID != "" {
 			identity, identityErr := a.Store.GetIdentityByUser(ctx, item.UserID, identityProvider)
 			if identityErr == nil {
-				studentID, _ = controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext)
+				studentID, _ = controlcrypto.Decrypt(a.cfg().EncryptionKey, identity.StudentIDCiphertext)
 			}
 		}
 		result = append(result, ErrorReportView{

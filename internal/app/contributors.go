@@ -25,7 +25,7 @@ func (a *App) resolveContributor(ctx context.Context, studentID string) (userID,
 	if len(studentID) > 64 || strings.ContainsAny(studentID, "\r\n\x00") {
 		return "", "", Err("invalid_student_id", "学号无效", 400)
 	}
-	hash := controlcrypto.HMACHex(a.Cfg.IDPepper, studentID)
+	hash := controlcrypto.HMACHex(a.cfg().IDPepper, studentID)
 	identity, err := a.Store.GetIdentityByHash(ctx, identityProvider, hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", Err("student_not_found", "该学号尚未登录过 App", 404)

@@ -3,34 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
-
-func TestConfigSaveValue(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(path, []byte("CONTROL_ADDR=127.0.0.1:8080\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg := Config{Path: path}
-	if err := cfg.SaveValue("CONTROL_OVERVIEW_SCALE_PERCENT", "150"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.SaveValue("CONTROL_ADDR", "0.0.0.0:1"); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := string(raw)
-	if !strings.Contains(env, "CONTROL_OVERVIEW_SCALE_PERCENT=150") {
-		t.Fatalf("new key missing: %s", env)
-	}
-	if !strings.Contains(env, "CONTROL_ADDR=0.0.0.0:1") {
-		t.Fatalf("existing key not updated: %s", env)
-	}
-}
 
 func TestLoadDotEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")

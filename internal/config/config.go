@@ -378,16 +378,6 @@ func updateDotEnv(path string, updates map[string]string) error {
 	return os.WriteFile(path, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")+"\n"), 0o600)
 }
 
-// SaveValue persists key=value into the file this config was loaded from, so
-// runtime changes survive restarts.
-func (c Config) SaveValue(key, value string) error {
-	path := c.Path
-	if path == "" {
-		path = filepath.Join("data", ".env")
-	}
-	return updateDotEnv(path, map[string]string{key: value})
-}
-
 func parseDotEnvValue(value string) string {
 	if len(value) >= 2 {
 		if value[0] == '"' && value[len(value)-1] == '"' {

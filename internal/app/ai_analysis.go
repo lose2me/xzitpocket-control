@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"xzitpocket-control/internal/ai"
+	"xzitpocket-control/internal/config"
 	"xzitpocket-control/internal/store/sqlite"
 )
 
@@ -104,60 +106,82 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) A
 	return view
 }
 
-// initAIAnalysis prepares the worker. It is a no-op unless the feature is
-// enabled in .env.
+// initAIAnalysis prepares the AI worker state. Settings can change while the
+// process runs, so this only seeds the snapshot and the wake channel; the
+// worker itself keeps running and re-reads the snapshot on every loop.
 func (a *App) initAIAnalysis() error {
-	if !a.Cfg.AIAnalysisEnabled {
-		return nil
-	}
-	windows, err := ai.ParseWindows(a.Cfg.AIWindows)
-	if err != nil {
-		return fmt.Errorf("CONTROL_AI_WINDOWS: %w", err)
-	}
-	location, err := time.LoadLocation(a.Cfg.AITimezone)
-	if err != nil {
-		a.Logger.Warn("AI timezone not found, falling back to UTC+8", "timezone", a.Cfg.AITimezone, "error", err)
-		location = time.FixedZone("CST", 8*3600)
-	}
-	model, err := ai.NewModel(ai.ModelOptions{
-		APIKey:  a.Cfg.AIAPIKey,
-		BaseURL: a.Cfg.AIBaseURL,
-		Name:    a.Cfg.AIModel,
-	})
+	a.aiCancel = make(map[string]context.CancelFunc)
+	a.aiWake = make(chan struct{}, 1)
+	enabled, err := a.buildAIState(a.cfg())
 	if err != nil {
 		return err
 	}
-	a.aiModel = model
-	a.aiWindows = windows
-	a.aiLocation = location
-	a.aiCancel = make(map[string]context.CancelFunc)
-	a.aiWake = make(chan struct{}, 1)
+	if !enabled {
+		return nil
+	}
 	for _, binary := range []string{"pdftohtml", "cwebp", "weasyprint", "node"} {
 		if _, err := exec.LookPath(binary); err != nil {
 			a.Logger.Warn("AI analysis dependency missing", "binary", binary, "hint", "apt-get install -y poppler-utils webp weasyprint fonts-noto-cjk nodejs npm")
 		}
 	}
-	if a.Cfg.AIMathJaxDir != "" {
-		if _, err := os.Stat(filepath.Join(a.Cfg.AIMathJaxDir, "render.js")); err != nil {
-			a.Logger.Warn("AI math renderer missing; formulas stay as LaTeX", "dir", a.Cfg.AIMathJaxDir, "hint", "cd ai-math && npm install --omit=dev")
+	if a.cfg().AIMathJaxDir != "" {
+		if _, err := os.Stat(filepath.Join(a.cfg().AIMathJaxDir, "render.js")); err != nil {
+			a.Logger.Warn("AI math renderer missing; formulas stay as LaTeX", "dir", a.cfg().AIMathJaxDir, "hint", "cd ai-math && npm install --omit=dev")
 		}
 	}
 	return nil
 }
 
+// buildAIState replaces the AI snapshot from cfg. It reports whether AI is
+// enabled. A disabled configuration stores an empty snapshot, which the worker
+// treats as "do nothing" and the API as 503.
+func (a *App) buildAIState(cfg config.Config) (bool, error) {
+	state, err := aiStateFromConfig(cfg, a.Logger)
+	if err != nil {
+		return false, err
+	}
+	a.aiState.Store(state)
+	return state.model != nil, nil
+}
+
+// aiStateFromConfig validates the AI settings and builds the worker snapshot
+// without touching the running state, so a rejected update changes nothing.
+func aiStateFromConfig(cfg config.Config, logger *slog.Logger) (*aiRuntime, error) {
+	if !cfg.AIAnalysisEnabled {
+		return &aiRuntime{}, nil
+	}
+	windows, err := ai.ParseWindows(cfg.AIWindows)
+	if err != nil {
+		return nil, fmt.Errorf("CONTROL_AI_WINDOWS: %w", err)
+	}
+	location, err := time.LoadLocation(cfg.AITimezone)
+	if err != nil {
+		logger.Warn("AI timezone not found, falling back to UTC+8", "timezone", cfg.AITimezone, "error", err)
+		location = time.FixedZone("CST", 8*3600)
+	}
+	model, err := ai.NewModel(ai.ModelOptions{
+		APIKey:  cfg.AIAPIKey,
+		BaseURL: cfg.AIBaseURL,
+		Name:    cfg.AIModel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &aiRuntime{model: model, windows: windows, location: location}, nil
+}
+
 func (a *App) aiNow() time.Time {
-	if a.aiLocation == nil {
+	if a.ai().location == nil {
 		return time.Now()
 	}
-	return time.Now().In(a.aiLocation)
+	return time.Now().In(a.ai().location)
 }
 
 // StartAIAnalysis runs the single worker loop. Jobs are processed one at a
 // time and only while the configured daily windows are open.
 func (a *App) StartAIAnalysis(ctx context.Context) {
-	if a.aiModel == nil {
-		return
-	}
+	// Always fix stale rows: AI may be disabled now and enabled from the
+	// console later, and a crash would otherwise leave tasks stuck as running.
 	if count, err := a.Store.ResetRunningAITasks(ctx); err != nil {
 		a.Logger.Error("reset AI tasks after restart", "error", err)
 	} else if count > 0 {
@@ -180,7 +204,8 @@ func (a *App) StartAIAnalysis(ctx context.Context) {
 				}
 			}
 			processed := false
-			if ai.InWindow(a.aiWindows, a.aiNow()) {
+			state := a.ai()
+			if state.model != nil && ai.InWindow(state.windows, a.aiNow()) {
 				task, ok, err := a.Store.ClaimNextAITask(ctx)
 				if err != nil {
 					a.Logger.Error("claim AI task", "error", err)
@@ -211,6 +236,10 @@ func (a *App) scanAIResources(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+		if a.ai().model == nil {
+			timer.Reset(aiScanInterval)
+			continue
+		}
 		tasks, err := a.Store.CreateAITasksForMissingResources(ctx, aiScanBatch, "auto")
 		if err != nil {
 			if ctx.Err() == nil {
@@ -228,7 +257,7 @@ func (a *App) scanAIResources(ctx context.Context) {
 // EnqueueAIAnalyses creates a new run for each resource. Earlier runs are kept
 // as history.
 func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor string) ([]AITaskView, []map[string]string, error) {
-	if a.aiModel == nil {
+	if a.ai().model == nil {
 		return nil, nil, Err("ai_disabled", "AI 解析未启用", 503)
 	}
 	if len(resourceIDs) == 0 {
@@ -283,7 +312,7 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 		if err != nil {
 			return nil, nil, err
 		}
-		created = append(created, aiTaskView(row, false, a.Cfg.AIPagesPerChunk))
+		created = append(created, aiTaskView(row, false, a.cfg().AIPagesPerChunk))
 	}
 	if len(created) > 0 {
 		a.wakeAIWorker()
@@ -312,7 +341,7 @@ func (a *App) ListAITasksForAdmin(ctx context.Context, status, search string, li
 	}
 	views := make([]AITaskView, 0, len(rows))
 	for _, row := range rows {
-		views = append(views, aiTaskView(row, false, a.Cfg.AIPagesPerChunk))
+		views = append(views, aiTaskView(row, false, a.cfg().AIPagesPerChunk))
 	}
 	return views, total, nil
 }
@@ -326,7 +355,7 @@ func (a *App) GetAITaskForAdmin(ctx context.Context, id string) (AITaskView, err
 		}
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, true, a.Cfg.AIPagesPerChunk), nil
+	return aiTaskView(row, true, a.cfg().AIPagesPerChunk), nil
 }
 
 // RetryAITask resumes a paused job in place. Failed, cancelled and skipped
@@ -368,7 +397,7 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 		if err != nil {
 			return AITaskView{}, err
 		}
-		return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
+		return aiTaskView(row, false, a.cfg().AIPagesPerChunk), nil
 	}
 	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, actor)
 	if err != nil {
@@ -386,7 +415,7 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 	if err != nil {
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
+	return aiTaskView(row, false, a.cfg().AIPagesPerChunk), nil
 }
 
 // CancelAITask stops a job and cancels any in-flight model request.
@@ -414,7 +443,7 @@ func (a *App) CancelAITask(ctx context.Context, id, actor string) (AITaskView, e
 	if err != nil {
 		return AITaskView{}, err
 	}
-	return aiTaskView(row, false, a.Cfg.AIPagesPerChunk), nil
+	return aiTaskView(row, false, a.cfg().AIPagesPerChunk), nil
 }
 
 // OpenAITaskOutput streams the generated analysis PDF.
@@ -463,6 +492,13 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	defer a.unregisterAIRequest(task.ID)
 	defer cancel()
 
+	// Settings can be changed from the console; work with the snapshot that was
+	// current when the task started.
+	model := a.ai().model
+	if model == nil {
+		return
+	}
+
 	isCancelled := func() bool {
 		current, err := a.Store.GetAITask(context.Background(), task.ID)
 		return err == nil && current.Status == "cancelled"
@@ -508,7 +544,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 		return
 	}
 
-	workDir := filepath.Join(a.Cfg.AIWorkDir, task.ID)
+	workDir := filepath.Join(a.cfg().AIWorkDir, task.ID)
 	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		finish("failed", "创建临时目录失败")
 		return
@@ -524,8 +560,8 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	extractCtx, extractCancel := context.WithTimeout(ctx, 10*time.Minute)
 	paper, err := ai.ExtractPaper(extractCtx, pdfPath, resource.Name, ai.ExtractOptions{
 		WorkDir:      workDir,
-		ImageQuality: a.Cfg.AIImageQuality,
-		ImageMaxEdge: a.Cfg.AIImageMaxEdge,
+		ImageQuality: a.cfg().AIImageQuality,
+		ImageMaxEdge: a.cfg().AIImageMaxEdge,
 	})
 	extractCancel()
 	if err != nil {
@@ -534,7 +570,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	}
 	totalPages := paper.TotalPages
 	if err := a.Store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
-		TotalPages: &totalPages, Model: stringPtr(a.aiModel.Name()),
+		TotalPages: &totalPages, Model: stringPtr(model.Name()),
 	}); err != nil {
 		a.Logger.Error("update AI task pages", "error", err, "task", task.ID)
 	}
@@ -588,7 +624,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			pause("等待下一个解析时间窗")
 			return
 		}
-		chunkEnd := minInt(nextPage+a.Cfg.AIPagesPerChunk-1, paper.TotalPages)
+		chunkEnd := minInt(nextPage+a.cfg().AIPagesPerChunk-1, paper.TotalPages)
 		instruction := fmt.Sprintf(ai.ChunkInstruction, paper.Title, nextPage, chunkEnd, paper.TotalPages)
 		parts, plain, err := ai.BuildContent(paper, nextPage, chunkEnd, instruction)
 		if err != nil {
@@ -596,7 +632,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			return
 		}
 		callCtx, callCancel, windowEnd := a.aiCallContext(ctx)
-		content, promptCalls, err := a.aiModel.Analyze(callCtx, history, parts)
+		content, promptCalls, err := model.Analyze(callCtx, history, parts)
 		callCancel()
 		a.saveAIPrompts(task.ID, &task.PromptsJSON, promptCalls)
 		if err != nil {
@@ -613,7 +649,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 				return
 			}
 			attempt++
-			if attempt >= a.Cfg.AIMaxAttempts {
+			if attempt >= a.cfg().AIMaxAttempts {
 				finish("failed", fmt.Sprintf("第 %d-%d 页解析失败（已重试 %d 次）：%s", nextPage, chunkEnd, attempt, err.Error()))
 				return
 			}
@@ -626,7 +662,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 		}
 		if strings.TrimSpace(content) == "" {
 			attempt++
-			if attempt >= a.Cfg.AIMaxAttempts {
+			if attempt >= a.cfg().AIMaxAttempts {
 				finish("failed", "模型返回空内容")
 				return
 			}
@@ -657,7 +693,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	}
 	renderCtx, renderCancel := context.WithTimeout(ctx, 5*time.Minute)
 	document := "# " + resource.Name + " · AI 解析\n\n" + task.Markdown
-	pdf, err := ai.RenderMarkdownPDF(renderCtx, document, a.Cfg.AIMathJaxDir)
+	pdf, err := ai.RenderMarkdownPDF(renderCtx, document, a.cfg().AIMathJaxDir)
 	renderCancel()
 	if err != nil {
 		finish("failed", "生成 PDF 失败："+err.Error())
@@ -735,7 +771,7 @@ func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, s
 			return ai.Verdict{}, "", calls, err
 		}
 		callCtx, callCancel, windowEnd := a.aiCallContext(ctx)
-		verdict, raw, promptCalls, err := a.aiModel.Precheck(callCtx, parts)
+		verdict, raw, promptCalls, err := a.ai().model.Precheck(callCtx, parts)
 		callCancel()
 		calls = append(calls, promptCalls...)
 		if err == nil {
@@ -748,7 +784,7 @@ func (a *App) precheckPaper(ctx context.Context, paper *ai.Paper) (ai.Verdict, s
 			return ai.Verdict{}, "", calls, err
 		}
 		attempts++
-		if attempts >= a.Cfg.AIMaxAttempts {
+		if attempts >= a.cfg().AIMaxAttempts {
 			return ai.Verdict{}, "", calls, err
 		}
 		if !a.sleepInWindow(ctx, aiRetryDelay(attempts)) {
@@ -797,21 +833,21 @@ func (a *App) downloadAIPdf(ctx context.Context, key, dest string) error {
 }
 
 func (a *App) aiInWindow() bool {
-	return a.aiModel != nil && ai.InWindow(a.aiWindows, a.aiNow())
+	return a.ai().model != nil && ai.InWindow(a.ai().windows, a.aiNow())
 }
 
 func (a *App) aiWindowClosed() bool {
-	return a.aiModel != nil && !ai.InWindow(a.aiWindows, a.aiNow())
+	return a.ai().model != nil && !ai.InWindow(a.ai().windows, a.aiNow())
 }
 
 func (a *App) aiCallContext(parent context.Context) (context.Context, context.CancelFunc, time.Time) {
 	now := a.aiNow()
-	windowEnd, ok := ai.WindowEnd(a.aiWindows, now)
+	windowEnd, ok := ai.WindowEnd(a.ai().windows, now)
 	if !ok {
 		windowEnd = now
 	}
 	deadline := windowEnd
-	if timeout := now.Add(a.Cfg.AIRequestTimeout); timeout.Before(deadline) {
+	if timeout := now.Add(a.cfg().AIRequestTimeout); timeout.Before(deadline) {
 		deadline = timeout
 	}
 	ctx, cancel := context.WithDeadline(parent, deadline)

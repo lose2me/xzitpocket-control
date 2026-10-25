@@ -103,7 +103,7 @@ func (a *App) cosClient() *cloud.COSClient {
 	if a.cosClientOverride != nil {
 		return a.cosClientOverride
 	}
-	return cloud.NewCOSClient(a.Cfg.COSSecretID, a.Cfg.COSSecretKey, a.Cfg.COSBucket, a.Cfg.COSRegion)
+	return cloud.NewCOSClient(a.cfg().COSSecretID, a.cfg().COSSecretKey, a.cfg().COSBucket, a.cfg().COSRegion)
 }
 
 // textbookViewForAdmin adds the contributor's decrypted student ID. It is only
@@ -325,7 +325,7 @@ func (a *App) copyStoredObject(ctx context.Context, src, dst string) error {
 // best-effort: the object is already stored, and refreshes wear off once the
 // cache TTL expires even when the API call fails.
 func (a *App) purgeCDN(ctx context.Context, keys ...string) {
-	if a.Cfg.CDNDomain == "" || a.Cfg.COSSecretID == "" || a.Cfg.COSSecretKey == "" {
+	if a.cfg().CDNDomain == "" || a.cfg().COSSecretID == "" || a.cfg().COSSecretKey == "" {
 		return
 	}
 	urls := make([]string, 0, len(keys))
@@ -333,12 +333,12 @@ func (a *App) purgeCDN(ctx context.Context, keys ...string) {
 		if key == "" {
 			continue
 		}
-		urls = append(urls, a.Cfg.CDNDomain+"/"+strings.TrimPrefix(key, "/"))
+		urls = append(urls, a.cfg().CDNDomain+"/"+strings.TrimPrefix(key, "/"))
 	}
 	if len(urls) == 0 {
 		return
 	}
-	if err := cloud.PurgeCDNCache(ctx, a.Cfg.COSSecretID, a.Cfg.COSSecretKey, urls); err != nil {
+	if err := cloud.PurgeCDNCache(ctx, a.cfg().COSSecretID, a.cfg().COSSecretKey, urls); err != nil {
 		a.Logger.Warn("cdn purge failed", "error", err, "urls", urls)
 	}
 }
@@ -489,13 +489,13 @@ func (a *App) textbookResourceURL(ctx context.Context, id, kind string, ttl time
 	if key == "" {
 		return TextbookResourceView{}, Err("resource_missing", "该教材没有对应资源", 404)
 	}
-	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
+	if a.cfg().CDNDomain == "" || a.cfg().CDNAuthKey == "" {
 		return TextbookResourceView{}, Err("cdn_unavailable", "CDN 未配置", 503)
 	}
 	if ttl <= 0 || ttl > 7*24*time.Hour {
-		ttl = a.Cfg.CDNURLTTL
+		ttl = a.cfg().CDNURLTTL
 	}
-	url := cloud.CDNSignedURL(a.Cfg.CDNDomain, a.Cfg.CDNAuthKey, "/"+key, ttl)
+	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+key, ttl)
 	return TextbookResourceView{
 		URL:       url,
 		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),

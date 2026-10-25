@@ -123,7 +123,7 @@ func (a *App) submissionIdentity(ctx context.Context, p SessionPrincipal) (name,
 func (a *App) submissionViewForAdmin(item sqlite.Submission) SubmissionView {
 	view := submissionView(item)
 	if item.StudentIDCiphertext != "" {
-		if studentID, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.StudentIDCiphertext); err == nil {
+		if studentID, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, item.StudentIDCiphertext); err == nil {
 			view.StudentID = studentID
 		}
 	}
@@ -607,13 +607,13 @@ func (a *App) SubmissionResourceURL(ctx context.Context, id, kind string, ttl ti
 	if item.PdfKey == "" {
 		return SubmissionURLView{}, Err("resource_missing", "该提交没有文件", 404)
 	}
-	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
+	if a.cfg().CDNDomain == "" || a.cfg().CDNAuthKey == "" {
 		return SubmissionURLView{}, Err("cdn_unavailable", "CDN 未配置", 503)
 	}
 	if ttl <= 0 || ttl > 7*24*time.Hour {
-		ttl = a.Cfg.CDNURLTTL
+		ttl = a.cfg().CDNURLTTL
 	}
-	url := cloud.CDNSignedURL(a.Cfg.CDNDomain, a.Cfg.CDNAuthKey, "/"+item.PdfKey, ttl)
+	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.PdfKey, ttl)
 	return SubmissionURLView{
 		URL:       url,
 		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),

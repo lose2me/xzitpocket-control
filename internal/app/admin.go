@@ -41,7 +41,7 @@ func (a *App) AdminLogin(ctx context.Context, key string) (string, AdminPrincipa
 	}
 	now := time.Now().UTC()
 	expires := now.Add(12 * time.Hour)
-	if err := a.Store.CreateAdminSession(ctx, admin.ID, controlcrypto.HashToken(a.Cfg.TokenPepper, token), expires, now); err != nil {
+	if err := a.Store.CreateAdminSession(ctx, admin.ID, controlcrypto.HashToken(a.cfg().TokenPepper, token), expires, now); err != nil {
 		return "", AdminPrincipal{}, err
 	}
 	_ = a.Store.TouchAdmin(ctx, admin.ID, now)
@@ -126,7 +126,7 @@ func (a *App) GetUserDetail(ctx context.Context, id string) (UserDetail, error) 
 	alias := ""
 	if identity.UserID != "" {
 		alias = identity.StudentAlias
-		studentID, _ = controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext)
+		studentID, _ = controlcrypto.Decrypt(a.cfg().EncryptionKey, identity.StudentIDCiphertext)
 	}
 	devices, err := a.Store.ListUserDevices(ctx, id)
 	if err != nil {

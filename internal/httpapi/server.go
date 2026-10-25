@@ -275,6 +275,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminAppReleaseTest(w, r)
 	case r.Method == http.MethodPut && path == "/admin/app/release-test":
 		s.adminAppReleaseTestUpdate(w, r)
+	case r.Method == http.MethodGet && path == "/admin/settings":
+		s.adminSettings(w, r)
+	case r.Method == http.MethodPut && path == "/admin/settings":
+		s.adminSettingsUpdate(w, r)
 	case r.Method == http.MethodGet && path == "/admin/school-calendar":
 		s.adminSchoolCalendar(w, r)
 	case r.Method == http.MethodPut && path == "/admin/school-calendar":
@@ -643,7 +647,8 @@ func adminPageFor(path, method string) (string, bool) {
 		return "courses", write
 	case path == "/admin/share-codes" || strings.HasPrefix(path, "/admin/share-codes/"):
 		return "share-codes", write
-	case path == "/admin/app/release" || path == "/admin/app/release-test" || path == "/admin/school-calendar":
+	case path == "/admin/app/release" || path == "/admin/app/release-test" || path == "/admin/school-calendar" ||
+		path == "/admin/settings":
 		return "config", write
 	case path == "/admin/audit":
 		return "audit", write
@@ -904,6 +909,31 @@ func (s *Server) adminMetricsBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authAdmin(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.App.SettingsView())
+}
+
+func (s *Server) adminSettingsUpdate(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in app.SettingsUpdate
+	if err := decodeJSON(r, &in, 64<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.UpdateSettings(r.Context(), in, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) adminOverviewDisplay(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r); !ok {
 		return

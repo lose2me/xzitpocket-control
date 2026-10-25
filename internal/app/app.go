@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"xzitpocket-control/internal/ai"
@@ -63,13 +64,35 @@ type App struct {
 	objectSizeMu    sync.Mutex
 	objectSizeCache map[string]int64
 
-	// AI exam analysis. The model is nil when the feature is disabled.
-	aiModel    *ai.Model
-	aiWindows  []ai.Window
-	aiLocation *time.Location
+	// AI exam analysis. The snapshot is replaced as a whole when the settings
+	// change, so readers never see a half-applied configuration.
+	aiState    atomic.Pointer[aiRuntime]
 	aiCancelMu sync.Mutex
 	aiCancel   map[string]context.CancelFunc
 	aiWake     chan struct{}
+}
+
+// cfg returns the current configuration snapshot. Callers must not keep the
+// returned value: settings can be replaced while the process runs.
+func (a *App) cfg() config.Config {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.Cfg
+}
+
+// aiRuntime is the AI worker's view of the runtime settings.
+type aiRuntime struct {
+	model    *ai.Model
+	windows  []ai.Window
+	location *time.Location
+}
+
+// ai returns the current AI snapshot; the zero value means "disabled".
+func (a *App) ai() *aiRuntime {
+	if state := a.aiState.Load(); state != nil {
+		return state
+	}
+	return &aiRuntime{}
 }
 
 func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, error) {
@@ -78,6 +101,9 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 	}
 	a := &App{Cfg: cfg, Store: store, Logger: logger}
 	if err := a.ensureAdmins(context.Background()); err != nil {
+		return nil, err
+	}
+	if err := a.LoadSettings(context.Background()); err != nil {
 		return nil, err
 	}
 	if err := a.initAIAnalysis(); err != nil {
@@ -89,7 +115,7 @@ func New(cfg config.Config, store *sqlite.Store, logger *slog.Logger) (*App, err
 // ensureAdmins keeps the .env super administrator in sync. Other admins live in
 // the database and are managed in the console only: .env never seeds them.
 func (a *App) ensureAdmins(ctx context.Context) error {
-	key := strings.TrimSpace(a.Cfg.AdminKey)
+	key := strings.TrimSpace(a.cfg().AdminKey)
 	if key == "" {
 		a.Logger.Warn("no admin account configured; the console has no super admin")
 		return nil
@@ -129,7 +155,7 @@ func (a *App) ensureAdmins(ctx context.Context) error {
 	default:
 		return err
 	}
-	if a.Cfg.AdminKey == "change-me" {
+	if a.cfg().AdminKey == "change-me" {
 		a.Logger.Warn("using default admin management key; edit data/.env")
 	}
 	return nil
@@ -166,7 +192,7 @@ func (a *App) AuthenticateDevice(ctx context.Context, token string) (DevicePrinc
 	if strings.TrimSpace(token) == "" {
 		return DevicePrincipal{}, ErrUnauthorized
 	}
-	d, err := a.Store.GetDeviceByTokenHash(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, token))
+	d, err := a.Store.GetDeviceByTokenHash(ctx, controlcrypto.HashToken(a.cfg().TokenPepper, token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return DevicePrincipal{}, Err("invalid_device_token", "设备令牌无效", http.StatusUnauthorized)
 	}
@@ -199,7 +225,7 @@ func (a *App) authenticateSession(ctx context.Context, token string, library boo
 	if strings.TrimSpace(token) == "" {
 		return SessionPrincipal{}, ErrUnauthorized
 	}
-	session, err := a.Store.GetSessionByAccessHash(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, token))
+	session, err := a.Store.GetSessionByAccessHash(ctx, controlcrypto.HashToken(a.cfg().TokenPepper, token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionPrincipal{}, Err("invalid_access_token", "访问令牌无效", http.StatusUnauthorized)
 	}
@@ -249,7 +275,7 @@ func (a *App) AuthenticateAdmin(ctx context.Context, token string) (AdminPrincip
 	if strings.TrimSpace(token) == "" {
 		return AdminPrincipal{}, ErrUnauthorized
 	}
-	session, err := a.Store.GetAdminSession(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, token))
+	session, err := a.Store.GetAdminSession(ctx, controlcrypto.HashToken(a.cfg().TokenPepper, token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return AdminPrincipal{}, Err("invalid_admin_session", "管理员会话无效", http.StatusUnauthorized)
 	}

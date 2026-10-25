@@ -246,6 +246,15 @@ CREATE TABLE IF NOT EXISTS school_calendar_config (
 INSERT OR IGNORE INTO school_calendar_config(id, days_json, slots_json, updated_at)
 VALUES (1, '[]', '[]', 0);
 
+-- Runtime settings edited from the console. Bootstrap settings (listen address,
+-- database path, web directory, peppers, super admin key, AI work directories)
+-- stay in data/.env; every row here is applied without a restart.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+);
+
 -- Short-lived encrypted configuration payloads shared between app installs.
 CREATE TABLE IF NOT EXISTS share_codes (
     id TEXT PRIMARY KEY,

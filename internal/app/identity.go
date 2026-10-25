@@ -27,7 +27,7 @@ func (a *App) contributorInfo(ctx context.Context, userID string) (studentID, na
 		return "", ""
 	}
 	name = strings.TrimSpace(identity.StudentAlias)
-	if plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext); err == nil {
+	if plain, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, identity.StudentIDCiphertext); err == nil {
 		studentID = plain
 	}
 	return
@@ -91,7 +91,7 @@ func (a *App) RegisterDevice(ctx context.Context, in RegisterDeviceInput, signat
 		return RegisterDeviceOutput{}, err
 	}
 	now := time.Now().UTC()
-	device := sqlite.Device{ID: deviceID, DeviceSerial: serial, Installation: in.InstallationID, TokenHash: controlcrypto.HashToken(a.Cfg.TokenPepper, token), PublicKey: in.PublicKey, Platform: in.Platform, AppVersion: in.AppVersion, CreatedAt: now, LastSeenAt: now}
+	device := sqlite.Device{ID: deviceID, DeviceSerial: serial, Installation: in.InstallationID, TokenHash: controlcrypto.HashToken(a.cfg().TokenPepper, token), PublicKey: in.PublicKey, Platform: in.Platform, AppVersion: in.AppVersion, CreatedAt: now, LastSeenAt: now}
 	if err := a.Store.CreateDevice(ctx, device); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return RegisterDeviceOutput{}, Err("installation_exists", "installation_id 已注册", http.StatusConflict)
@@ -126,7 +126,7 @@ func (a *App) CreateChallenge(ctx context.Context, principal DevicePrincipal) (C
 	}
 	now := time.Now().UTC()
 	expires := now.Add(5 * time.Minute)
-	if err := a.Store.CreateChallenge(ctx, sqlite.Challenge{ID: id, DeviceID: principal.Device.ID, Challenge: challenge, ChallengeHash: controlcrypto.HashToken(a.Cfg.TokenPepper, challenge), ExpiresAt: expires}); err != nil {
+	if err := a.Store.CreateChallenge(ctx, sqlite.Challenge{ID: id, DeviceID: principal.Device.ID, Challenge: challenge, ChallengeHash: controlcrypto.HashToken(a.cfg().TokenPepper, challenge), ExpiresAt: expires}); err != nil {
 		return ChallengeOutput{}, err
 	}
 	return ChallengeOutput{ChallengeID: id, Challenge: challenge, ExpiresAt: expires.Format(time.RFC3339)}, nil
@@ -163,7 +163,7 @@ func (a *App) CheckLoginEligibility(ctx context.Context, studentID string) error
 	if err := controlcrypto.ValidateStudentID(studentID); err != nil {
 		return Err("invalid_student_id", "学号格式无效", http.StatusBadRequest)
 	}
-	identity, err := a.Store.GetIdentityByHash(ctx, identityProvider, controlcrypto.HMACHex(a.Cfg.IDPepper, studentID))
+	identity, err := a.Store.GetIdentityByHash(ctx, identityProvider, controlcrypto.HMACHex(a.cfg().IDPepper, studentID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -234,7 +234,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		a.recordLoginAttemptWithSource(ctx, "", device.ID, "alias_mismatch", sourceHash)
 		return SessionOutput{}, Err("invalid_student_alias", "student_alias 不匹配", http.StatusBadRequest)
 	}
-	ok, err := a.Store.ConsumeChallenge(ctx, in.ChallengeID, device.ID, controlcrypto.HashToken(a.Cfg.TokenPepper, in.Challenge), time.Now().UTC())
+	ok, err := a.Store.ConsumeChallenge(ctx, in.ChallengeID, device.ID, controlcrypto.HashToken(a.cfg().TokenPepper, in.Challenge), time.Now().UTC())
 	if err != nil {
 		return SessionOutput{}, err
 	}
@@ -243,7 +243,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, Err("challenge_expired", "登录挑战无效或已使用", http.StatusUnauthorized)
 	}
 
-	studentHash := controlcrypto.HMACHex(a.Cfg.IDPepper, in.StudentID)
+	studentHash := controlcrypto.HMACHex(a.cfg().IDPepper, in.StudentID)
 	identity, err := a.Store.GetIdentityByHash(ctx, identityProvider, studentHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		userID, idErr := controlcrypto.NewID("usr")
@@ -255,7 +255,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		if idErr != nil {
 			return SessionOutput{}, idErr
 		}
-		ciphertext, idErr := controlcrypto.Encrypt(a.Cfg.EncryptionKey, in.StudentID)
+		ciphertext, idErr := controlcrypto.Encrypt(a.cfg().EncryptionKey, in.StudentID)
 		if idErr != nil {
 			return SessionOutput{}, idErr
 		}
@@ -299,7 +299,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, err
 	}
 	accessExpiry, refreshExpiry := now.Add(15*time.Minute), now.Add(30*24*time.Hour)
-	if err := a.Store.CreateSession(ctx, sqlite.Session{ID: sid, UserID: user.ID, DeviceID: device.ID, AccessHash: controlcrypto.HashToken(a.Cfg.TokenPepper, access), RefreshHash: controlcrypto.HashToken(a.Cfg.TokenPepper, refresh), ExpiresAt: accessExpiry, RefreshExpires: refreshExpiry, CreatedAt: now, LastUsedAt: now}); err != nil {
+	if err := a.Store.CreateSession(ctx, sqlite.Session{ID: sid, UserID: user.ID, DeviceID: device.ID, AccessHash: controlcrypto.HashToken(a.cfg().TokenPepper, access), RefreshHash: controlcrypto.HashToken(a.cfg().TokenPepper, refresh), ExpiresAt: accessExpiry, RefreshExpires: refreshExpiry, CreatedAt: now, LastUsedAt: now}); err != nil {
 		return SessionOutput{}, err
 	}
 	a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "success", sourceHash)
@@ -338,30 +338,30 @@ func (a *App) recordLoginAttemptWithSource(ctx context.Context, userID, deviceID
 	if err := a.Store.AddAudit(ctx, userID, "login_attempt", "device", deviceID, detail, now); err != nil {
 		a.Logger.Warn("record login attempt failed", "error", err)
 	}
-	count, err := a.Store.CountLoginAttempts(ctx, userID, deviceID, now.Add(-a.Cfg.RiskLoginWindow))
+	count, err := a.Store.CountLoginAttempts(ctx, userID, deviceID, now.Add(-a.cfg().RiskLoginWindow))
 	if err != nil {
 		return
 	}
-	if count >= a.Cfg.RiskLoginCount {
+	if count >= a.cfg().RiskLoginCount {
 		id, idErr := controlcrypto.NewID("risk")
 		if idErr != nil {
 			return
 		}
-		_ = a.Store.CreateRiskEvent(ctx, sqlite.RiskEvent{ID: id, Type: "login_attempt_burst", UserID: userID, DeviceID: deviceID, ObservedCount: count, WindowStart: now.Add(-a.Cfg.RiskLoginWindow), WindowEnd: now, Detail: detail, CreatedAt: now})
+		_ = a.Store.CreateRiskEvent(ctx, sqlite.RiskEvent{ID: id, Type: "login_attempt_burst", UserID: userID, DeviceID: deviceID, ObservedCount: count, WindowStart: now.Add(-a.cfg().RiskLoginWindow), WindowEnd: now, Detail: detail, CreatedAt: now})
 	}
 }
 
 func (a *App) recordRiskForDevices(ctx context.Context, userID, deviceID string) {
 	now := time.Now().UTC()
 	count, err := a.Store.CountUserDevices(ctx, userID)
-	if err != nil || count <= a.Cfg.RiskDeviceCount {
+	if err != nil || count <= a.cfg().RiskDeviceCount {
 		return
 	}
 	id, err := controlcrypto.NewID("risk")
 	if err != nil {
 		return
 	}
-	detail := controlcrypto.JSON(map[string]any{"device_count": count, "threshold": a.Cfg.RiskDeviceCount})
+	detail := controlcrypto.JSON(map[string]any{"device_count": count, "threshold": a.cfg().RiskDeviceCount})
 	_ = a.Store.CreateRiskEvent(ctx, sqlite.RiskEvent{ID: id, Type: "account_device_burst", UserID: userID, DeviceID: deviceID, ObservedCount: count, WindowStart: now, WindowEnd: now, Detail: detail, CreatedAt: now})
 }
 
@@ -369,7 +369,7 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	if strings.TrimSpace(refreshToken) == "" {
 		return SessionOutput{}, Err("invalid_refresh_token", "刷新令牌无效", http.StatusUnauthorized)
 	}
-	hash := controlcrypto.HashToken(a.Cfg.TokenPepper, refreshToken)
+	hash := controlcrypto.HashToken(a.cfg().TokenPepper, refreshToken)
 	session, err := a.Store.GetSessionByRefreshHash(ctx, hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionOutput{}, Err("invalid_refresh_token", "刷新令牌无效", http.StatusUnauthorized)
@@ -426,7 +426,7 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 		return SessionOutput{}, err
 	}
 	accessExpiry, refreshExpiry := now.Add(15*time.Minute), session.RefreshExpires
-	rotated, err := a.Store.RotateSession(ctx, session.ID, hash, controlcrypto.HashToken(a.Cfg.TokenPepper, access), controlcrypto.HashToken(a.Cfg.TokenPepper, nextRefresh), accessExpiry, refreshExpiry, now)
+	rotated, err := a.Store.RotateSession(ctx, session.ID, hash, controlcrypto.HashToken(a.cfg().TokenPepper, access), controlcrypto.HashToken(a.cfg().TokenPepper, nextRefresh), accessExpiry, refreshExpiry, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SessionOutput{}, Err("refresh_replayed", "刷新令牌已失效", http.StatusUnauthorized)

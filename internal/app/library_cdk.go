@@ -90,7 +90,7 @@ func (a *App) CreateLibraryCDKs(ctx context.Context, in LibraryCDKCreateInput, a
 			if err != nil {
 				return nil, err
 			}
-			cdks = append(cdks, sqlite.LibraryCDK{ID: id, CodeHash: controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalLibraryCDKCode(code)), Status: "active", CreatedAt: now})
+			cdks = append(cdks, sqlite.LibraryCDK{ID: id, CodeHash: controlcrypto.HashToken(a.cfg().TokenPepper, canonicalLibraryCDKCode(code)), Status: "active", CreatedAt: now})
 			codes = append(codes, code)
 		}
 		if err := a.Store.CreateLibraryCDKs(ctx, cdks); err != nil {
@@ -101,7 +101,7 @@ func (a *App) CreateLibraryCDKs(ctx context.Context, in LibraryCDKCreateInput, a
 		}
 		views := make([]CreatedLibraryCDKView, 0, len(cdks))
 		for i, cdk := range cdks {
-			views = append(views, CreatedLibraryCDKView{LibraryCDKView: libraryCDKView(cdk, a.Cfg.EncryptionKey), Code: codes[i]})
+			views = append(views, CreatedLibraryCDKView{LibraryCDKView: libraryCDKView(cdk, a.cfg().EncryptionKey), Code: codes[i]})
 			_ = a.Store.AddAudit(ctx, actor, "library_cdk_create", "library_cdk", cdk.ID, controlcrypto.JSON(map[string]any{"batch_count": count}), now)
 		}
 		return views, nil
@@ -130,12 +130,12 @@ func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, sort, orde
 	}
 	studentHash := ""
 	if controlcrypto.ValidateStudentID(query) == nil {
-		studentHash = controlcrypto.HMACHex(a.Cfg.IDPepper, query)
+		studentHash = controlcrypto.HMACHex(a.cfg().IDPepper, query)
 	}
 	codeHash := ""
 	canonicalCode := canonicalLibraryCDKCode(query)
 	if validLibraryCDKCode(canonicalCode) {
-		codeHash = controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalCode)
+		codeHash = controlcrypto.HashToken(a.cfg().TokenPepper, canonicalCode)
 	}
 	items, total, err := a.Store.ListLibraryCDKs(ctx, limit, offset, sort, order, query, studentHash, codeHash)
 	if err != nil {
@@ -143,7 +143,7 @@ func (a *App) ListLibraryCDKs(ctx context.Context, limit, offset int, sort, orde
 	}
 	result := make([]LibraryCDKView, 0, len(items))
 	for _, item := range items {
-		result = append(result, libraryCDKView(item, a.Cfg.EncryptionKey))
+		result = append(result, libraryCDKView(item, a.cfg().EncryptionKey))
 	}
 	return result, total, nil
 }
@@ -174,7 +174,7 @@ func (a *App) RedeemLibraryCDK(ctx context.Context, p SessionPrincipal, code, ba
 	if err != nil {
 		return LibraryCDKRedemption{}, err
 	}
-	cdk, err := a.Store.RedeemLibraryCDK(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, code), bankID, identity.StudentIDHash, identity.StudentIDCiphertext, p.User.ID, time.Now().UTC())
+	cdk, err := a.Store.RedeemLibraryCDK(ctx, controlcrypto.HashToken(a.cfg().TokenPepper, code), bankID, identity.StudentIDHash, identity.StudentIDCiphertext, p.User.ID, time.Now().UTC())
 	if errors.Is(err, sqlite.ErrLibraryCDKNotFound) {
 		return LibraryCDKRedemption{}, Err("library_cdk_not_found", "CDK 不存在", http.StatusNotFound)
 	}

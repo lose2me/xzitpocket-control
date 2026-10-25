@@ -1526,6 +1526,40 @@ import { template } from './template.js';
           existingCoverUrl.value = '';
         }
       };
+      const settingGroups = ref([]);
+      const settingsForm = ref({});
+      const applySettingsView = (out) => {
+        const groups = (out && out.groups) || [];
+        const form = {};
+        groups.forEach(group => (group.fields || []).forEach(field => {
+          form[field.key] = {
+            kind: field.kind,
+            value: field.kind === 'bool' ? field.value === 'true' : (field.value || ''),
+            set: !!field.set,
+          };
+        }));
+        settingGroups.value = groups;
+        settingsForm.value = form;
+      };
+      const loadSettings = async () => {
+        applySettingsView(await api('/api/v1/admin/settings'));
+      };
+      const saveSettings = () => call(async () => {
+        const values = {};
+        Object.entries(settingsForm.value || {}).forEach(([key, entry]) => {
+          if (!entry) return;
+          if (entry.kind === 'bool') { values[key] = entry.value ? 'true' : 'false'; return; }
+          if (entry.kind === 'secret') {
+            const secret = (entry.value || '').trim();
+            if (secret) values[key] = secret;
+            return;
+          }
+          values[key] = entry.value == null ? '' : String(entry.value).trim();
+        });
+        const out = await api('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ values }) });
+        applySettingsView(out);
+        notify('运行配置已保存并生效');
+      });
       const loadRelease = async () => {
         const out = await api('/api/v1/admin/app/release');
         releaseConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
@@ -1749,7 +1783,7 @@ import { template } from './template.js';
           else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources(), loadAITasks()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
-          else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
+          else if (view.value === 'config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar(), loadSettings()]);
           else if (view.value === 'audit') audit.value = ((await api('/api/v1/admin/audit?limit=100')).items || []).map(item => Object.assign({}, item, { target_text: [item.target_type, item.target_id].filter(Boolean).join(' ') }));
         });
       };
@@ -2110,7 +2144,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,

@@ -97,7 +97,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 			return CreatedShareCodeView{Code: code, CreatedAt: candidate.CreatedAt}, nil
 		}
 	}
-	encrypted, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, string(payload))
+	encrypted, err := controlcrypto.Encrypt(a.cfg().EncryptionKey, string(payload))
 	if err != nil {
 		return CreatedShareCodeView{}, err
 	}
@@ -116,7 +116,7 @@ func (a *App) CreateShareCode(ctx context.Context, in ShareCodeCreateInput, user
 		}
 		item := sqlite.ShareCode{
 			ID:                id,
-			CodeHash:          controlcrypto.HashToken(a.Cfg.TokenPepper, canonicalShareCode(code)),
+			CodeHash:          controlcrypto.HashToken(a.cfg().TokenPepper, canonicalShareCode(code)),
 			CodeCiphertext:    codeCiphertext,
 			PayloadCiphertext: encrypted,
 			PayloadHash:       payloadHash,
@@ -144,14 +144,14 @@ func (a *App) ReadShareCode(ctx context.Context, rawCode string) (map[string]any
 	if !validShareCode(code) {
 		return nil, ShareCodeView{}, Err("invalid_share_code", "分享码无效", http.StatusBadRequest)
 	}
-	item, err := a.Store.GetShareCodeByHash(ctx, controlcrypto.HashToken(a.Cfg.TokenPepper, code))
+	item, err := a.Store.GetShareCodeByHash(ctx, controlcrypto.HashToken(a.cfg().TokenPepper, code))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ShareCodeView{}, Err("share_code_not_found", "分享码不存在", http.StatusNotFound)
 	}
 	if err != nil {
 		return nil, ShareCodeView{}, err
 	}
-	plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.PayloadCiphertext)
+	plain, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, item.PayloadCiphertext)
 	if err != nil {
 		return nil, ShareCodeView{}, Err("invalid_share_data", "分享数据已损坏", http.StatusInternalServerError)
 	}
@@ -165,14 +165,14 @@ func (a *App) ReadShareCode(ctx context.Context, rawCode string) (map[string]any
 // The plaintext code is never stored as-is; keeping an encrypted copy lets
 // administrators look a code up again after creation.
 func (a *App) encryptShareCode(code string) (string, error) {
-	return controlcrypto.Encrypt(a.Cfg.EncryptionKey, canonicalShareCode(code))
+	return controlcrypto.Encrypt(a.cfg().EncryptionKey, canonicalShareCode(code))
 }
 
 func (a *App) decryptShareCode(ciphertext string) string {
 	if strings.TrimSpace(ciphertext) == "" {
 		return ""
 	}
-	code, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, ciphertext)
+	code, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, ciphertext)
 	if err != nil {
 		return ""
 	}
@@ -264,7 +264,7 @@ func (a *App) GetShareCode(ctx context.Context, id string) (ShareCodeView, map[s
 	if err != nil {
 		return ShareCodeView{}, nil, err
 	}
-	plain, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.PayloadCiphertext)
+	plain, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, item.PayloadCiphertext)
 	if err != nil {
 		return ShareCodeView{}, nil, Err("invalid_share_data", "分享数据已损坏", http.StatusInternalServerError)
 	}
@@ -285,7 +285,7 @@ func (a *App) studentIDForUser(ctx context.Context, userID string) string {
 	if err != nil {
 		return ""
 	}
-	studentID, _ := controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext)
+	studentID, _ := controlcrypto.Decrypt(a.cfg().EncryptionKey, identity.StudentIDCiphertext)
 	return studentID
 }
 

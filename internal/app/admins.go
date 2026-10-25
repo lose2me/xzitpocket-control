@@ -52,12 +52,12 @@ func (a *App) adminSummary(item sqlite.Admin) AdminSummaryView {
 // are decrypted from the stored copy.
 func (a *App) adminKey(item sqlite.Admin) string {
 	if item.Name == superAdminName {
-		return strings.TrimSpace(a.Cfg.AdminKey)
+		return strings.TrimSpace(a.cfg().AdminKey)
 	}
 	if item.KeyCiphertext == "" {
 		return ""
 	}
-	key, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, item.KeyCiphertext)
+	key, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, item.KeyCiphertext)
 	if err != nil {
 		return ""
 	}
@@ -111,7 +111,7 @@ func (a *App) CreateAdminForAdmin(ctx context.Context, in AdminWriteInput, actor
 	if err != nil {
 		return AdminSummaryView{}, err
 	}
-	ciphertext, err := controlcrypto.Encrypt(a.Cfg.EncryptionKey, key)
+	ciphertext, err := controlcrypto.Encrypt(a.cfg().EncryptionKey, key)
 	if err != nil {
 		return AdminSummaryView{}, err
 	}
@@ -162,7 +162,7 @@ func (a *App) UpdateAdminForAdmin(ctx context.Context, id string, in AdminWriteI
 		if err != nil {
 			return AdminSummaryView{}, err
 		}
-		ciphertext, err = controlcrypto.Encrypt(a.Cfg.EncryptionKey, key)
+		ciphertext, err = controlcrypto.Encrypt(a.cfg().EncryptionKey, key)
 		if err != nil {
 			return AdminSummaryView{}, err
 		}

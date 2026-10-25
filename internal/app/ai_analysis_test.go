@@ -61,9 +61,7 @@ func TestRunAITaskPipeline(t *testing.T) {
 	a, store := newCourseApp(t)
 	ctx := context.Background()
 	a.cosClientOverride = newStubCOSClient(map[string]string{http.MethodGet: string(pdf)}, nil)
-	a.aiModel = model
-	a.aiWindows = []ai.Window{{Start: 0, End: 1440}}
-	a.aiLocation = time.UTC
+	a.aiState.Store(&aiRuntime{model: model, windows: []ai.Window{{Start: 0, End: 1440}}, location: time.UTC})
 	a.aiCancel = make(map[string]context.CancelFunc)
 	a.Cfg.AIWorkDir = t.TempDir()
 	a.Cfg.AIPagesPerChunk = 1
@@ -168,7 +166,7 @@ func makeAITestPDF(t *testing.T) []byte {
 func TestEnqueueRestartsActiveAITask(t *testing.T) {
 	a, store := newCourseApp(t)
 	ctx := context.Background()
-	a.aiModel = &ai.Model{}
+	a.aiState.Store(&aiRuntime{model: &ai.Model{}, windows: []ai.Window{{Start: 0, End: 1440}}, location: time.UTC})
 	now := time.Now().UTC()
 	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "重解.pdf"}, now)
 	if err != nil {

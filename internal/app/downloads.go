@@ -139,7 +139,7 @@ func (a *App) GetUploadStats(ctx context.Context, p SessionPrincipal) (UploadSta
 	}
 	view := UploadStatsView{ContributionCount: contribution, DownloadCount: downloads}
 	if identity, err := a.Store.GetIdentityByUser(ctx, p.User.ID, identityProvider); err == nil {
-		if studentID, err := controlcrypto.Decrypt(a.Cfg.EncryptionKey, identity.StudentIDCiphertext); err == nil {
+		if studentID, err := controlcrypto.Decrypt(a.cfg().EncryptionKey, identity.StudentIDCiphertext); err == nil {
 			view.StudentID = studentID
 		}
 	}

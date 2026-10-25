@@ -28,7 +28,7 @@ type cdnStatsCache struct {
 // returned while a background goroutine revalidates it. refresh bypasses the
 // cache and waits for fresh data.
 func (a *App) CDNStats(ctx context.Context, days int, refresh bool) (*cloud.CDNStats, error) {
-	if a.Cfg.COSSecretID == "" || a.Cfg.COSSecretKey == "" {
+	if a.cfg().COSSecretID == "" || a.cfg().COSSecretKey == "" {
 		return nil, Err("cdn_unavailable", "CDN 未配置", http.StatusServiceUnavailable)
 	}
 	now := time.Now()
@@ -52,7 +52,7 @@ func (a *App) CDNStats(ctx context.Context, days int, refresh bool) (*cloud.CDNS
 }
 
 func (a *App) fetchCDNStats(ctx context.Context, days int, now time.Time) (*cloud.CDNStats, error) {
-	stats, err := cloud.FetchCDNStats(ctx, a.Cfg.COSSecretID, a.Cfg.COSSecretKey, days, now)
+	stats, err := cloud.FetchCDNStats(ctx, a.cfg().COSSecretID, a.cfg().COSSecretKey, days, now)
 	if err != nil {
 		a.Logger.Warn("fetch cdn stats failed", "error", err)
 		return nil, Err("cdn_stats_failed", "获取 CDN 统计失败", http.StatusBadGateway)

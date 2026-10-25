@@ -1,0 +1,143 @@
+package app
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"xzitpocket-control/internal/config"
+	"xzitpocket-control/internal/store/sqlite"
+)
+
+func settingsField(t *testing.T, view SettingsView, key string) SettingsFieldView {
+	t.Helper()
+	for _, group := range view.Groups {
+		for _, field := range group.Fields {
+			if field.Key == key {
+				return field
+			}
+		}
+	}
+	t.Fatalf("setting %s missing from view", key)
+	return SettingsFieldView{}
+}
+
+// TestUpdateSettingsHotApplies covers the store + runtime path: values apply
+// immediately, secrets are encrypted at rest and never echoed, empty secrets
+// keep the stored value, and invalid input changes nothing.
+func TestUpdateSettingsHotApplies(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+
+	view, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		config.SettingEventRetentionDays: "45",
+		config.SettingCOSSecretKey:       "super-secret-key",
+	}}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.cfg().EventRetentionDays; got != 45 {
+		t.Fatalf("retention = %d, want 45 without restart", got)
+	}
+	if got := a.cfg().COSSecretKey; got != "super-secret-key" {
+		t.Fatalf("secret not applied: %q", got)
+	}
+	field := settingsField(t, view, config.SettingCOSSecretKey)
+	if field.Value != "" || !field.Set {
+		t.Fatalf("secret leaked to the console: %#v", field)
+	}
+	if settingsField(t, view, config.SettingEventRetentionDays).Value != "45" {
+		t.Fatalf("view did not reflect the saved value")
+	}
+
+	stored, err := store.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := stored[config.SettingCOSSecretKey]
+	if !strings.HasPrefix(raw, settingSecretPrefix) || strings.Contains(raw, "super-secret-key") {
+		t.Fatalf("secret is not encrypted at rest: %q", raw)
+	}
+
+	// An empty secret means "keep the stored value".
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		config.SettingCOSSecretKey: "",
+	}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.cfg().COSSecretKey; got != "super-secret-key" {
+		t.Fatalf("empty secret cleared the value: %q", got)
+	}
+
+	// Invalid values are rejected before anything is persisted.
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		config.SettingEventRetentionDays: "0",
+	}}, "admin"); err == nil {
+		t.Fatal("invalid retention was accepted")
+	}
+	if got := a.cfg().EventRetentionDays; got != 45 {
+		t.Fatalf("rejected update still changed the runtime config: %d", got)
+	}
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
+		"CONTROL_UNKNOWN_KEY": "x",
+	}}, "admin"); err == nil {
+		t.Fatal("unknown setting was accepted")
+	}
+
+	// A restart must rebuild the same runtime values from the database.
+	reloaded, err := New(config.Config{
+		TokenPepper:   a.cfg().TokenPepper,
+		IDPepper:      a.cfg().IDPepper,
+		EncryptionKey: a.cfg().EncryptionKey,
+		AdminKey:      "test",
+	}, store, a.Logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.cfg().EventRetentionDays != 45 || reloaded.cfg().COSSecretKey != "super-secret-key" {
+		t.Fatalf("settings were not restored from the database: retention=%d key=%q",
+			reloaded.cfg().EventRetentionDays, reloaded.cfg().COSSecretKey)
+	}
+}
+
+// TestLoadSettingsSeedsFromConfig covers an upgrade from a .env-only install:
+// the first start copies the .env values into app_settings, encrypting secrets.
+func TestLoadSettingsSeedsFromConfig(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key := []byte("01234567890123456789012345678901")
+	a, err := New(config.Config{
+		TokenPepper:        []byte("token"),
+		IDPepper:           []byte("id"),
+		EncryptionKey:      key,
+		AdminKey:           "test",
+		EventRetentionDays: 21,
+		COSSecretKey:       "seed-secret",
+	}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.cfg().EventRetentionDays != 21 || a.cfg().COSSecretKey != "seed-secret" {
+		t.Fatalf("seeded config not applied: %+v", a.cfg())
+	}
+	stored, err := store.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored[config.SettingEventRetentionDays] != "21" {
+		t.Fatalf("retention not seeded: %#v", stored)
+	}
+	if raw := stored[config.SettingCOSSecretKey]; !strings.HasPrefix(raw, settingSecretPrefix) || strings.Contains(raw, "seed-secret") {
+		t.Fatalf("seeded secret is not encrypted: %q", raw)
+	}
+}

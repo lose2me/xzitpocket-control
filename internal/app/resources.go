@@ -290,13 +290,13 @@ func (a *App) resourceURL(ctx context.Context, id string, ttl time.Duration, all
 	if item.PdfKey == "" {
 		return ResourceURLView{}, Err("resource_missing", "该试卷没有文件", 404)
 	}
-	if a.Cfg.CDNDomain == "" || a.Cfg.CDNAuthKey == "" {
+	if a.cfg().CDNDomain == "" || a.cfg().CDNAuthKey == "" {
 		return ResourceURLView{}, Err("cdn_unavailable", "CDN 未配置", 503)
 	}
 	if ttl <= 0 || ttl > 7*24*time.Hour {
-		ttl = a.Cfg.CDNURLTTL
+		ttl = a.cfg().CDNURLTTL
 	}
-	url := cloud.CDNSignedURL(a.Cfg.CDNDomain, a.Cfg.CDNAuthKey, "/"+item.PdfKey, ttl)
+	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.PdfKey, ttl)
 	return ResourceURLView{
 		URL:       url,
 		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),

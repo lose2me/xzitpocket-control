@@ -36,7 +36,7 @@ func metadataValue(ctx context.Context, path string) (string, error) {
 // instance is looked up by the metadata public IP, so no instance id has to be
 // configured.
 func (a *App) HostStats(ctx context.Context, days int, refresh bool) (*cloud.HostStats, error) {
-	if a.Cfg.MonitorSecretID == "" || a.Cfg.MonitorSecretKey == "" {
+	if a.cfg().MonitorSecretID == "" || a.cfg().MonitorSecretKey == "" {
 		return nil, Err("host_unavailable", "主机监控未配置", http.StatusServiceUnavailable)
 	}
 	now := time.Now()
@@ -58,7 +58,7 @@ func (a *App) HostStats(ctx context.Context, days int, refresh bool) (*cloud.Hos
 		a.Logger.Warn("read instance public ip failed", "error", err)
 		return nil, Err("host_unavailable", "无法获取主机信息", http.StatusServiceUnavailable)
 	}
-	stats, err := cloud.FetchHostStats(ctx, a.Cfg.MonitorSecretID, a.Cfg.MonitorSecretKey, region, publicIP, days, now)
+	stats, err := cloud.FetchHostStats(ctx, a.cfg().MonitorSecretID, a.cfg().MonitorSecretKey, region, publicIP, days, now)
 	if err != nil {
 		a.Logger.Warn("fetch host stats failed", "error", err)
 		return nil, Err("host_stats_failed", "获取主机统计失败", http.StatusBadGateway)

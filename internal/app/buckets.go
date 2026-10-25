@@ -37,11 +37,11 @@ func bucketLabel(bucket string) string {
 
 func (a *App) bucketTargets() []bucketTarget {
 	targets := make([]bucketTarget, 0, 2)
-	if a.Cfg.COSBucket != "" {
-		targets = append(targets, bucketTarget{key: "assets", label: bucketLabel(a.Cfg.COSBucket), bucket: a.Cfg.COSBucket})
+	if a.cfg().COSBucket != "" {
+		targets = append(targets, bucketTarget{key: "assets", label: bucketLabel(a.cfg().COSBucket), bucket: a.cfg().COSBucket})
 	}
-	if a.Cfg.COSWebsiteBucket != "" {
-		targets = append(targets, bucketTarget{key: "website", label: bucketLabel(a.Cfg.COSWebsiteBucket), bucket: a.Cfg.COSWebsiteBucket})
+	if a.cfg().COSWebsiteBucket != "" {
+		targets = append(targets, bucketTarget{key: "website", label: bucketLabel(a.cfg().COSWebsiteBucket), bucket: a.cfg().COSWebsiteBucket})
 	}
 	return targets
 }
@@ -49,7 +49,7 @@ func (a *App) bucketTargets() []bucketTarget {
 // BucketStats returns the two COS buckets' usage. Like the CDN stats it is
 // cached for 10 minutes and revalidated in the background once stale.
 func (a *App) BucketStats(ctx context.Context, days int, refresh bool) (*cloud.BucketStatsResponse, error) {
-	if a.Cfg.COSSecretID == "" || a.Cfg.COSSecretKey == "" {
+	if a.cfg().COSSecretID == "" || a.cfg().COSSecretKey == "" {
 		return nil, Err("bucket_unavailable", "对象存储未配置", http.StatusServiceUnavailable)
 	}
 	if len(a.bucketTargets()) == 0 {
@@ -80,7 +80,7 @@ func (a *App) fetchBucketStats(ctx context.Context, days int, now time.Time) (*c
 		Buckets:     make([]cloud.BucketStats, 0, 2),
 	}
 	for _, target := range a.bucketTargets() {
-		item, err := cloud.FetchBucketStats(ctx, a.Cfg.COSSecretID, a.Cfg.COSSecretKey, a.Cfg.COSRegion, target.bucket, days, now)
+		item, err := cloud.FetchBucketStats(ctx, a.cfg().COSSecretID, a.cfg().COSSecretKey, a.cfg().COSRegion, target.bucket, days, now)
 		if err != nil {
 			a.Logger.Warn("fetch bucket stats failed", "bucket", target.bucket, "error", err)
 			continue

@@ -111,7 +111,7 @@ func (a *App) MetricsBreakdown(ctx context.Context) (sqlite.MetricsBreakdown, er
 }
 
 func (a *App) CleanupTelemetry(ctx context.Context) {
-	before := time.Now().UTC().AddDate(0, 0, -a.Cfg.EventRetentionDays)
+	before := time.Now().UTC().AddDate(0, 0, -a.cfg().EventRetentionDays)
 	if n, err := a.Store.CleanupEvents(ctx, before); err != nil {
 		a.Logger.Warn("cleanup events failed", "error", err)
 	} else if n > 0 {
@@ -127,7 +127,7 @@ func (a *App) CleanupTelemetry(ctx context.Context) {
 	} else if n > 0 {
 		a.Logger.Info("cleaned challenges", "count", n)
 	}
-	auditBefore := time.Now().UTC().AddDate(0, 0, -a.Cfg.AuditRetentionDays)
+	auditBefore := time.Now().UTC().AddDate(0, 0, -a.cfg().AuditRetentionDays)
 	if n, err := a.Store.CleanupAuditLogs(ctx, auditBefore); err != nil {
 		a.Logger.Warn("cleanup audit logs failed", "error", err)
 	} else if n > 0 {

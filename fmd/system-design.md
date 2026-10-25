@@ -169,7 +169,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 ## 7. 管理 API
 
-管理员登录：`POST /api/v1/admin/session`，请求体 `{"key":"..."}`。系统只有一个本地管理员，不显示用户名或角色；浏览器使用会话 Cookie 和 CSRF，脚本可使用 Bearer 管理员令牌。
+管理员登录：`POST /api/v1/admin/session`，请求体 `{"key":"..."}`。控制台按密钥识别管理员：`.env` 的 `CONTROL_ADMIN_KEY` 是超级管理员，其余管理员由超管在后台「管理员」页面创建或删除（按页面授权 `r`/`rw`，通配 `*=rw` 仅限超管）；`.env` 不再播种其他管理员，浏览器使用会话 Cookie 和 CSRF，脚本可使用 Bearer 管理员令牌。
 
 | 方法 | 路径 |
 | --- | --- |
@@ -190,6 +190,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | GET | `/app/release`（公开读取 APP 发布信息） |
 | GET | `/admin/app/release` |
 | PUT | `/admin/app/release` |
+| GET/PUT | `/admin/settings`（运行配置，保存后即时生效） |
 | POST/DELETE | `/admin/session` |
 
 题库创建和更新只接受 `{ "questionBank": ... }`；创建不带题库 ID，更新通过 URL 指定 ID。`orderId` 可在创建或更新时设置，必须是未占用的正整数；省略时创建自动分配、更新保留原值。错误统一返回 `error.code`、`error.message` 和 `request_id`。
@@ -211,19 +212,25 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 程序只读取运行目录 `data/.env`，不读取系统环境变量。文件缺失时自动创建并生成随机密钥。
 
+`.env` 只保留**系统设置**：进程启动前就要用到、或与历史数据绑定的项。
+
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `CONTROL_ADDR` | `127.0.0.1:8080` | 监听地址 |
 | `CONTROL_DB` | `data/control.db` | SQLite 路径 |
-| `CONTROL_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | 对外地址 |
-| `CONTROL_TOKEN_PEPPER` | 自动生成 | 令牌 HMAC |
-| `CONTROL_ID_PEPPER` | 自动生成 | 学号/IP HMAC |
-| `CONTROL_ENCRYPTION_KEY` | 自动生成 | 学号加密 |
-| `CONTROL_ADMIN_KEY` | `change-me` | 管理密钥 |
-| `CONTROL_EVENT_RETENTION_DAYS` | `90` | 事件保留天数 |
-| `CONTROL_RISK_LOGIN_WINDOW` | `10m` | 登录观察窗口 |
-| `CONTROL_RISK_LOGIN_COUNT` | `5` | 登录观察阈值 |
-| `CONTROL_RISK_DEVICE_COUNT` | `5` | 设备观察阈值 |
+| `CONTROL_WEB_DIR` | 空 | 后台静态文件目录，空则用内嵌前端 |
+| `CONTROL_TOKEN_PEPPER` | 自动生成 | 令牌 HMAC（与旧库绑定） |
+| `CONTROL_ID_PEPPER` | 自动生成 | 学号/IP HMAC（与旧库绑定） |
+| `CONTROL_ENCRYPTION_KEY` | 自动生成 | 学号与管理员密钥加密（与旧库绑定） |
+| `CONTROL_ADMIN_KEY` | `change-me` | 超管密钥，每次启动同步到 `admin_users` |
+| `CONTROL_AI_WORK_DIR` | `<db 目录>/ai-work` | AI 临时目录 |
+| `CONTROL_AI_MATHJAX_DIR` | `ai-math` | MathJax 渲染目录 |
+
+其余运行配置存在 `app_settings` 表，由后台「配置」页读写，保存后立即生效（`app.Config.UpdateSettings` → `applyRuntimeUpdates`），不需要重启：对外地址、事件/审计保留天数、概览显示比例、风控阈值、COS/CDN/监控凭证、AI 开关与全部 AI 参数。
+
+- 首次启动时用 `.env` 里的同名值（或默认值）播种 `app_settings`，之后数据库是唯一来源；再改 `.env` 不会覆盖已保存的值。
+- Secret 类配置（COS/CDN/监控凭证、AI API Key）写入前用 `CONTROL_ENCRYPTION_KEY` 加密，前缀 `enc:v1:`；`GET /admin/settings` 只返回 `set: true`，不回显明文。
+- 页面权限复用 `config` 页（读写分离），写操作记录 `audit_logs.settings_update`（只记 key 名）。
 
 当前数据库唯一结构来源为 `internal/store/sqlite/schema.sql`，启动时直接创建表和索引。SQLite 开启外键、WAL 和 `busy_timeout=5000`。
 
