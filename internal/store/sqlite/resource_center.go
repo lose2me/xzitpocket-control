@@ -24,14 +24,15 @@ type ResourceCourse struct {
 // contentVersion combines the row count and newest timestamp of each content
 // type. A count catches additions and deletions (which do not change the
 // newest timestamp), while the timestamp catches edits.
-func contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated int64) string {
-	return fmt.Sprintf("r%d.%d:t%d.%d:c%d", resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated)
+func contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated, aiCount, aiUpdated int64) string {
+	return fmt.Sprintf("r%d.%d:t%d.%d:c%d:ai%d.%d", resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated, aiCount, aiUpdated)
 }
 
 // CourseContentRevision returns the version of one course's app-visible
 // resources and textbooks.
 func (s *Store) CourseContentRevision(ctx context.Context, code string) (string, error) {
 	var resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated int64
+	var aiCount, aiUpdated int64
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM resources r WHERE r.course_code = ? AND r.archived_at = 0),
@@ -40,12 +41,17 @@ func (s *Store) CourseContentRevision(ctx context.Context, code string) (string,
 				WHERE tc.course_code = ? AND t.archived_at = 0),
 			(SELECT COALESCE(MAX(t.updated_at), 0) FROM textbook_courses tc JOIN textbooks t ON t.id = tc.textbook_id
 				WHERE tc.course_code = ? AND t.archived_at = 0),
-			(SELECT COALESCE(MAX(c.updated_at), 0) FROM courses c WHERE c.code = ?)`, code, code, code, code, code).
-		Scan(&resourceCount, &resourceUpdated, &textbookCount, &textbookUpdated, &courseUpdated)
+			(SELECT COALESCE(MAX(c.updated_at), 0) FROM courses c WHERE c.code = ?),
+			(SELECT COUNT(*) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.course_code = ? AND r.archived_at = 0 AND t.status = 'succeeded'),
+			(SELECT COALESCE(MAX(t.updated_at), 0) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.course_code = ? AND r.archived_at = 0 AND t.status = 'succeeded')`,
+		code, code, code, code, code, code, code).
+		Scan(&resourceCount, &resourceUpdated, &textbookCount, &textbookUpdated, &courseUpdated, &aiCount, &aiUpdated)
 	if err != nil {
 		return "", err
 	}
-	return contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated), nil
+	return contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated, aiCount, aiUpdated), nil
 }
 
 // ResourceCenterRevision returns a value that changes whenever any content
@@ -56,6 +62,7 @@ func (s *Store) ResourceCenterRevision(ctx context.Context) (string, error) {
 	var textbooks, textbookUpdated int64
 	var banks, bankUpdated int64
 	var textbookLinks, bankLinks int64
+	var aiCount, aiUpdated int64
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM courses WHERE code <> ''),
@@ -67,14 +74,18 @@ func (s *Store) ResourceCenterRevision(ctx context.Context) (string, error) {
 			(SELECT COUNT(*) FROM question_banks WHERE status = 'active' AND archived_at = 0),
 			(SELECT COALESCE(MAX(updated_at), 0) FROM question_banks WHERE status = 'active' AND archived_at = 0),
 			(SELECT COUNT(*) FROM textbook_courses),
-			(SELECT COUNT(*) FROM question_bank_courses)`).
-		Scan(&courses, &courseUpdated, &resources, &resourceUpdated, &textbooks, &textbookUpdated, &banks, &bankUpdated, &textbookLinks, &bankLinks)
+			(SELECT COUNT(*) FROM question_bank_courses),
+			(SELECT COUNT(*) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.archived_at = 0 AND t.status = 'succeeded'),
+			(SELECT COALESCE(MAX(t.updated_at), 0) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.archived_at = 0 AND t.status = 'succeeded')`).
+		Scan(&courses, &courseUpdated, &resources, &resourceUpdated, &textbooks, &textbookUpdated, &banks, &bankUpdated, &textbookLinks, &bankLinks, &aiCount, &aiUpdated)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("c%d.%d:r%d.%d:t%d.%d:q%d.%d:tc%d:qc%d",
+	return fmt.Sprintf("c%d.%d:r%d.%d:t%d.%d:q%d.%d:tc%d:qc%d:ai%d.%d",
 		courses, courseUpdated, resources, resourceUpdated, textbooks, textbookUpdated,
-		banks, bankUpdated, textbookLinks, bankLinks), nil
+		banks, bankUpdated, textbookLinks, bankLinks, aiCount, aiUpdated), nil
 }
 
 func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, error) {
@@ -101,7 +112,11 @@ func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, erro
 				WHERE tc.course_code = c.code AND t.archived_at = 0),
 			(SELECT COALESCE(MAX(t.updated_at), 0) FROM textbook_courses tc JOIN textbooks t ON t.id = tc.textbook_id
 				WHERE tc.course_code = c.code AND t.archived_at = 0),
-			c.updated_at
+			c.updated_at,
+			(SELECT COUNT(*) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.course_code = c.code AND r.archived_at = 0 AND t.status = 'succeeded'),
+			(SELECT COALESCE(MAX(t.updated_at), 0) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
+				WHERE r.course_code = c.code AND r.archived_at = 0 AND t.status = 'succeeded')
 		FROM courses c
 		WHERE c.code <> '' AND (
 			EXISTS (SELECT 1 FROM question_bank_courses qbc
@@ -121,14 +136,15 @@ func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, erro
 	for rows.Next() {
 		var item ResourceCourse
 		var coverUpdated, resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated int64
+		var aiCount, aiUpdated int64
 		if err := rows.Scan(&item.Code, &item.Name, &item.QuestionBankCount, &item.ResourceCount, &item.TextbookCount, &item.CoverTextbookID,
-			&coverUpdated, &resourceCount, &resourceUpdated, &textbookCount, &textbookUpdated, &courseUpdated); err != nil {
+			&coverUpdated, &resourceCount, &resourceUpdated, &textbookCount, &textbookUpdated, &courseUpdated, &aiCount, &aiUpdated); err != nil {
 			return nil, err
 		}
 		if coverUpdated > 0 {
 			item.CoverVersion = fmt.Sprintf("%d", coverUpdated)
 		}
-		item.Version = contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated)
+		item.Version = contentVersion(resourceCount, resourceUpdated, textbookCount, textbookUpdated, courseUpdated, aiCount, aiUpdated)
 		items = append(items, item)
 	}
 	return items, rows.Err()

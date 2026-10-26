@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"xzitpocket-control/internal/store/sqlite"
 )
@@ -90,10 +91,22 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 		return nil, 0, "", err
 	}
 	views := make([]ResourceView, 0, len(items))
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		view := resourceView(item)
 		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
 		views = append(views, view)
+		ids = append(ids, item.ID)
+	}
+	aiTasks, err := a.Store.LatestSucceededAITasks(ctx, ids)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	for i := range views {
+		if task, ok := aiTasks[views[i].ID]; ok {
+			views[i].HasAI = true
+			views[i].AIUpdatedAt = task.UpdatedAt.Format(time.RFC3339)
+		}
 	}
 	return views, total, version, nil
 }

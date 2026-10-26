@@ -501,3 +501,48 @@ func (s *Store) ResetRunningAITasks(ctx context.Context) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// LatestSucceededAITasks returns the newest succeeded run for each resource.
+// Resources without a succeeded run are absent from the map.
+func (s *Store) LatestSucceededAITasks(ctx context.Context, resourceIDs []string) (map[string]AITask, error) {
+	out := make(map[string]AITask, len(resourceIDs))
+	if len(resourceIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(resourceIDs)), ",")
+	args := make([]any, len(resourceIDs))
+	for i, id := range resourceIDs {
+		args[i] = id
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks
+		WHERE status = 'succeeded' AND resource_id IN (`+placeholders+`)
+		ORDER BY created_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanAITask(rows)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := out[item.ResourceID]; !exists {
+			out[item.ResourceID] = item
+		}
+	}
+	return out, rows.Err()
+}
+
+// LatestAITaskByResource returns the newest run for a resource, whatever its
+// status. The bool is false when the resource has never been queued.
+func (s *Store) LatestAITaskByResource(ctx context.Context, resourceID string) (AITask, bool, error) {
+	item, err := scanAITask(s.DB.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks
+		WHERE resource_id = ? ORDER BY created_at DESC LIMIT 1`, resourceID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AITask{}, false, nil
+	}
+	if err != nil {
+		return AITask{}, false, err
+	}
+	return item, true, nil
+}

@@ -195,6 +195,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.userCourseResources(w, r)
 	case r.Method == http.MethodGet && path == "/textbooks":
 		s.userCourseTextbooks(w, r)
+	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "ai", "resources"):
+		s.userResourceAI(w, r, segment(path, 1))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "url", "resources"):
 		s.userResourceURL(w, r, segment(path, 1))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "url", "textbooks"):

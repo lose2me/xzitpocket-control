@@ -152,3 +152,61 @@ func TestCourseResourceListIsNotTruncatedAtOnePage(t *testing.T) {
 		t.Fatalf("resources = %d, total = %d, want 205", len(items), total)
 	}
 }
+
+func TestResourceAIVisibility(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, err := store.CreateCourse(ctx, sqlite.CourseInput{Code: "C1", Name: "高等数学"}, now); err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "期末试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "resources/res-1/original.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := "succeeded"
+	markdown := "# 解析结果"
+	outputKey := "ai/papers/" + resource.ID + "/" + task.ID + ".pdf"
+	outputSize := int64(1234)
+	totalPages := 3
+	solvable := 1
+	if err := store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
+		Status: &status, Markdown: &markdown, OutputKey: &outputKey,
+		OutputSize: &outputSize, TotalPages: &totalPages, Solvable: &solvable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	views, _, version, err := a.ListCourseResourcesForUser(ctx, "C1")
+	if err != nil || len(views) != 1 {
+		t.Fatalf("views = %#v, err = %v", views, err)
+	}
+	if !views[0].HasAI || views[0].AIUpdatedAt == "" {
+		t.Fatalf("resource AI fields = %#v", views[0])
+	}
+
+	courses, err := a.ListResourceCourses(ctx)
+	if err != nil || len(courses) != 1 {
+		t.Fatalf("courses = %#v, err = %v", courses, err)
+	}
+	if courses[0].Version != version {
+		t.Fatalf("course version = %q, resource version = %q", courses[0].Version, version)
+	}
+
+	ai, err := a.ResourceAIForUser(ctx, resource.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ai.Available || ai.Markdown != markdown || ai.TotalPages != totalPages {
+		t.Fatalf("ai = %#v", ai)
+	}
+}

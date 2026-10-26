@@ -29,12 +29,28 @@ type ResourceView struct {
 	Archived             bool   `json:"archived"`
 	CreatedAt            string `json:"created_at"`
 	UpdatedAt            string `json:"updated_at"`
+	HasAI                bool   `json:"has_ai"`
+	AIUpdatedAt          string `json:"ai_updated_at,omitempty"`
 }
 
 // ResourceURLView is a temporary, signed CDN URL for a resource PDF.
 type ResourceURLView struct {
 	URL       string `json:"url"`
 	ExpiresAt string `json:"expires_at"`
+}
+
+// ResourceAIView is the app-facing AI analysis of one paper.
+type ResourceAIView struct {
+	Available    bool   `json:"available"`
+	Status       string `json:"status,omitempty"`
+	Markdown     string `json:"markdown,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+	OutputSize   int64  `json:"output_size,omitempty"`
+	TotalPages   int    `json:"total_pages,omitempty"`
+	Solvable     int    `json:"solvable,omitempty"`
+	PrecheckNote string `json:"precheck_note,omitempty"`
+	PDFURL       string `json:"pdf_url,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // ResourceUpload is one file in a course resource upload.
@@ -272,6 +288,55 @@ func (a *App) requireResource(ctx context.Context, id string) (sqlite.Resource, 
 // ResourceURL returns a temporary signed CDN URL for a published resource.
 func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (ResourceURLView, error) {
 	return a.resourceURL(ctx, id, ttl, false)
+}
+
+// ResourceAIForUser returns the newest succeeded analysis for a published
+// resource, including its markdown and a temporary URL for the rendered PDF.
+// A resource that has been queued but has no finished run reports its status
+// so the app can show "解析中".
+func (a *App) ResourceAIForUser(ctx context.Context, id string, ttl time.Duration) (ResourceAIView, error) {
+	item, err := a.requireResource(ctx, id)
+	if err != nil {
+		return ResourceAIView{}, err
+	}
+	if !item.ArchivedAt.IsZero() {
+		return ResourceAIView{}, ErrNotFound
+	}
+	tasks, err := a.Store.ListAITasksByResource(ctx, id)
+	if err != nil {
+		return ResourceAIView{}, err
+	}
+	if len(tasks) == 0 {
+		return ResourceAIView{}, nil
+	}
+	latest := tasks[len(tasks)-1]
+	var succeeded *sqlite.AITask
+	for i := len(tasks) - 1; i >= 0; i-- {
+		if tasks[i].Status == "succeeded" {
+			succeeded = &tasks[i]
+			break
+		}
+	}
+	if succeeded == nil {
+		return ResourceAIView{Status: latest.Status, Error: latest.Error}, nil
+	}
+	view := ResourceAIView{
+		Available:    true,
+		Status:       succeeded.Status,
+		Markdown:     succeeded.Markdown,
+		UpdatedAt:    succeeded.UpdatedAt.Format(time.RFC3339),
+		OutputSize:   succeeded.OutputSize,
+		TotalPages:   succeeded.TotalPages,
+		Solvable:     succeeded.Solvable,
+		PrecheckNote: succeeded.PrecheckNote,
+	}
+	if succeeded.OutputKey != "" && a.cfg().CDNDomain != "" && a.cfg().CDNAuthKey != "" {
+		if ttl <= 0 || ttl > 7*24*time.Hour {
+			ttl = a.cfg().CDNURLTTL
+		}
+		view.PDFURL = cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+succeeded.OutputKey, ttl)
+	}
+	return view, nil
 }
 
 // ResourceURLForAdmin also serves archived resources in the console.

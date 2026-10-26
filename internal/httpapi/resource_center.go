@@ -52,6 +52,18 @@ func (s *Server) userCourseTextbooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "version": version})
 }
 
+func (s *Server) userResourceAI(w http.ResponseWriter, r *http.Request, id string) {
+	if _, ok := s.authSession(w, r); !ok {
+		return
+	}
+	out, err := s.App.ResourceAIForUser(r.Context(), id, userURLTTL(r))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id string) {
 	if _, ok := s.authSession(w, r); !ok {
 		return
