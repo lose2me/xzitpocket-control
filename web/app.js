@@ -292,7 +292,6 @@ import { template } from './template.js';
       const libraryTab = ref('publish');
       const textbookTab = ref('publish');
       const resourceTab = ref('publish');
-      const courseTab = ref('publish');
       const loading = ref(false);
       const error = ref('');
       const overview = ref({});
@@ -1591,6 +1590,16 @@ import { template } from './template.js';
           existingCoverUrl.value = '';
         }
       };
+      const settingGroupIcons = {
+        general: 'mdi-tune-variant', risk: 'mdi-shield-alert-outline', storage: 'mdi-cloud-outline',
+        cdn: 'mdi-web', monitoring: 'mdi-server-outline', ai: 'mdi-robot-outline',
+      };
+      const settingGroupIcon = (key) => settingGroupIcons[key] || 'mdi-cog-outline';
+      // 卡片标题跟随当前 tab，避免标题和 tab 各说各的。
+      const settingTabLabel = computed(() => {
+        const group = (settingGroups.value || []).find(item => item.key === settingTab.value);
+        return group ? group.label : '运行配置';
+      });
       const settingGroups = ref([]);
       const settingsForm = ref({});
       const applySettingsView = (out) => {
@@ -2219,7 +2228,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingsForm, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, courseTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
