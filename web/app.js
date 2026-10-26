@@ -735,7 +735,7 @@ import { template } from './template.js';
         { title: '课程编号', key: 'code', sortable: true, width: '19%' },
         { title: '课程名称', key: 'name', sortable: true, width: '31%' },
         { title: '试卷数', key: 'resource_count', align: 'center', width: '10%' },
-        { title: '解析完成', key: 'all_analyzed', align: 'center', width: '14%' },
+        { title: '解析状态', key: 'all_analyzed', align: 'center', width: '14%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '26%' }
       ];
       const courseResourceHeaders = [
@@ -780,10 +780,7 @@ import { template } from './template.js';
       const aiSolvableColor = (value) => value === 1 ? 'success' : value === 0 ? 'error' : 'grey';
       const analysisProgressLabel = (row) => {
         const item = rawItem(row);
-        const analyzable = Number(item.analyzable_count || 0);
-        const analyzed = Number(item.analyzed_count || 0);
-        if (!analyzable) return '无试卷';
-        return item.all_analyzed ? '全部完成 ' + analyzed + '/' + analyzable : analyzed + '/' + analyzable;
+        return Number(item.analyzed_count || 0) + '/' + Number(item.analyzable_count || 0);
       };
       const analysisProgressColor = (row) => {
         const item = rawItem(row);
