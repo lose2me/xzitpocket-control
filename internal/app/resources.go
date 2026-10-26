@@ -49,6 +49,7 @@ type ResourceURLView struct {
 type ResourceAIView struct {
 	Available    bool   `json:"available"`
 	Mode         string `json:"mode"`
+	Format       string `json:"format,omitempty"`
 	Status       string `json:"status,omitempty"`
 	Markdown     string `json:"markdown,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
@@ -423,6 +424,7 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 		view := ResourceAIView{
 			Available:  true,
 			Mode:       mode,
+			Format:     storedFileFormat(item.ManualAIKey),
 			UpdatedAt:  item.ManualAIUpdatedAt.Format(time.RFC3339),
 			OutputSize: item.ManualAISize,
 		}

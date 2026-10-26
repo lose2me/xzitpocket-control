@@ -25,6 +25,7 @@ type ResourceSubmissionTicketInput struct {
 	MD5             string `json:"md5"`
 	SizeBytes       int64  `json:"size_bytes"`
 	ManualMD5       string `json:"manual_md5"`
+	ManualFormat    string `json:"manual_format"`
 	ManualSizeBytes int64  `json:"manual_size_bytes"`
 }
 
@@ -235,7 +236,11 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		if in.ManualSizeBytes <= 0 || in.ManualSizeBytes > maxSubmissionBytes {
 			return ResourceUploadTicketView{}, Err("invalid_size", "原版解析文件大小无效", 400)
 		}
-		manualKey = submissionManualObjectKey(manualHash)
+		manualFormat, ok := normalizeSubmissionFormat(in.ManualFormat)
+		if !ok {
+			return ResourceUploadTicketView{}, Err("invalid_format", "原版解析文件类型无效", 400)
+		}
+		manualKey = submissionManualObjectKey(manualHash, manualFormat)
 		manualSize = in.ManualSizeBytes
 	}
 
