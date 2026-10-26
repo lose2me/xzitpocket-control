@@ -551,7 +551,7 @@ body {
   height: auto;
   padding: 2px 12px;
   border: 1px solid #e7eeeb;
-  border-radius: 10px;
+  border-radius: 0;
   background: #eef3f1;
 }
 
