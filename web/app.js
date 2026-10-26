@@ -378,6 +378,7 @@ import { template } from './template.js';
       const archivedBanks = ref([]);
       const archivedBankTotal = ref(0);
       const resourceDialog = ref(false);
+      const resourceArchived = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
       const aiTasks = ref([]);
@@ -755,14 +756,6 @@ import { template } from './template.js';
         { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
         { title: '下载量', key: 'download_count', align: 'center', width: '8%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '27%' }
-      ];
-      const archivedResourceHeaders = [
-        { title: '文件名', key: 'name', width: '26%' },
-        { title: '关联课程', key: 'course_code', width: '12%' },
-        { title: '类型', key: 'format', align: 'center', width: '7%' },
-        { title: '贡献者学号', key: 'contributor_student_id', width: '14%' },
-        { title: '下载量', key: 'download_count', align: 'center', width: '8%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
       const aiHeaders = [
         { title: '试卷', key: 'resource_name', width: '22%' },
@@ -1298,7 +1291,7 @@ import { template } from './template.js';
         if (id) await uploadTextbookAssets(id);
         textbookDialog.value = false;
         notify(editing ? '教材已更新' : '教材已创建');
-        await loadTextbooks();
+        await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
       });
       const openContributorDialog = (kind, item) => {
         contributorKind.value = kind;
@@ -1320,10 +1313,9 @@ import { template } from './template.js';
         notify(studentId ? '已绑定贡献者学号' : '已解除贡献者绑定');
         contributorDialog.value = false;
         if (kind === 'textbook') {
-          await loadTextbooks();
+          await Promise.all([loadTextbooks(), loadArchivedTextbooks()]);
         } else {
-          await loadCourseResources();
-          await loadCourses();
+          await Promise.all([loadCourseResources(), loadCourses(), loadArchivedResources()]);
         }
       });
       const deleteTextbook = (row) => call(async () => {
@@ -1450,15 +1442,56 @@ import { template } from './template.js';
       });
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
-        const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code));
+        const archived = resourceArchived.value ? '&archived=1' : '';
+        const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code) + archived + '&limit=200');
         courseResources.value = out.items || [];
       };
       const loadArchivedResources = async () => {
-        const out = await api('/api/v1/admin/resources?archived=1&limit=200');
-        archivedResources.value = out.items || []; archivedResourceTotal.value = out.total || 0;
+        const items = [];
+        let offset = 0;
+        let total = 0;
+        while (true) {
+          const out = await api('/api/v1/admin/resources?archived=1&limit=200&offset=' + offset);
+          const page = out.items || [];
+          items.push(...page);
+          total = Number(out.total || 0);
+          offset += 200;
+          if (!page.length || items.length >= total) break;
+        }
+        archivedResources.value = items;
+        archivedResourceTotal.value = total;
       };
-      const openResourceDialog = (row) => call(async () => {
+      const archivedCourseRows = computed(() => {
+        const names = new Map((courses.value || []).map((course) => [course.code, course.name]));
+        const rows = new Map();
+        for (const item of archivedResources.value || []) {
+          const code = item.course_code || '';
+          let row = rows.get(code);
+          if (!row) {
+            row = {
+              id: code || '__none__',
+              code,
+              name: names.get(code) || '',
+              resource_count: 0,
+              analyzable_count: 0,
+              analyzed_count: 0,
+              all_analyzed: false,
+            };
+            rows.set(code, row);
+          }
+          row.resource_count++;
+          if (item.has_pdf) {
+            row.analyzable_count++;
+            if (item.has_basic_ai && item.has_advanced_ai) row.analyzed_count++;
+          }
+        }
+        return [...rows.values()]
+          .map((row) => ({ ...row, all_analyzed: row.analyzable_count > 0 && row.analyzed_count === row.analyzable_count }))
+          .sort((a, b) => a.code.localeCompare(b.code));
+      });
+      const openResourceDialog = (row, archived = false) => call(async () => {
         const item = rawItem(row);
+        resourceArchived.value = !!archived;
         resourceCourse.value = { code: item.code || '', name: item.name || '' };
         resourceFiles.value = [];
         await loadCourseResources();
@@ -2052,7 +2085,7 @@ import { template } from './template.js';
         const path = '/api/v1/admin/question-banks' + (bankEditing.value ? '/' + encodeURIComponent(bankID) : '');
         const editing = bankEditing.value;
         await api(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-        closeBankEditor(); notify(editing ? '题库已更新' : '题库已创建'); await loadBanks();
+        closeBankEditor(); notify(editing ? '题库已更新' : '题库已创建'); await Promise.all([loadBanks(), loadArchivedBanks()]);
       });
       const saveRelease = () => call(async () => {
         const latestVersion = (releaseForm.value.latestVersion || '').trim();
@@ -2177,7 +2210,7 @@ import { template } from './template.js';
         const next = item.status === 'disabled' ? 'active' : 'disabled';
         if (!window.confirm((next === 'disabled' ? '确定停用' : '确定启用') + '题库“' + item.name + '”吗？')) return;
         await api('/api/v1/admin/question-banks/' + encodeURIComponent(item.id) + '/status', { method: 'PATCH', body: JSON.stringify({ status: next }) });
-        notify(next === 'disabled' ? '题库已停用' : '题库已启用'); await loadBanks();
+        notify(next === 'disabled' ? '题库已停用' : '题库已启用'); await Promise.all([loadBanks(), loadArchivedBanks()]);
       });
       const removeBank = (row) => call(async () => {
         const item = rawItem(row);
@@ -2291,7 +2324,7 @@ import { template } from './template.js';
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
-        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
+        resourceDialog, resourceArchived, resourceCourse, courseResources, archivedCourseRows, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, loadArchivedResources, setResourceArchived,
         aiTasks, aiTotal, aiSearch, aiHeaders, aiModeLabel, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,

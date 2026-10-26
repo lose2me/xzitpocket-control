@@ -254,9 +254,6 @@ func (a *App) UploadManualAnalysis(ctx context.Context, id string, data []byte, 
 	if err != nil {
 		return ResourceView{}, err
 	}
-	if !item.ArchivedAt.IsZero() {
-		return ResourceView{}, ErrNotFound
-	}
 	if len(data) == 0 || len(data) > maxResourcePdfBytes || !bytes.HasPrefix(data, []byte("%PDF")) {
 		return ResourceView{}, Err("invalid_upload", "PDF 内容无效", 400)
 	}

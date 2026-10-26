@@ -110,7 +110,7 @@ func (s *Store) CreateAITask(ctx context.Context, resourceID, mode, actor string
 	defer func() { _ = tx.Rollback() }()
 
 	var exists string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM resources WHERE id = ? AND pdf_key <> '' AND LOWER(pdf_key) LIKE '%.pdf' AND archived_at = 0`, resourceID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM resources WHERE id = ? AND pdf_key <> '' AND LOWER(pdf_key) LIKE '%.pdf'`, resourceID).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AITask{}, false, sql.ErrNoRows
 	}
