@@ -124,10 +124,10 @@ var SettingSpecs = []SettingSpec{
 
 	{Key: SettingAIPrecheckSystem, Group: "ai", Label: "预检系统提示词", Kind: SettingKindText, Hint: "留空则用内置模板"},
 	{Key: SettingAIPrecheckInstruction, Group: "ai", Label: "预检指令", Kind: SettingKindText, Hint: "占位符依次为：试卷标题、检查页数、总页数（%s %d %d）"},
-	{Key: SettingAIAnalysisSystem, Group: "ai", Label: "基础解析系统提示词", Kind: SettingKindText, Hint: "留空则用内置模板"},
-	{Key: SettingAIAnalysisSystemAdvanced, Group: "ai", Label: "高级解析系统提示词", Kind: SettingKindText, Hint: "留空则用内置精讲模板"},
-	{Key: SettingAIChunkInstruction, Group: "ai", Label: "基础分段解析指令", Kind: SettingKindText, Hint: "占位符依次为：试卷标题、起始页、结束页、总页数（%s %d %d %d）"},
-	{Key: SettingAIChunkInstructionAdvanced, Group: "ai", Label: "高级分段解析指令", Kind: SettingKindText, Hint: "占位符同上，留空则用内置精讲模板"},
+	{Key: SettingAIAnalysisSystem, Group: "ai", Label: "精简版解析系统提示词", Kind: SettingKindText, Hint: "留空则用内置模板"},
+	{Key: SettingAIAnalysisSystemAdvanced, Group: "ai", Label: "小学生版解析系统提示词", Kind: SettingKindText, Hint: "留空则用内置精讲模板"},
+	{Key: SettingAIChunkInstruction, Group: "ai", Label: "精简版分段解析指令", Kind: SettingKindText, Hint: "占位符依次为：试卷标题、起始页、结束页、总页数（%s %d %d %d）"},
+	{Key: SettingAIChunkInstructionAdvanced, Group: "ai", Label: "小学生版分段解析指令", Kind: SettingKindText, Hint: "占位符同上，留空则用内置精讲模板"},
 	{Key: SettingAIContinuePrompt, Group: "ai", Label: "续写指令", Kind: SettingKindText, Hint: "输出被截断时追加，留空则用内置模板"},
 }
 

@@ -369,6 +369,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminResourceRestore(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resources"):
 		s.adminResourceResourceURL(w, r, segment(path, 2))
+	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "manual-analysis", "admin", "resources"):
+		s.adminResourceManualAnalysis(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resources"):
 		s.adminResourceDownload(w, r, segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "contributor", "admin", "resources"):

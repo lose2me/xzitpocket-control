@@ -571,3 +571,33 @@ func (s *Store) LatestAITaskByResource(ctx context.Context, resourceID string) (
 	}
 	return item, true, nil
 }
+
+// LatestAITasks returns the newest run for each resource, whatever its mode or
+// status. The map is keyed by resource id.
+func (s *Store) LatestAITasks(ctx context.Context, resourceIDs []string) (map[string]AITask, error) {
+	out := make(map[string]AITask, len(resourceIDs))
+	if len(resourceIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(resourceIDs)), ",")
+	args := make([]any, len(resourceIDs))
+	for i, id := range resourceIDs {
+		args[i] = id
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+aiTaskColumns+` FROM resource_ai_tasks
+		WHERE resource_id IN (`+placeholders+`) ORDER BY created_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanAITask(rows)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := out[item.ResourceID]; !exists {
+			out[item.ResourceID] = item
+		}
+	}
+	return out, rows.Err()
+}

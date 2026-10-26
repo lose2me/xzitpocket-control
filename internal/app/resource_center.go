@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"xzitpocket-control/internal/store/sqlite"
 )
@@ -91,36 +90,13 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 		return nil, 0, "", err
 	}
 	views := make([]ResourceView, 0, len(items))
-	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		view := resourceView(item)
 		view.SizeBytes = a.objectSize(ctx, item.PdfKey)
 		views = append(views, view)
-		ids = append(ids, item.ID)
 	}
-	aiTasks, err := a.Store.LatestSucceededAITasks(ctx, ids)
-	if err != nil {
+	if err := a.enrichAIStatus(ctx, views); err != nil {
 		return nil, 0, "", err
-	}
-	for i := range views {
-		byMode := aiTasks[views[i].ID]
-		var newest time.Time
-		modes := make([]string, 0, 2)
-		for _, mode := range []string{"basic", "advanced"} {
-			task, ok := byMode[mode]
-			if !ok {
-				continue
-			}
-			modes = append(modes, mode)
-			if task.UpdatedAt.After(newest) {
-				newest = task.UpdatedAt
-			}
-		}
-		if len(modes) > 0 {
-			views[i].HasAI = true
-			views[i].AIModes = modes
-			views[i].AIUpdatedAt = newest.Format(time.RFC3339)
-		}
 	}
 	return views, total, version, nil
 }

@@ -23,6 +23,9 @@ type Resource struct {
 	PdfKey            string    `json:"pdf_key"`
 	DownloadCount     int64     `json:"download_count"`
 	ContributorUserID string    `json:"contributor_user_id"`
+	ManualAIKey       string    `json:"manual_ai_key"`
+	ManualAISize      int64     `json:"manual_ai_size"`
+	ManualAIUpdatedAt time.Time `json:"manual_ai_updated_at"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	ArchivedAt        time.Time `json:"archived_at"`
@@ -34,7 +37,7 @@ type ResourceInput struct {
 	CourseCode string
 }
 
-const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, contributor_user_id, created_at, updated_at, archived_at"
+const resourceColumns = "id, name, tags, course_code, pdf_key, download_count, contributor_user_id, manual_ai_key, manual_ai_size, manual_ai_updated_at, created_at, updated_at, archived_at"
 
 var resourceListSorts = map[string]string{
 	"name":           "r.name",
@@ -194,14 +197,30 @@ type rowScannerResource interface {
 
 func scanResource(row rowScannerResource) (Resource, error) {
 	var item Resource
-	var created, updated, archived int64
-	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &item.ContributorUserID, &created, &updated, &archived); err != nil {
+	var manualUpdated, created, updated, archived int64
+	if err := row.Scan(&item.ID, &item.Name, &item.Tags, &item.CourseCode, &item.PdfKey, &item.DownloadCount, &item.ContributorUserID, &item.ManualAIKey, &item.ManualAISize, &manualUpdated, &created, &updated, &archived); err != nil {
 		return Resource{}, err
 	}
+	item.ManualAIUpdatedAt = optionalFromMillis(manualUpdated)
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
 	item.ArchivedAt = optionalFromMillis(archived)
 	return item, nil
+}
+
+// SetResourceManualAnalysis records a manually uploaded analysis PDF.
+func (s *Store) SetResourceManualAnalysis(ctx context.Context, id, key string, size int64, now time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE resources SET manual_ai_key = ?, manual_ai_size = ?, manual_ai_updated_at = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`,
+		key, size, millis(now), millis(now), id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // SetResourceContributor links an approved upload to the student who

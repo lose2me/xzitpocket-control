@@ -223,4 +223,19 @@ func TestResourceAIVisibility(t *testing.T) {
 	if !ai.Available || ai.Markdown != markdown || ai.TotalPages != totalPages {
 		t.Fatalf("ai = %#v", ai)
 	}
+
+	if err := store.SetResourceManualAnalysis(ctx, resource.ID, "resources/manual.pdf", 4567, now); err != nil {
+		t.Fatal(err)
+	}
+	views, _, _, err = a.ListCourseResourcesForUser(ctx, "C1")
+	if err != nil || len(views) != 1 {
+		t.Fatalf("views after manual = %#v, err = %v", views, err)
+	}
+	if !views[0].HasManualAI || len(views[0].AIModes) != 2 || views[0].AIModes[1] != "manual" {
+		t.Fatalf("manual AI fields = %#v", views[0])
+	}
+	manual, err := a.ResourceAIForUser(ctx, resource.ID, "manual", 0)
+	if err != nil || !manual.Available || manual.OutputSize != 4567 {
+		t.Fatalf("manual ai = %#v, err = %v", manual, err)
+	}
 }

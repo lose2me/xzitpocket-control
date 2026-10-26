@@ -239,3 +239,45 @@ func scanCourse(row rowScannerCourse) (Course, error) {
 	item.UpdatedAt = fromMillis(updated)
 	return item, nil
 }
+
+// CourseAnalysisStats is the number of PDF papers in a course and how many of
+// them have both AI reports.
+type CourseAnalysisStats struct {
+	Analyzable int64
+	Analyzed   int64
+}
+
+// AnalysisStatsByCourse returns basic+advanced completion counts per course.
+func (s *Store) AnalysisStatsByCourse(ctx context.Context, codes []string) (map[string]CourseAnalysisStats, error) {
+	out := make(map[string]CourseAnalysisStats, len(codes))
+	if len(codes) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, 0, len(codes))
+	args := make([]any, 0, len(codes))
+	for _, code := range codes {
+		placeholders = append(placeholders, "?")
+		args = append(args, code)
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT r.course_code,
+			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0
+				AND EXISTS (SELECT 1 FROM resource_ai_tasks b WHERE b.resource_id = r.id AND b.mode = 'basic' AND b.status = 'succeeded')
+				AND EXISTS (SELECT 1 FROM resource_ai_tasks a WHERE a.resource_id = r.id AND a.mode = 'advanced' AND a.status = 'succeeded')
+				THEN 1 ELSE 0 END)
+		FROM resources r WHERE r.course_code IN (`+strings.Join(placeholders, ",")+`)
+		GROUP BY r.course_code`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code string
+		var stats CourseAnalysisStats
+		if err := rows.Scan(&code, &stats.Analyzable, &stats.Analyzed); err != nil {
+			return nil, err
+		}
+		out[code] = stats
+	}
+	return out, rows.Err()
+}

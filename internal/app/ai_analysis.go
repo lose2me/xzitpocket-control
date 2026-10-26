@@ -356,9 +356,9 @@ func normalizeAIModes(modes []string) ([]string, error) {
 
 func aiModeLabel(mode string) string {
 	if mode == "advanced" {
-		return "高级解析"
+		return "小学生版"
 	}
-	return "基础解析"
+	return "精简版"
 }
 
 // wakeAIWorker asks the single worker loop to check the queue immediately

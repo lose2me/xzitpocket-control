@@ -15,22 +15,27 @@ import (
 
 // ResourceView is the administrator-facing resource row.
 type ResourceView struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Tags                 string   `json:"tags"`
-	CourseCode           string   `json:"course_code"`
-	HasPdf               bool     `json:"has_pdf"`
-	Format               string   `json:"format"`
-	SizeBytes            int64    `json:"size_bytes,omitempty"`
-	DownloadCount        int64    `json:"download_count"`
-	ContributorUserID    string   `json:"contributor_user_id,omitempty"`
-	ContributorStudentID string   `json:"contributor_student_id,omitempty"`
-	ContributorName      string   `json:"contributor_name,omitempty"`
-	Archived             bool     `json:"archived"`
-	CreatedAt            string   `json:"created_at"`
-	UpdatedAt            string   `json:"updated_at"`
-	HasAI                bool     `json:"has_ai"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Tags                 string `json:"tags"`
+	CourseCode           string `json:"course_code"`
+	HasPdf               bool   `json:"has_pdf"`
+	Format               string `json:"format"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	DownloadCount        int64  `json:"download_count"`
+	ContributorUserID    string `json:"contributor_user_id,omitempty"`
+	ContributorStudentID string `json:"contributor_student_id,omitempty"`
+	ContributorName      string `json:"contributor_name,omitempty"`
+	Archived             bool   `json:"archived"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
+	HasAI                bool   `json:"has_ai"`
+	HasBasicAI           bool   `json:"has_basic_ai"`
+	HasAdvancedAI        bool   `json:"has_advanced_ai"`
+	HasManualAI          bool   `json:"has_manual_ai"`
+	manualUpdatedAt      time.Time
 	AIModes              []string `json:"ai_modes,omitempty"`
+	AISolvable           int      `json:"ai_solvable"`
 	AIUpdatedAt          string   `json:"ai_updated_at,omitempty"`
 }
 
@@ -69,11 +74,14 @@ const (
 func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
-		HasPdf:        item.PdfKey != "",
-		Format:        storedFileFormat(item.PdfKey),
-		DownloadCount: item.DownloadCount,
-		Archived:      !item.ArchivedAt.IsZero(),
-		CreatedAt:     item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
+		HasPdf:          item.PdfKey != "",
+		Format:          storedFileFormat(item.PdfKey),
+		DownloadCount:   item.DownloadCount,
+		Archived:        !item.ArchivedAt.IsZero(),
+		HasManualAI:     item.ManualAIKey != "",
+		manualUpdatedAt: item.ManualAIUpdatedAt,
+		AISolvable:      -1,
+		CreatedAt:       item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
 
@@ -88,6 +96,60 @@ func (a *App) resourceViewForAdmin(ctx context.Context, item sqlite.Resource) Re
 	return view
 }
 
+// enrichAIStatus fills the per-resource AI flags used by the console and the
+// app resource lists.
+func (a *App) enrichAIStatus(ctx context.Context, views []ResourceView) error {
+	if len(views) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(views))
+	for _, view := range views {
+		ids = append(ids, view.ID)
+	}
+	succeeded, err := a.Store.LatestSucceededAITasks(ctx, ids)
+	if err != nil {
+		return err
+	}
+	latest, err := a.Store.LatestAITasks(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		byMode := succeeded[views[i].ID]
+		modes := make([]string, 0, 3)
+		var newest time.Time
+		if task, ok := byMode["basic"]; ok {
+			views[i].HasBasicAI = true
+			modes = append(modes, "basic")
+			if task.UpdatedAt.After(newest) {
+				newest = task.UpdatedAt
+			}
+		}
+		if task, ok := byMode["advanced"]; ok {
+			views[i].HasAdvancedAI = true
+			modes = append(modes, "advanced")
+			if task.UpdatedAt.After(newest) {
+				newest = task.UpdatedAt
+			}
+		}
+		if views[i].HasManualAI {
+			modes = append(modes, "manual")
+			if views[i].manualUpdatedAt.After(newest) {
+				newest = views[i].manualUpdatedAt
+			}
+		}
+		views[i].AIModes = modes
+		views[i].HasAI = len(modes) > 0
+		if !newest.IsZero() {
+			views[i].AIUpdatedAt = newest.Format(time.RFC3339)
+		}
+		if task, ok := latest[views[i].ID]; ok {
+			views[i].AISolvable = task.Solvable
+		}
+	}
+	return nil
+}
+
 func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, search, courseCode, sort, order string, archived bool) ([]ResourceView, int, error) {
 	items, err := a.Store.ListResources(ctx, clampLimit(limit), max0(offset), search, courseCode, sort, order, archived)
 	if err != nil {
@@ -100,6 +162,9 @@ func (a *App) ListResourcesForAdmin(ctx context.Context, limit, offset int, sear
 	views := make([]ResourceView, 0, len(items))
 	for _, item := range items {
 		views = append(views, a.resourceViewForAdmin(ctx, item))
+	}
+	if err := a.enrichAIStatus(ctx, views); err != nil {
+		return nil, 0, err
 	}
 	return views, total, nil
 }
@@ -182,12 +247,56 @@ func (a *App) UploadCourseResources(ctx context.Context, courseCode string, uplo
 	return map[string]any{"items": items, "failed": failed, "course_code": courseCode}, nil
 }
 
+// UploadManualAnalysis stores a manually prepared analysis PDF for a paper.
+// It replaces any previous manual file.
+func (a *App) UploadManualAnalysis(ctx context.Context, id string, data []byte, actor string) (ResourceView, error) {
+	item, err := a.requireResource(ctx, id)
+	if err != nil {
+		return ResourceView{}, err
+	}
+	if !item.ArchivedAt.IsZero() {
+		return ResourceView{}, ErrNotFound
+	}
+	if len(data) == 0 || len(data) > maxResourcePdfBytes || !bytes.HasPrefix(data, []byte("%PDF")) {
+		return ResourceView{}, Err("invalid_upload", "PDF 内容无效", 400)
+	}
+	client, err := a.requireStorage()
+	if err != nil {
+		return ResourceView{}, err
+	}
+	now := time.Now().UTC()
+	key := publishedObjectKey("resource", fileFormatPDF, md5Hex([]byte(item.ID+":"+md5Hex(data))))
+	if err := client.PutObject(ctx, key, "application/pdf", data); err != nil {
+		return ResourceView{}, err
+	}
+	oldKey := item.ManualAIKey
+	if err := a.Store.SetResourceManualAnalysis(ctx, item.ID, key, int64(len(data)), now); err != nil {
+		_ = client.DeleteObject(ctx, key)
+		return ResourceView{}, err
+	}
+	if oldKey != "" && oldKey != key {
+		a.removeStoredFileIfUnused(ctx, oldKey)
+	}
+	a.purgeCDN(ctx, key)
+	_ = a.Store.AddAudit(ctx, actor, "resource_manual_analysis", "resource", item.ID, "{}", now)
+
+	item.ManualAIKey = key
+	item.ManualAISize = int64(len(data))
+	item.ManualAIUpdatedAt = now
+	views := []ResourceView{resourceView(item)}
+	if err := a.enrichAIStatus(ctx, views); err != nil {
+		return ResourceView{}, err
+	}
+	return views[0], nil
+}
+
 func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) error {
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
 		return err
 	}
 	aiOutputKeys := make([]string, 0)
+	manualKey := item.ManualAIKey
 	if tasks, taskErr := a.Store.ListAITasksByResource(ctx, item.ID); taskErr == nil {
 		for _, task := range tasks {
 			if task.OutputKey != "" {
@@ -203,6 +312,9 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 		return err
 	}
 	a.removeResourceAssets(ctx, item)
+	if manualKey != "" {
+		a.removeStoredFileIfUnused(ctx, manualKey)
+	}
 	if len(aiOutputKeys) > 0 {
 		if client, err := a.requireStorage(); err == nil {
 			for _, key := range aiOutputKeys {
@@ -297,7 +409,7 @@ func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (Re
 // A resource that has been queued but has no finished run reports its status
 // so the app can show "解析中".
 func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.Duration) (ResourceAIView, error) {
-	if mode != "advanced" {
+	if mode != "basic" && mode != "advanced" && mode != "manual" {
 		mode = "basic"
 	}
 	item, err := a.requireResource(ctx, id)
@@ -306,6 +418,24 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 	}
 	if !item.ArchivedAt.IsZero() {
 		return ResourceAIView{}, ErrNotFound
+	}
+	if mode == "manual" {
+		if item.ManualAIKey == "" {
+			return ResourceAIView{Mode: mode}, nil
+		}
+		view := ResourceAIView{
+			Available:  true,
+			Mode:       mode,
+			UpdatedAt:  item.ManualAIUpdatedAt.Format(time.RFC3339),
+			OutputSize: item.ManualAISize,
+		}
+		if a.cfg().CDNDomain != "" && a.cfg().CDNAuthKey != "" {
+			if ttl <= 0 || ttl > 7*24*time.Hour {
+				ttl = a.cfg().CDNURLTTL
+			}
+			view.PDFURL = cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.ManualAIKey, ttl)
+		}
+		return view, nil
 	}
 	tasks, err := a.Store.ListAITasksByResource(ctx, id)
 	if err != nil {

@@ -11,6 +11,18 @@ body,
   margin: 0;
 }
 
+/* Keep the viewport scrollbar gutter reserved so pages with and without a
+   scrollbar render tables and cards at the same width. */
+html {
+  scrollbar-gutter: stable;
+}
+
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
+  }
+}
+
 body {
   background: #f4f7f8;
   color: #24343b;

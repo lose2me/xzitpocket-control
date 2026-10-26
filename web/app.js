@@ -429,6 +429,9 @@ import { template } from './template.js';
       const resourceFiles = ref([]);
       const uploading = ref(false);
       const uploadProgress = ref(0);
+      const manualFileInput = ref(null);
+      const manualTarget = ref(null);
+      const manualUploading = ref(false);
       const courseOptions = ref([]);
       const pdfCanvasEl = ref(null);
       const pdfFile = ref(null);
@@ -729,17 +732,22 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '16%' }
       ];
       const resourceHeaders = [
-        { title: '课程编号', key: 'code', sortable: true, width: '22%' },
-        { title: '课程名称', key: 'name', sortable: true, width: '34%' },
-        { title: '试卷数', key: 'resource_count', align: 'center', width: '14%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '30%' }
+        { title: '课程编号', key: 'code', sortable: true, width: '19%' },
+        { title: '课程名称', key: 'name', sortable: true, width: '31%' },
+        { title: '试卷数', key: 'resource_count', align: 'center', width: '10%' },
+        { title: '解析完成', key: 'all_analyzed', align: 'center', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '26%' }
       ];
       const courseResourceHeaders = [
-        { title: '文件名', key: 'name', width: '26%' },
-        { title: '贡献者学号', key: 'contributor_student_id', width: '15%' },
-        { title: '下载量', key: 'download_count', align: 'center', width: '10%' },
-        { title: '上传时间', key: 'created_at', width: '15%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '34%' }
+        { title: '文件名', key: 'name', width: '18%' },
+        { title: '可解析', key: 'ai_solvable', align: 'center', width: '8%' },
+        { title: '精简版', key: 'has_basic_ai', align: 'center', width: '8%' },
+        { title: '小学生版', key: 'has_advanced_ai', align: 'center', width: '9%' },
+        { title: '原版', key: 'has_manual_ai', align: 'center', width: '7%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '12%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '7%' },
+        { title: '上传时间', key: 'created_at', width: '12%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '19%' }
       ];
       const archivedTextbookHeaders = [
         { title: '教材名称', key: 'name', width: '25%' },
@@ -765,7 +773,23 @@ import { template } from './template.js';
         { title: '更新时间', key: 'updated_at', width: '15%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
-      const aiModeLabel = (mode) => mode === 'advanced' ? '高级' : '基础';
+      const aiModeLabel = (mode) => mode === 'advanced' ? '小学生版' : mode === 'manual' ? '原版' : '精简版';
+      const aiDoneIcon = (done) => done ? 'mdi-check-circle' : 'mdi-minus-circle-outline';
+      const aiDoneColor = (done) => done ? 'success' : 'grey';
+      const aiSolvableLabel = (value) => value === 1 ? '可解析' : value === 0 ? '不可解析' : '未检测';
+      const aiSolvableColor = (value) => value === 1 ? 'success' : value === 0 ? 'error' : 'grey';
+      const analysisProgressLabel = (row) => {
+        const item = rawItem(row);
+        const analyzable = Number(item.analyzable_count || 0);
+        const analyzed = Number(item.analyzed_count || 0);
+        if (!analyzable) return '无试卷';
+        return item.all_analyzed ? '全部完成 ' + analyzed + '/' + analyzable : analyzed + '/' + analyzable;
+      };
+      const analysisProgressColor = (row) => {
+        const item = rawItem(row);
+        if (!Number(item.analyzable_count || 0)) return 'grey';
+        return item.all_analyzed ? 'success' : 'warning';
+      };
       const aiStatusLabel = (status) => ({ queued: '排队中', running: '解析中', paused: '已暂停', succeeded: '已完成', failed: '失败', skipped: '不可解答', cancelled: '取消' }[status] || valueOrDash(status));
       const aiElapsedLabel = (row) => {
         const seconds = rawItem(row).elapsed_seconds;
@@ -1337,8 +1361,10 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify(payload) });
         const created = (out.items || []).length;
         const failed = out.failed || [];
-        if (failed.length) notify('已加入 ' + created + ' 个任务，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
-        else notify('已加入 ' + created + ' 个 AI 解析任务');
+        const modes = [...new Set((out.items || []).map(item => aiModeLabel(item.mode) + '解析'))];
+        const suffix = modes.length ? '（' + modes.join('、') + '）' : '';
+        if (failed.length) notify('已加入 ' + created + ' 个任务' + suffix + '，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
+        else notify('已加入 ' + created + ' 个 AI 解析任务' + suffix);
         await loadAITasks();
       });
       const enqueueAIItem = (row) => {
@@ -1349,7 +1375,9 @@ import { template } from './template.js';
       };
       const reanalyzeAITask = (row) => {
         const item = rawItem(row);
-        return enqueueAIResources([item.resource_id], [item.mode || 'basic']);
+        const mode = item.mode || 'basic';
+        if (!window.confirm('确定重新解析“' + (item.resource_name || '试卷') + '”的' + aiModeLabel(mode) + '解析吗？')) return;
+        return enqueueAIResources([item.resource_id], [mode]);
       };
       const retryAITask = (row) => call(async () => {
         const item = rawItem(row);
@@ -1470,6 +1498,34 @@ import { template } from './template.js';
           notify('已上传 ' + created + ' 个，失败 ' + failed.length + ' 个：' + failed.map(f => f.name + '（' + f.reason + '）').join('；'), 'warning');
         } else {
           notify('已上传 ' + created + ' 个 PDF');
+        }
+      });
+      const openManualUpload = (row) => {
+        manualTarget.value = rawItem(row);
+        if (manualFileInput.value) manualFileInput.value.click();
+      };
+      const onManualFileSelected = (event) => call(async () => {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        const target = manualTarget.value;
+        input.value = '';
+        if (!file || !target) return;
+        if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')) {
+          throw new Error('请选择 PDF 文件');
+        }
+        const data = new FormData();
+        data.append('file', file, file.name || 'manual-analysis.pdf');
+        manualUploading.value = true;
+        try {
+          const out = await api('/api/v1/admin/resources/' + encodeURIComponent(target.id) + '/manual-analysis', { method: 'POST', body: data });
+          notify('已上传“' + (target.name || '试卷') + '”的原版解析');
+          if (out && out.id) {
+            const index = courseResources.value.findIndex((item) => item.id === out.id);
+            if (index >= 0) courseResources.value[index] = out;
+          }
+          await loadCourseResources();
+        } finally {
+          manualUploading.value = false;
         }
       });
       const deleteResource = (row) => call(async () => {
@@ -2238,7 +2294,7 @@ import { template } from './template.js';
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
-        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
+        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
         aiTasks, aiTotal, aiSearch, aiHeaders, aiModeLabel, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
@@ -2248,7 +2304,7 @@ import { template } from './template.js';
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, setBankArchived, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, openContributorDialog, saveContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook, setTextbookArchived,
-        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, deleteResource, downloadResource, onTextbookDrop,
+        openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, openManualUpload, onManualFileSelected, deleteResource, downloadResource, onTextbookDrop,
         loadCourses, searchCourses, sortCourses, openNewCourse, editCourse, saveCourse, deleteCourse, booksLabel,
         admins, adminDialog, adminEditingId, adminForm, adminPermsForm, adminPageOptions, adminPermOptions, adminHeaders, loadAdmins, openNewAdmin, editAdmin, saveAdmin, deleteAdmin, adminPermSummary, randomAdminKey
       };

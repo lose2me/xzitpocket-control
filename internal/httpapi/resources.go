@@ -88,6 +88,34 @@ func (s *Server) adminResourceContributor(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) adminResourceManualAnalysis(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, r, app.Err("invalid_upload", "上传内容无效", http.StatusBadRequest))
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, r, app.Err("invalid_upload", "缺少 PDF 文件", http.StatusBadRequest))
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, (80<<20)+1))
+	if err != nil {
+		writeError(w, r, app.Err("invalid_upload", "读取文件失败", http.StatusBadRequest))
+		return
+	}
+	item, err := s.App.UploadManualAnalysis(r.Context(), id, data, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (s *Server) adminResourceDelete(w http.ResponseWriter, r *http.Request, id string) {
 	p, ok := s.authAdmin(w, r)
 	if !ok || !checkAdminCSRF(w, r) {
