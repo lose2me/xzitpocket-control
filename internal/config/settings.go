@@ -112,7 +112,7 @@ var SettingSpecs = []SettingSpec{
 	{Key: SettingAIAPIKey, Group: "ai", Label: "API Key", Kind: SettingKindSecret},
 	{Key: SettingAIBaseURL, Group: "ai", Label: "API 地址", Kind: SettingKindURL},
 	{Key: SettingAIModel, Group: "ai", Label: "模型", Kind: SettingKindString},
-	{Key: SettingAIWindows, Group: "ai", Label: "解析时间窗", Kind: SettingKindText, Hint: "例如 00:00-08:50,12:00-13:50"},
+	{Key: SettingAIWindows, Group: "ai", Label: "解析时间窗", Kind: SettingKindString, Hint: "例如 00:00-08:50,12:00-13:50"},
 	{Key: SettingAITimezone, Group: "ai", Label: "时区", Kind: SettingKindString},
 	{Key: SettingAIPagesPerChunk, Group: "ai", Label: "每次页数", Kind: SettingKindInt, Min: 1, Max: 200},
 	{Key: SettingAIRequestTimeout, Group: "ai", Label: "请求超时", Kind: SettingKindDuration},
