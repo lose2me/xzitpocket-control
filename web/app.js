@@ -1675,6 +1675,15 @@ import { template } from './template.js';
       });
       const settingGroups = ref([]);
       const settingsForm = ref({});
+      const aiPromptSettingTab = ref('');
+      const aiPromptSettingFields = computed(() => {
+        const group = (settingGroups.value || []).find(item => item.key === 'ai');
+        return (group && group.fields ? group.fields : []).filter(field => field.kind === 'text');
+      });
+      const aiPromptSettingField = computed(() => {
+        const fields = aiPromptSettingFields.value;
+        return fields.find(field => field.key === aiPromptSettingTab.value) || fields[0] || null;
+      });
       const applySettingsView = (out) => {
         const groups = (out && out.groups) || [];
         const form = {};
@@ -1689,6 +1698,10 @@ import { template } from './template.js';
         settingsForm.value = form;
         if (!groups.some(group => group.key === settingTab.value)) {
           settingTab.value = groups.length ? groups[0].key : 'general';
+        }
+        const prompts = aiPromptSettingFields.value;
+        if (!prompts.some(field => field.key === aiPromptSettingTab.value)) {
+          aiPromptSettingTab.value = prompts.length ? prompts[0].key : '';
         }
       };
       const loadSettings = async () => {
@@ -2301,7 +2314,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, aiPromptSettingFields, aiPromptSettingTab, aiPromptSettingField, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
