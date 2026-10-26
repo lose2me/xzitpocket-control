@@ -522,10 +522,10 @@ func (s *Store) ResetRunningAITasks(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// LatestSucceededAITasks returns the newest succeeded run for each resource.
-// Resources without a succeeded run are absent from the map.
-func (s *Store) LatestSucceededAITasks(ctx context.Context, resourceIDs []string) (map[string]AITask, error) {
-	out := make(map[string]AITask, len(resourceIDs))
+// LatestSucceededAITasks returns the newest succeeded run for each resource
+// and analysis mode. Resources without a succeeded run are absent from the map.
+func (s *Store) LatestSucceededAITasks(ctx context.Context, resourceIDs []string) (map[string]map[string]AITask, error) {
+	out := make(map[string]map[string]AITask, len(resourceIDs))
 	if len(resourceIDs) == 0 {
 		return out, nil
 	}
@@ -546,8 +546,13 @@ func (s *Store) LatestSucceededAITasks(ctx context.Context, resourceIDs []string
 		if err != nil {
 			return nil, err
 		}
-		if _, exists := out[item.ResourceID]; !exists {
-			out[item.ResourceID] = item
+		byMode, exists := out[item.ResourceID]
+		if !exists {
+			byMode = make(map[string]AITask, 2)
+			out[item.ResourceID] = byMode
+		}
+		if _, exists := byMode[item.Mode]; !exists {
+			byMode[item.Mode] = item
 		}
 	}
 	return out, rows.Err()

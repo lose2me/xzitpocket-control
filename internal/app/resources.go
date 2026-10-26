@@ -15,22 +15,23 @@ import (
 
 // ResourceView is the administrator-facing resource row.
 type ResourceView struct {
-	ID                   string `json:"id"`
-	Name                 string `json:"name"`
-	Tags                 string `json:"tags"`
-	CourseCode           string `json:"course_code"`
-	HasPdf               bool   `json:"has_pdf"`
-	Format               string `json:"format"`
-	SizeBytes            int64  `json:"size_bytes,omitempty"`
-	DownloadCount        int64  `json:"download_count"`
-	ContributorUserID    string `json:"contributor_user_id,omitempty"`
-	ContributorStudentID string `json:"contributor_student_id,omitempty"`
-	ContributorName      string `json:"contributor_name,omitempty"`
-	Archived             bool   `json:"archived"`
-	CreatedAt            string `json:"created_at"`
-	UpdatedAt            string `json:"updated_at"`
-	HasAI                bool   `json:"has_ai"`
-	AIUpdatedAt          string `json:"ai_updated_at,omitempty"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Tags                 string   `json:"tags"`
+	CourseCode           string   `json:"course_code"`
+	HasPdf               bool     `json:"has_pdf"`
+	Format               string   `json:"format"`
+	SizeBytes            int64    `json:"size_bytes,omitempty"`
+	DownloadCount        int64    `json:"download_count"`
+	ContributorUserID    string   `json:"contributor_user_id,omitempty"`
+	ContributorStudentID string   `json:"contributor_student_id,omitempty"`
+	ContributorName      string   `json:"contributor_name,omitempty"`
+	Archived             bool     `json:"archived"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	HasAI                bool     `json:"has_ai"`
+	AIModes              []string `json:"ai_modes,omitempty"`
+	AIUpdatedAt          string   `json:"ai_updated_at,omitempty"`
 }
 
 // ResourceURLView is a temporary, signed CDN URL for a resource PDF.

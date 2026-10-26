@@ -204,7 +204,7 @@ func TestResourceAIVisibility(t *testing.T) {
 	if err != nil || len(views) != 1 {
 		t.Fatalf("views = %#v, err = %v", views, err)
 	}
-	if !views[0].HasAI || views[0].AIUpdatedAt == "" {
+	if !views[0].HasAI || views[0].AIUpdatedAt == "" || len(views[0].AIModes) != 1 || views[0].AIModes[0] != "basic" {
 		t.Fatalf("resource AI fields = %#v", views[0])
 	}
 

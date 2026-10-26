@@ -103,9 +103,23 @@ func (a *App) ListCourseResourcesForUser(ctx context.Context, courseCode string)
 		return nil, 0, "", err
 	}
 	for i := range views {
-		if task, ok := aiTasks[views[i].ID]; ok {
+		byMode := aiTasks[views[i].ID]
+		var newest time.Time
+		modes := make([]string, 0, 2)
+		for _, mode := range []string{"basic", "advanced"} {
+			task, ok := byMode[mode]
+			if !ok {
+				continue
+			}
+			modes = append(modes, mode)
+			if task.UpdatedAt.After(newest) {
+				newest = task.UpdatedAt
+			}
+		}
+		if len(modes) > 0 {
 			views[i].HasAI = true
-			views[i].AIUpdatedAt = task.UpdatedAt.Format(time.RFC3339)
+			views[i].AIModes = modes
+			views[i].AIUpdatedAt = newest.Format(time.RFC3339)
 		}
 	}
 	return views, total, version, nil
