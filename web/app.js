@@ -1592,7 +1592,7 @@ import { template } from './template.js';
       };
       const settingGroupIcons = {
         general: 'mdi-tune-variant', risk: 'mdi-shield-alert-outline', storage: 'mdi-cloud-outline',
-        cdn: 'mdi-web', monitoring: 'mdi-server-outline', ai: 'mdi-robot-outline',
+        cdn: 'mdi-web', monitoring: 'mdi-server-outline', ai: 'mdi-file-search-outline',
       };
       const settingGroupIcon = (key) => settingGroupIcons[key] || 'mdi-cog-outline';
       // 卡片标题跟随当前 tab，避免标题和 tab 各说各的。
