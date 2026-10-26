@@ -357,6 +357,8 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
     tags TEXT NOT NULL DEFAULT '',
     pdf_key TEXT NOT NULL DEFAULT '',
     size_bytes INTEGER NOT NULL DEFAULT 0,
+    manual_pdf_key TEXT NOT NULL DEFAULT '',
+    manual_size_bytes INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_upload', 'pending_review')),
     submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     submitted_by_name TEXT NOT NULL DEFAULT '',

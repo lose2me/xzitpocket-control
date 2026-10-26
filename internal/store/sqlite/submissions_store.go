@@ -19,6 +19,8 @@ type Submission struct {
 	Tags                string    `json:"tags"`
 	PdfKey              string    `json:"pdf_key"`
 	SizeBytes           int64     `json:"size_bytes"`
+	ManualPdfKey        string    `json:"manual_pdf_key"`
+	ManualSizeBytes     int64     `json:"manual_size_bytes"`
 	Status              string    `json:"status"`
 	SubmittedByUserID   string    `json:"submitted_by_user_id"`
 	SubmittedByName     string    `json:"submitted_by_name"`
@@ -42,7 +44,7 @@ type SubmissionInput struct {
 	TargetID            string
 }
 
-const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at"
+const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, manual_pdf_key, manual_size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at"
 
 func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now time.Time) (Submission, error) {
 	if strings.TrimSpace(input.Status) == "" {
@@ -169,6 +171,21 @@ func (s *Store) SetSubmissionPdfKey(ctx context.Context, id, key string, sizeByt
 	return nil
 }
 
+// SetSubmissionManualKey records the optional manual analysis PDF.
+func (s *Store) SetSubmissionManualKey(ctx context.Context, id, key string, sizeBytes int64, now time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE resource_submissions SET manual_pdf_key = ?, manual_size_bytes = ?, updated_at = ? WHERE id = ?`,
+		key, sizeBytes, millis(now), id)
+	if err != nil {
+		return err
+	}
+	if affected, countErr := result.RowsAffected(); countErr != nil {
+		return countErr
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // MarkSubmissionUploaded promotes a verified direct upload into the review queue.
 func (s *Store) MarkSubmissionUploaded(ctx context.Context, id string, sizeBytes int64, now time.Time) error {
 	result, err := s.DB.ExecContext(ctx, `UPDATE resource_submissions
@@ -260,7 +277,7 @@ func scanSubmission(row rowScannerSubmission) (Submission, error) {
 	var userID sql.NullString
 	var created, updated int64
 	if err := row.Scan(&item.ID, &item.Kind, &item.CourseCode, &item.Name, &item.Tags, &item.PdfKey,
-		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &item.TargetID, &created, &updated); err != nil {
+		&item.SizeBytes, &item.ManualPdfKey, &item.ManualSizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &item.TargetID, &created, &updated); err != nil {
 		return Submission{}, err
 	}
 	item.SubmittedByUserID = userID.String

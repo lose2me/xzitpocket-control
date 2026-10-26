@@ -378,7 +378,6 @@ import { template } from './template.js';
       const archivedBanks = ref([]);
       const archivedBankTotal = ref(0);
       const resourceDialog = ref(false);
-      const resourceArchived = ref(false);
       const resourceCourse = ref({ code: '', name: '' });
       const courseResources = ref([]);
       const aiTasks = ref([]);
@@ -749,6 +748,18 @@ import { template } from './template.js';
         { title: '下载量', key: 'download_count', align: 'center', width: '7%' },
         { title: '上传时间', key: 'created_at', width: '12%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '19%' }
+      ];
+      const archivedResourceHeaders = [
+        { title: '文件名', key: 'name', width: '16%' },
+        { title: '课程', key: 'course_code', width: '8%' },
+        { title: '可解析', key: 'ai_solvable', align: 'center', width: '7%' },
+        { title: '精简版', key: 'has_basic_ai', align: 'center', width: '7%' },
+        { title: '小学生版', key: 'has_advanced_ai', align: 'center', width: '8%' },
+        { title: '原版', key: 'has_manual_ai', align: 'center', width: '6%' },
+        { title: '贡献者学号', key: 'contributor_student_id', width: '11%' },
+        { title: '下载量', key: 'download_count', align: 'center', width: '6%' },
+        { title: '上传时间', key: 'created_at', width: '11%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '20%' }
       ];
       const archivedTextbookHeaders = [
         { title: '教材名称', key: 'name', width: '25%' },
@@ -1442,8 +1453,7 @@ import { template } from './template.js';
       });
       const loadCourseResources = async () => {
         const code = (resourceCourse.value && resourceCourse.value.code) || '';
-        const archived = resourceArchived.value ? '&archived=1' : '';
-        const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code) + archived + '&limit=200');
+        const out = await api('/api/v1/admin/resources?course_code=' + encodeURIComponent(code) + '&limit=200');
         courseResources.value = out.items || [];
       };
       const loadArchivedResources = async () => {
@@ -1461,37 +1471,8 @@ import { template } from './template.js';
         archivedResources.value = items;
         archivedResourceTotal.value = total;
       };
-      const archivedCourseRows = computed(() => {
-        const names = new Map((courses.value || []).map((course) => [course.code, course.name]));
-        const rows = new Map();
-        for (const item of archivedResources.value || []) {
-          const code = item.course_code || '';
-          let row = rows.get(code);
-          if (!row) {
-            row = {
-              id: code || '__none__',
-              code,
-              name: names.get(code) || '',
-              resource_count: 0,
-              analyzable_count: 0,
-              analyzed_count: 0,
-              all_analyzed: false,
-            };
-            rows.set(code, row);
-          }
-          row.resource_count++;
-          if (item.has_pdf) {
-            row.analyzable_count++;
-            if (item.has_basic_ai && item.has_advanced_ai) row.analyzed_count++;
-          }
-        }
-        return [...rows.values()]
-          .map((row) => ({ ...row, all_analyzed: row.analyzable_count > 0 && row.analyzed_count === row.analyzable_count }))
-          .sort((a, b) => a.code.localeCompare(b.code));
-      });
-      const openResourceDialog = (row, archived = false) => call(async () => {
+      const openResourceDialog = (row) => call(async () => {
         const item = rawItem(row);
-        resourceArchived.value = !!archived;
         resourceCourse.value = { code: item.code || '', name: item.name || '' };
         resourceFiles.value = [];
         await loadCourseResources();
@@ -2324,7 +2305,7 @@ import { template } from './template.js';
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
-        resourceDialog, resourceArchived, resourceCourse, courseResources, archivedCourseRows, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, loadArchivedResources, setResourceArchived,
+        resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
         aiTasks, aiTotal, aiSearch, aiHeaders, aiModeLabel, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,

@@ -51,6 +51,12 @@ func submissionObjectKey(kind, format, hash string) string {
 	return papersSubmissionsPrefix + hash + "." + format
 }
 
+// submissionManualObjectKey is the pending-review location for an optional
+// manual analysis PDF uploaded alongside a paper.
+func submissionManualObjectKey(hash string) string {
+	return papersSubmissionsPrefix + "manual/" + hash + "." + fileFormatPDF
+}
+
 // publishedObjectKey is the live location for approved content.
 func publishedObjectKey(kind, format, hash string) string {
 	if kind == "textbook" {

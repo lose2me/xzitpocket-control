@@ -16,23 +16,26 @@ import (
 // The file itself goes straight to COS through a short-lived signed URL; the
 // control server only sees the metadata and a short verification range.
 type ResourceSubmissionTicketInput struct {
-	Kind       string `json:"kind"`
-	CourseCode string `json:"course_code"`
-	Name       string `json:"name"`
-	Tags       string `json:"tags"`
-	TargetID   string `json:"target_id"`
-	Format     string `json:"format"`
-	MD5        string `json:"md5"`
-	SizeBytes  int64  `json:"size_bytes"`
+	Kind            string `json:"kind"`
+	CourseCode      string `json:"course_code"`
+	Name            string `json:"name"`
+	Tags            string `json:"tags"`
+	TargetID        string `json:"target_id"`
+	Format          string `json:"format"`
+	MD5             string `json:"md5"`
+	SizeBytes       int64  `json:"size_bytes"`
+	ManualMD5       string `json:"manual_md5"`
+	ManualSizeBytes int64  `json:"manual_size_bytes"`
 }
 
 // ResourceUploadTicketView is the direct-upload authorization returned to the
 // app. UploadURL is a presigned COS PUT URL for a content-addressed key under
 // books/submissions or papers/submissions.
 type ResourceUploadTicketView struct {
-	ID        string `json:"id"`
-	UploadURL string `json:"upload_url"`
-	ExpiresAt string `json:"expires_at"`
+	ID              string `json:"id"`
+	UploadURL       string `json:"upload_url"`
+	ManualUploadURL string `json:"manual_upload_url,omitempty"`
+	ExpiresAt       string `json:"expires_at"`
 }
 
 // SubmissionView is the administrator-facing review queue row.
@@ -222,6 +225,19 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if _, err := client.HeadObject(ctx, key); err == nil {
 		return ResourceUploadTicketView{}, Err("submission_duplicate", "该文件已提交过，请勿重复上传", 409)
 	}
+	manualKey := ""
+	manualSize := int64(0)
+	if kind == "resource" && (strings.TrimSpace(in.ManualMD5) != "" || in.ManualSizeBytes > 0) {
+		manualHash, ok := normalizeMD5(in.ManualMD5)
+		if !ok {
+			return ResourceUploadTicketView{}, Err("invalid_md5", "原版解析文件校验失败，请重试", 400)
+		}
+		if in.ManualSizeBytes <= 0 || in.ManualSizeBytes > maxSubmissionBytes {
+			return ResourceUploadTicketView{}, Err("invalid_size", "原版解析文件大小无效", 400)
+		}
+		manualKey = submissionManualObjectKey(manualHash)
+		manualSize = in.ManualSizeBytes
+	}
 
 	now := time.Now().UTC()
 	submitterName, studentIDCiphertext := a.submissionIdentity(ctx, p)
@@ -237,16 +253,31 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
 		return ResourceUploadTicketView{}, err
 	}
+	manualUploadURL := ""
+	if manualKey != "" {
+		if err := a.Store.SetSubmissionManualKey(ctx, item.ID, manualKey, manualSize, now); err != nil {
+			_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
+			return ResourceUploadTicketView{}, err
+		}
+		manualUploadURL, err = client.PresignPutURL(manualKey, manualSize, submissionTicketTTL)
+		if err != nil {
+			_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
+			a.Logger.Error("presign manual analysis upload failed", "error", err, "submission", item.ID)
+			return ResourceUploadTicketView{}, Err("storage_error", "创建原版解析上传通道失败", 502)
+		}
+	}
 	uploadURL, err := client.PresignPutURL(key, in.SizeBytes, submissionTicketTTL)
 	if err != nil {
 		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
 		a.Logger.Error("presign submission upload failed", "error", err, "submission", item.ID)
 		return ResourceUploadTicketView{}, Err("storage_error", "创建上传通道失败", 502)
 	}
+	expiresAt := time.Now().Add(submissionTicketTTL).UTC().Format(time.RFC3339)
 	return ResourceUploadTicketView{
-		ID:        item.ID,
-		UploadURL: uploadURL,
-		ExpiresAt: time.Now().Add(submissionTicketTTL).UTC().Format(time.RFC3339),
+		ID:              item.ID,
+		UploadURL:       uploadURL,
+		ManualUploadURL: manualUploadURL,
+		ExpiresAt:       expiresAt,
 	}, nil
 }
 
@@ -287,6 +318,31 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	if err != nil || !storedFileIsValid(item.PdfKey, prefix) {
 		a.discardUpload(ctx, item)
 		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
+	}
+	if item.ManualPdfKey != "" {
+		manualSize, manualETag, err := client.HeadObjectInfo(ctx, item.ManualPdfKey)
+		if err != nil {
+			a.discardUpload(ctx, item)
+			return SubmissionView{}, Err("upload_missing", "未检测到原版解析文件", 409)
+		}
+		if manualSize <= 0 || manualSize > maxSubmissionBytes {
+			a.discardUpload(ctx, item)
+			return SubmissionView{}, Err("invalid_file", "原版解析文件内容无效", 400)
+		}
+		if expected := objectHashFromKey(item.ManualPdfKey); expected != "" && !strings.EqualFold(manualETag, expected) {
+			a.discardUpload(ctx, item)
+			return SubmissionView{}, Err("invalid_file", "原版解析文件校验失败，请重试", 400)
+		}
+		manualPrefix, err := client.GetObjectRange(ctx, item.ManualPdfKey, 0, 7)
+		if err != nil || !storedFileIsValid(item.ManualPdfKey, manualPrefix) {
+			a.discardUpload(ctx, item)
+			return SubmissionView{}, Err("invalid_file", "原版解析文件内容无效", 400)
+		}
+		now := time.Now().UTC()
+		if err := a.Store.SetSubmissionManualKey(ctx, item.ID, item.ManualPdfKey, manualSize, now); err != nil {
+			return SubmissionView{}, err
+		}
+		item.ManualSizeBytes = manualSize
 	}
 	now := time.Now().UTC()
 	if err := a.Store.MarkSubmissionUploaded(ctx, item.ID, size, now); err != nil {
@@ -335,6 +391,14 @@ func (a *App) discardUpload(ctx context.Context, item sqlite.Submission) {
 
 // removeUploadObject is best-effort and skips keys that approved content uses.
 func (a *App) removeUploadObject(ctx context.Context, item sqlite.Submission) {
+	if item.ManualPdfKey != "" {
+		if client := a.cosClient(); client.Configured() {
+			if err := client.DeleteObject(ctx, item.ManualPdfKey); err != nil {
+				a.Logger.Warn("delete manual analysis upload object failed", "error", err, "key", item.ManualPdfKey)
+			}
+		}
+		a.purgeCDN(ctx, item.ManualPdfKey)
+	}
 	if item.PdfKey == "" {
 		return
 	}
@@ -544,6 +608,15 @@ func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor str
 		if err := a.Store.SetResourcePdfKey(ctx, resource.ID, publishedKey, now); err != nil {
 			_ = a.Store.DeleteResource(ctx, resource.ID)
 			return nil, err
+		}
+		if item.ManualPdfKey != "" {
+			if err := a.Store.SetResourceManualAnalysis(ctx, resource.ID, item.ManualPdfKey, item.ManualSizeBytes, now); err != nil {
+				_ = a.Store.DeleteResource(ctx, resource.ID)
+				return nil, err
+			}
+			resource.ManualAIKey = item.ManualPdfKey
+			resource.ManualAISize = item.ManualSizeBytes
+			resource.ManualAIUpdatedAt = now
 		}
 		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
 			return a.Store.SetResourceContributor(ctx, resource.ID, userID)

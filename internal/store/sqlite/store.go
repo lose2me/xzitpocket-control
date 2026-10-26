@@ -52,7 +52,7 @@ var currentSchemaTables = []struct {
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "manual_ai_key", "manual_ai_size", "manual_ai_updated_at", "created_at", "updated_at", "archived_at"}},
 	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "mode", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
 	{name: "app_settings", columns: []string{"key", "value", "updated_at"}},
-	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
+	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "manual_pdf_key", "manual_size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
 
 type Store struct {
@@ -128,6 +128,8 @@ var additiveMigrations = []struct {
 	{"resources", "contributor_user_id", `ALTER TABLE resources ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "student_id_ciphertext", `ALTER TABLE resource_submissions ADD COLUMN student_id_ciphertext TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "target_id", `ALTER TABLE resource_submissions ADD COLUMN target_id TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "manual_pdf_key", `ALTER TABLE resource_submissions ADD COLUMN manual_pdf_key TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "manual_size_bytes", `ALTER TABLE resource_submissions ADD COLUMN manual_size_bytes INTEGER NOT NULL DEFAULT 0`},
 	{"textbooks", "archived_at", `ALTER TABLE textbooks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"resources", "archived_at", `ALTER TABLE resources ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"resources", "manual_ai_key", `ALTER TABLE resources ADD COLUMN manual_ai_key TEXT NOT NULL DEFAULT ''`},
