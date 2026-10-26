@@ -50,7 +50,7 @@ var currentSchemaTables = []struct {
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
-	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
+	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "mode", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
 	{name: "app_settings", columns: []string{"key", "value", "updated_at"}},
 	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
 }
@@ -132,6 +132,7 @@ var additiveMigrations = []struct {
 	{"resources", "archived_at", `ALTER TABLE resources ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"question_banks", "archived_at", `ALTER TABLE question_banks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"resource_ai_tasks", "prompts_json", `ALTER TABLE resource_ai_tasks ADD COLUMN prompts_json TEXT NOT NULL DEFAULT ''`},
+	{"resource_ai_tasks", "mode", `ALTER TABLE resource_ai_tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'basic'`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -188,6 +189,7 @@ var removedIndexes = []string{
 	"idx_question_banks_archived",
 	"idx_textbooks_archived",
 	"idx_resources_archived",
+	"idx_resource_ai_tasks_active",
 }
 
 func (s *Store) dropRemovedIndexes(ctx context.Context) error {
@@ -363,6 +365,7 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 		`CREATE TABLE resource_ai_tasks_new (
 			id TEXT PRIMARY KEY,
 			resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+			mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
 			status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
 			solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
 			precheck_note TEXT NOT NULL DEFAULT '',
@@ -382,8 +385,8 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 			finished_at INTEGER NOT NULL DEFAULT 0,
 			prompts_json TEXT NOT NULL DEFAULT ''
 		)`,
-		`INSERT INTO resource_ai_tasks_new(id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json)
-			SELECT id, resource_id, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json FROM resource_ai_tasks`,
+		`INSERT INTO resource_ai_tasks_new(id, resource_id, mode, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json)
+			SELECT id, resource_id, mode, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json FROM resource_ai_tasks`,
 		`DROP TABLE resource_ai_tasks`,
 		`ALTER TABLE resource_ai_tasks_new RENAME TO resource_ai_tasks`,
 	}

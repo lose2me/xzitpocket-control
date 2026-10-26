@@ -45,10 +45,18 @@ func TestResourceCentreGroupsCourseContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(courses) != 1 {
-		t.Fatalf("courses = %#v, want only the course with content", courses)
+	if len(courses) != 2 {
+		t.Fatalf("courses = %#v, want every course including empty ones", courses)
 	}
-	got := courses[0]
+	var got ResourceCourseView
+	for _, course := range courses {
+		if course.Code == "C1" {
+			got = course
+		}
+	}
+	if got.Code == "" {
+		t.Fatalf("courses = %#v, want C1", courses)
+	}
 	if got.Code != "C1" || got.QuestionBankCount != 1 || got.ResourceCount != 1 || got.TextbookCount != 1 {
 		t.Fatalf("course = %#v", got)
 	}
@@ -79,14 +87,20 @@ func TestResourceCentreGroupsCourseContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	courses, err = a.ListResourceCourses(ctx)
-	if err != nil || len(courses) != 1 {
+	if err != nil {
 		t.Fatalf("courses = %#v, err = %v", courses, err)
 	}
-	if courses[0].Version == got.Version {
+	var updated ResourceCourseView
+	for _, course := range courses {
+		if course.Code == "C1" {
+			updated = course
+		}
+	}
+	if updated.Version == got.Version {
 		t.Fatal("course version did not change after adding a resource")
 	}
-	if _, _, updatedVersion, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || updatedVersion != courses[0].Version {
-		t.Fatalf("updated version = %q, want %q, err = %v", updatedVersion, courses[0].Version, err)
+	if _, _, updatedVersion, err := a.ListCourseResourcesForUser(ctx, "C1"); err != nil || updatedVersion != updated.Version {
+		t.Fatalf("updated version = %q, want %q, err = %v", updatedVersion, updated.Version, err)
 	}
 	versions, err := a.GetConfigVersions(ctx)
 	if err != nil || versions.ResourceCenter == "" {
@@ -169,7 +183,7 @@ func TestResourceAIVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
+	task, _, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +216,7 @@ func TestResourceAIVisibility(t *testing.T) {
 		t.Fatalf("course version = %q, resource version = %q", courses[0].Version, version)
 	}
 
-	ai, err := a.ResourceAIForUser(ctx, resource.ID, 0)
+	ai, err := a.ResourceAIForUser(ctx, resource.ID, "basic", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -204,8 +204,14 @@ func parseVerdict(content string) (Verdict, error) {
 // Analyze sends one page range in the paper's conversation and returns the
 // markdown answer. Long answers are continued in the same conversation.
 func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
+	return m.AnalyzeWithSystem(ctx, m.analysisSystem, history, parts)
+}
+
+// AnalyzeWithSystem runs one analysis pass with an explicit system prompt, so
+// the same model can produce the basic and advanced reports.
+func (m *Model) AnalyzeWithSystem(ctx context.Context, system string, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
 	messages := make([]openai.ChatCompletionMessage, 0, len(history)+2)
-	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: m.analysisSystem})
+	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: promptOr(system, DefaultAnalysisSystem)})
 	for _, message := range history {
 		role := message.Role
 		if role != openai.ChatMessageRoleAssistant {

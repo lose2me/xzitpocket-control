@@ -757,20 +757,23 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
       const aiHeaders = [
-        { title: '试卷', key: 'resource_name', width: '26%' },
-        { title: '课程号', key: 'course_code', width: '12%' },
-        { title: '状态', key: 'status', align: 'center', width: '10%' },
-        { title: '耗时', key: 'elapsed', align: 'center', width: '12%' },
-        { title: '更新时间', key: 'updated_at', width: '16%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '24%' }
+        { title: '试卷', key: 'resource_name', width: '22%' },
+        { title: '课程号', key: 'course_code', width: '10%' },
+        { title: '类型', key: 'mode', align: 'center', width: '9%' },
+        { title: '状态', key: 'status', align: 'center', width: '9%' },
+        { title: '耗时', key: 'elapsed', align: 'center', width: '10%' },
+        { title: '更新时间', key: 'updated_at', width: '15%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
       ];
+      const aiModeLabel = (mode) => mode === 'advanced' ? '高级' : '基础';
       const aiStatusLabel = (status) => ({ queued: '排队中', running: '解析中', paused: '已暂停', succeeded: '已完成', failed: '失败', skipped: '不可解答', cancelled: '取消' }[status] || valueOrDash(status));
       const aiElapsedLabel = (row) => {
         const seconds = rawItem(row).elapsed_seconds;
         return Number.isFinite(seconds) ? Math.max(0, seconds) + 's' : '—';
       };
-      const aiTaskForResource = (resourceId) => (aiTasks.value || []).reduce((latest, task) => {
+      const aiTaskForResource = (resourceId, mode) => (aiTasks.value || []).reduce((latest, task) => {
         if (task.resource_id !== resourceId) return latest;
+        if (mode && task.mode !== mode) return latest;
         if (!latest) return task;
         const current = Date.parse(task.created_at || '') || 0;
         const previous = Date.parse(latest.created_at || '') || 0;
@@ -778,11 +781,12 @@ import { template } from './template.js';
       }, null);
       const aiIsLatestTask = (row) => {
         const item = rawItem(row);
-        const latest = aiTaskForResource(item.resource_id);
+        const latest = aiTaskForResource(item.resource_id, item.mode);
         return latest ? latest.id === item.id : false;
       };
-      const aiLatestOutputTask = (resourceId) => (aiTasks.value || []).reduce((latest, task) => {
+      const aiLatestOutputTask = (resourceId, mode) => (aiTasks.value || []).reduce((latest, task) => {
         if (task.resource_id !== resourceId || !task.has_output) return latest;
+        if (mode && task.mode !== mode) return latest;
         if (!latest) return task;
         const current = Date.parse(task.created_at || '') || 0;
         const previous = Date.parse(latest.created_at || '') || 0;
@@ -790,17 +794,17 @@ import { template } from './template.js';
       }, null);
       const aiIsLatestOutput = (row) => {
         const item = rawItem(row);
-        const latest = aiLatestOutputTask(item.resource_id);
+        const latest = aiLatestOutputTask(item.resource_id, item.mode);
         return latest ? latest.id === item.id : false;
       };
       const aiActionLabel = (resourceId) => {
-        const task = aiTaskForResource(resourceId);
-        if (!task) return 'AI解析';
-        if (task.status === 'running') return '解析中';
-        if (task.status === 'queued') return '排队中';
-        if (task.status === 'succeeded') return '重解';
-        if (task.status === 'paused') return '继续解析';
-        if (task.status === 'failed') return '重试';
+        const tasks = (aiTasks.value || []).filter(task => task.resource_id === resourceId);
+        if (!tasks.length) return 'AI解析';
+        if (tasks.some(task => task.status === 'running')) return '解析中';
+        if (tasks.some(task => task.status === 'queued')) return '排队中';
+        if (tasks.some(task => task.status === 'paused')) return '继续解析';
+        if (tasks.every(task => task.status === 'succeeded')) return '重解';
+        if (tasks.some(task => task.status === 'failed')) return '重试';
         return 'AI解析';
       };
       const archivedBankHeaders = [
@@ -1326,9 +1330,11 @@ import { template } from './template.js';
         aiTasks.value = out.items || [];
         aiTotal.value = out.total || 0;
       };
-      const enqueueAIResources = (ids) => call(async () => {
+      const enqueueAIResources = (ids, modes) => call(async () => {
         if (!ids.length) throw new Error('没有可解析的 PDF 试卷');
-        const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify({ resource_ids: ids }) });
+        const payload = { resource_ids: ids };
+        if (modes && modes.length) payload.modes = modes;
+        const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify(payload) });
         const created = (out.items || []).length;
         const failed = out.failed || [];
         if (failed.length) notify('已加入 ' + created + ' 个任务，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
@@ -1339,11 +1345,11 @@ import { template } from './template.js';
         const item = rawItem(row);
         const task = aiTaskForResource(item.id);
         if (task && task.status === 'paused') return retryAITask(task);
-        return enqueueAIResources([item.id]);
+        return enqueueAIResources([item.id], ['basic', 'advanced']);
       };
       const reanalyzeAITask = (row) => {
         const item = rawItem(row);
-        return enqueueAIResources([item.resource_id]);
+        return enqueueAIResources([item.resource_id], [item.mode || 'basic']);
       };
       const retryAITask = (row) => call(async () => {
         const item = rawItem(row);
@@ -1360,7 +1366,7 @@ import { template } from './template.js';
       });
       const downloadAITask = (row) => call(async () => {
         const item = rawItem(row);
-        await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', (item.resource_name || '试卷') + '-AI解析.pdf');
+        await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', (item.resource_name || '试卷') + '-AI解析-' + aiModeLabel(item.mode) + '.pdf');
       });
       const loadMathJax = () => {
         if (window.MathJax && window.MathJax.typesetPromise) return Promise.resolve();
@@ -1407,7 +1413,7 @@ import { template } from './template.js';
         } catch (_) {}
         aiPromptCalls.value = Array.isArray(calls) ? calls : [];
         aiPromptText.value = text;
-        aiPromptTitle.value = item.resource_name || 'Prompt';
+        aiPromptTitle.value = (item.resource_name || 'Prompt') + ' · ' + aiModeLabel(item.mode) + '解析';
         aiPromptTab.value = aiPromptCalls.value.length ? '0' : 'json';
         aiPromptDialog.value = true;
       });
@@ -2233,7 +2239,7 @@ import { template } from './template.js';
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
-        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiModeLabel, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,

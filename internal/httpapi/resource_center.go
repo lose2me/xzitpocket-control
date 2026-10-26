@@ -56,7 +56,7 @@ func (s *Server) userResourceAI(w http.ResponseWriter, r *http.Request, id strin
 	if _, ok := s.authSession(w, r); !ok {
 		return
 	}
-	out, err := s.App.ResourceAIForUser(r.Context(), id, userURLTTL(r))
+	out, err := s.App.ResourceAIForUser(r.Context(), id, r.URL.Query().Get("mode"), userURLTTL(r))
 	if err != nil {
 		writeError(w, r, err)
 		return

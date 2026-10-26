@@ -118,15 +118,7 @@ func (s *Store) ListResourceCourses(ctx context.Context) ([]ResourceCourse, erro
 			(SELECT COALESCE(MAX(t.updated_at), 0) FROM resource_ai_tasks t JOIN resources r ON r.id = t.resource_id
 				WHERE r.course_code = c.code AND r.archived_at = 0 AND t.status = 'succeeded')
 		FROM courses c
-		WHERE c.code <> '' AND (
-			EXISTS (SELECT 1 FROM question_bank_courses qbc
-				JOIN question_banks b ON b.id = qbc.question_bank_id
-				WHERE qbc.course_code = c.code AND b.status = 'active' AND b.archived_at = 0)
-			OR EXISTS (SELECT 1 FROM resources r WHERE r.course_code = c.code AND r.pdf_key <> '' AND r.archived_at = 0)
-			OR EXISTS (SELECT 1 FROM textbook_courses tc
-				JOIN textbooks t ON t.id = tc.textbook_id
-				WHERE tc.course_code = c.code AND t.pdf_key <> '' AND t.archived_at = 0)
-		)
+		WHERE c.code <> ''
 		ORDER BY c.name ASC, c.code ASC`)
 	if err != nil {
 		return nil, err

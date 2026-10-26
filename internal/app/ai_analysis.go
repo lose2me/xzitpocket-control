@@ -33,6 +33,7 @@ const (
 type AITaskView struct {
 	ID             string `json:"id"`
 	ResourceID     string `json:"resource_id"`
+	Mode           string `json:"mode"`
 	ResourceName   string `json:"resource_name"`
 	CourseCode     string `json:"course_code"`
 	Status         string `json:"status"`
@@ -84,7 +85,7 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool, pagesPerChunk int) A
 		elapsedSeconds = int64(end.Sub(row.StartedAt).Seconds())
 	}
 	view := AITaskView{
-		ID: row.ID, ResourceID: row.ResourceID, ResourceName: row.ResourceName,
+		ID: row.ID, ResourceID: row.ResourceID, Mode: row.Mode, ResourceName: row.ResourceName,
 		CourseCode: row.CourseCode, Status: row.Status, Solvable: row.Solvable,
 		PrecheckNote: row.PrecheckNote, Attempt: row.Attempt, NextPage: row.NextPage,
 		TotalPages: row.TotalPages, Progress: progress, Error: row.Error, Model: row.Model,
@@ -257,9 +258,9 @@ func (a *App) scanAIResources(ctx context.Context) {
 	}
 }
 
-// EnqueueAIAnalyses creates a new run for each resource. Earlier runs are kept
-// as history.
-func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor string) ([]AITaskView, []map[string]string, error) {
+// EnqueueAIAnalyses creates a new run for each resource and mode. Earlier
+// runs are kept as history.
+func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes []string, actor string) ([]AITaskView, []map[string]string, error) {
 	if a.ai().model == nil {
 		return nil, nil, Err("ai_disabled", "AI 解析未启用", 503)
 	}
@@ -269,7 +270,11 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 	if len(resourceIDs) > 100 {
 		return nil, nil, Err("invalid_request", "一次最多提交 100 份试卷", 400)
 	}
-	created := make([]AITaskView, 0, len(resourceIDs))
+	requested, err := normalizeAIModes(modes)
+	if err != nil {
+		return nil, nil, err
+	}
+	created := make([]AITaskView, 0, len(resourceIDs)*len(requested))
 	failed := make([]map[string]string, 0)
 	seen := make(map[string]bool)
 	for _, rawID := range resourceIDs {
@@ -278,50 +283,82 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor
 			continue
 		}
 		seen[id] = true
-		// An explicit re-parse restarts the paper: stop any queued/running
-		// attempt (it stays in history as cancelled) and start a fresh run.
-		if active, ok, err := a.Store.GetActiveAITaskByResource(ctx, id); err != nil {
-			return nil, nil, err
-		} else if ok && (active.Status == "queued" || active.Status == "running") {
-			if _, err := a.CancelAITask(ctx, active.ID, actor); err != nil {
-				var apiErr *APIError
-				if !errors.As(err, &apiErr) || apiErr.Code != "ai_inactive" {
-					return nil, nil, err
+		for _, mode := range requested {
+			// An explicit re-parse restarts the paper in this mode: stop any
+			// queued/running attempt (it stays in history as cancelled).
+			if active, ok, err := a.Store.GetActiveAITaskByResource(ctx, id, mode); err != nil {
+				return nil, nil, err
+			} else if ok && (active.Status == "queued" || active.Status == "running") {
+				if _, err := a.CancelAITask(ctx, active.ID, actor); err != nil {
+					var apiErr *APIError
+					if !errors.As(err, &apiErr) || apiErr.Code != "ai_inactive" {
+						return nil, nil, err
+					}
 				}
 			}
-		}
-		task, inserted, err := a.Store.CreateAITask(ctx, id, actor)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				failed = append(failed, map[string]string{"resource_id": id, "reason": "试卷不存在、已归档或不是 PDF"})
+			task, inserted, err := a.Store.CreateAITask(ctx, id, mode, actor)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					failed = append(failed, map[string]string{"resource_id": id, "mode": mode, "reason": "试卷不存在、已归档或不是 PDF"})
+					continue
+				}
+				return nil, nil, err
+			}
+			if !inserted {
+				reason := "该试卷已有未完成的解析任务"
+				switch task.Status {
+				case "running":
+					reason = "该试卷正在解析中"
+				case "queued":
+					reason = "该试卷已在解析队列中"
+				case "paused":
+					reason = "该试卷有暂停中的解析任务，请先继续解析"
+				}
+				failed = append(failed, map[string]string{"resource_id": id, "mode": mode, "reason": aiModeLabel(mode) + "：" + reason})
 				continue
 			}
-			return nil, nil, err
-		}
-		if !inserted {
-			reason := "该试卷已有未完成的解析任务"
-			switch task.Status {
-			case "running":
-				reason = "该试卷正在解析中"
-			case "queued":
-				reason = "该试卷已在解析队列中"
-			case "paused":
-				reason = "该试卷有暂停中的解析任务，请先继续解析"
+			row, err := a.Store.GetAITaskRow(ctx, task.ID)
+			if err != nil {
+				return nil, nil, err
 			}
-			failed = append(failed, map[string]string{"resource_id": id, "reason": reason})
-			continue
+			created = append(created, aiTaskView(row, false, a.cfg().AIPagesPerChunk))
 		}
-		row, err := a.Store.GetAITaskRow(ctx, task.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		created = append(created, aiTaskView(row, false, a.cfg().AIPagesPerChunk))
 	}
 	if len(created) > 0 {
 		a.wakeAIWorker()
 		_ = a.Store.AddAudit(ctx, actor, "ai_analysis_enqueue", "resource_ai_task", "", fmt.Sprintf(`{"count":%d}`, len(created)), time.Now().UTC())
 	}
 	return created, failed, nil
+}
+
+// aiAnalysisModes are the two report depths generated for every paper.
+var aiAnalysisModes = []string{"basic", "advanced"}
+
+// normalizeAIModes returns the requested modes, defaulting to both pipelines.
+func normalizeAIModes(modes []string) ([]string, error) {
+	if len(modes) == 0 {
+		return append([]string(nil), aiAnalysisModes...), nil
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(modes))
+	for _, raw := range modes {
+		mode := strings.ToLower(strings.TrimSpace(raw))
+		if mode != "basic" && mode != "advanced" {
+			return nil, Err("invalid_request", "解析类型必须是 basic 或 advanced", 400)
+		}
+		if !seen[mode] {
+			seen[mode] = true
+			out = append(out, mode)
+		}
+	}
+	return out, nil
+}
+
+func aiModeLabel(mode string) string {
+	if mode == "advanced" {
+		return "高级解析"
+	}
+	return "基础解析"
 }
 
 // wakeAIWorker asks the single worker loop to check the queue immediately
@@ -402,7 +439,7 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 		}
 		return aiTaskView(row, false, a.cfg().AIPagesPerChunk), nil
 	}
-	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, actor)
+	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, task.Mode, actor)
 	if err != nil {
 		return AITaskView{}, err
 	}
@@ -628,14 +665,18 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 			return
 		}
 		chunkEnd := minInt(nextPage+a.cfg().AIPagesPerChunk-1, paper.TotalPages)
-		instruction := fmt.Sprintf(chunkInstruction(a.cfg()), paper.Title, nextPage, chunkEnd, paper.TotalPages)
+		instruction := fmt.Sprintf(chunkInstruction(a.cfg(), task.Mode), paper.Title, nextPage, chunkEnd, paper.TotalPages)
 		parts, plain, err := ai.BuildContent(paper, nextPage, chunkEnd, instruction)
 		if err != nil {
 			finish("failed", "构建请求失败："+err.Error())
 			return
 		}
 		callCtx, callCancel, windowEnd := a.aiCallContext(ctx)
-		content, promptCalls, err := model.Analyze(callCtx, history, parts)
+		system := a.cfg().AIAnalysisSystem
+		if task.Mode == "advanced" {
+			system = a.cfg().AIAdvancedAnalysisSystem
+		}
+		content, promptCalls, err := model.AnalyzeWithSystem(callCtx, system, history, parts)
 		callCancel()
 		a.saveAIPrompts(task.ID, &task.PromptsJSON, promptCalls)
 		if err != nil {
@@ -695,7 +736,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 		return
 	}
 	renderCtx, renderCancel := context.WithTimeout(ctx, 5*time.Minute)
-	document := "# " + resource.Name + " · AI 解析\n\n" + task.Markdown
+	document := "# " + resource.Name + " · AI 解析（" + aiModeLabel(task.Mode) + "）\n\n" + task.Markdown
 	pdf, err := ai.RenderMarkdownPDF(renderCtx, document, a.cfg().AIMathJaxDir)
 	renderCancel()
 	if err != nil {
@@ -740,7 +781,7 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 func (a *App) cleanupOlderAITasks(task sqlite.AITask) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	keys, err := a.Store.DeleteOlderAITasks(ctx, task.ResourceID, task.ID)
+	keys, err := a.Store.DeleteOlderAITasks(ctx, task.ResourceID, task.ID, task.Mode)
 	if err != nil {
 		a.Logger.Warn("delete older AI tasks", "error", err, "task", task.ID)
 		return
@@ -762,7 +803,13 @@ func (a *App) cleanupOlderAITasks(task sqlite.AITask) {
 
 // chunkInstruction returns the configured page-range instruction, falling back
 // to the built-in template when the setting is blank.
-func chunkInstruction(cfg config.Config) string {
+func chunkInstruction(cfg config.Config, mode string) string {
+	if mode == "advanced" {
+		if strings.TrimSpace(cfg.AIAdvancedChunkInstruction) == "" {
+			return ai.DefaultAdvancedChunkInstruction
+		}
+		return cfg.AIAdvancedChunkInstruction
+	}
 	if strings.TrimSpace(cfg.AIChunkInstruction) == "" {
 		return ai.DefaultChunkInstruction
 	}

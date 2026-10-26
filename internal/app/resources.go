@@ -42,6 +42,7 @@ type ResourceURLView struct {
 // ResourceAIView is the app-facing AI analysis of one paper.
 type ResourceAIView struct {
 	Available    bool   `json:"available"`
+	Mode         string `json:"mode"`
 	Status       string `json:"status,omitempty"`
 	Markdown     string `json:"markdown,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
@@ -294,7 +295,10 @@ func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (Re
 // resource, including its markdown and a temporary URL for the rendered PDF.
 // A resource that has been queued but has no finished run reports its status
 // so the app can show "解析中".
-func (a *App) ResourceAIForUser(ctx context.Context, id string, ttl time.Duration) (ResourceAIView, error) {
+func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.Duration) (ResourceAIView, error) {
+	if mode != "advanced" {
+		mode = "basic"
+	}
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
 		return ResourceAIView{}, err
@@ -306,22 +310,29 @@ func (a *App) ResourceAIForUser(ctx context.Context, id string, ttl time.Duratio
 	if err != nil {
 		return ResourceAIView{}, err
 	}
-	if len(tasks) == 0 {
-		return ResourceAIView{}, nil
+	filtered := make([]sqlite.AITask, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Mode == mode {
+			filtered = append(filtered, task)
+		}
 	}
-	latest := tasks[len(tasks)-1]
+	if len(filtered) == 0 {
+		return ResourceAIView{Mode: mode}, nil
+	}
+	latest := filtered[len(filtered)-1]
 	var succeeded *sqlite.AITask
-	for i := len(tasks) - 1; i >= 0; i-- {
-		if tasks[i].Status == "succeeded" {
-			succeeded = &tasks[i]
+	for i := len(filtered) - 1; i >= 0; i-- {
+		if filtered[i].Status == "succeeded" {
+			succeeded = &filtered[i]
 			break
 		}
 	}
 	if succeeded == nil {
-		return ResourceAIView{Status: latest.Status, Error: latest.Error}, nil
+		return ResourceAIView{Mode: mode, Status: latest.Status, Error: latest.Error}, nil
 	}
 	view := ResourceAIView{
 		Available:    true,
+		Mode:         mode,
 		Status:       succeeded.Status,
 		Markdown:     succeeded.Markdown,
 		UpdatedAt:    succeeded.UpdatedAt.Format(time.RFC3339),

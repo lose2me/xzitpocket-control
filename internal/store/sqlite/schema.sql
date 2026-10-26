@@ -375,6 +375,7 @@ CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissio
 CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     id TEXT PRIMARY KEY,
     resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
     solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
     precheck_note TEXT NOT NULL DEFAULT '',
@@ -396,5 +397,5 @@ CREATE TABLE IF NOT EXISTS resource_ai_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_resource_ai_tasks_status ON resource_ai_tasks(status, created_at);
--- At most one unfinished run per paper; completed/failed rows are history.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_ai_tasks_active ON resource_ai_tasks(resource_id) WHERE status IN ('queued', 'running', 'paused');
+-- At most one unfinished run per paper per analysis mode; older rows are history.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_ai_tasks_mode_active ON resource_ai_tasks(resource_id, mode) WHERE status IN ('queued', 'running', 'paused');
