@@ -2145,7 +2145,7 @@ import { template } from './template.js';
         notify('学校校历已保存');
       });
       const selectSchoolCalendarScope = (scope) => {
-        schoolCalendarScope.value = scope;
+        schoolCalendarScope.value = scope || '';
         refreshSchoolCalendarJson();
       };
       const saveSchoolCalendarExceptions = () => call(async () => {
