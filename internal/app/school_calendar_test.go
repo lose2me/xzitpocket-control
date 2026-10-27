@@ -2,11 +2,103 @@ package app
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"testing"
 
 	"xzitpocket-control/internal/store/sqlite"
 )
+
+func TestCollegeCalendarExceptionsReplaceGlobal(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	global, err := a.GetSchoolCalendar(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first, second string
+	for _, day := range global.Days {
+		if day.Name == "" {
+			if first == "" {
+				first = day.Date
+			} else if second == "" {
+				second = day.Date
+				break
+			}
+		}
+	}
+
+	if _, err := a.SaveSchoolCalendarExceptions(ctx, SchoolCalendarExceptionsInput{
+		College: "数学与统计学院",
+		Exceptions: []SchoolCalendarDay{
+			{Date: first, Name: "院级活动"},
+		},
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	college, err := a.GetSchoolCalendarForCollege(ctx, "数学与统计学院")
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := ""
+	for _, day := range college.Days {
+		if day.Date == first {
+			named = day.Name
+		}
+		if day.Date == second && day.Name != "" {
+			t.Fatalf("college calendar kept a global exception: %#v", day)
+		}
+	}
+	if named != "院级活动" {
+		t.Fatalf("college exception not applied: %q", named)
+	}
+
+	// Another college and the anonymous client keep the global calendar.
+	other, err := a.GetSchoolCalendarForCollege(ctx, "机电工程学院")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, day := range other.Days {
+		if day.Date == first && day.Name == "院级活动" {
+			t.Fatal("global calendar leaked the college override")
+		}
+	}
+
+	// Out-of-range exception dates are rejected.
+	if _, err := a.SaveSchoolCalendarExceptions(ctx, SchoolCalendarExceptionsInput{
+		College:    "数学与统计学院",
+		Exceptions: []SchoolCalendarDay{{Date: "1999-01-01", Name: "越界"}},
+	}, "admin"); err == nil {
+		t.Fatal("an out-of-range exception should be rejected")
+	}
+
+	admin, err := a.GetSchoolCalendarAdmin(ctx)
+	if err != nil || len(admin.Colleges) != 1 || admin.Colleges[0].College != "数学与统计学院" {
+		t.Fatalf("admin view = %#v err=%v", admin, err)
+	}
+
+	if _, err := a.DeleteSchoolCalendarExceptions(ctx, "数学与统计学院", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	back, err := a.GetSchoolCalendarForCollege(ctx, "数学与统计学院")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, day := range back.Days {
+		if day.Date == first && day.Name == "院级活动" {
+			t.Fatal("override was not cleared")
+		}
+	}
+}
 
 func TestGetSchoolCalendarReinitializesCorruptConfig(t *testing.T) {
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))

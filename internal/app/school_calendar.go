@@ -231,6 +231,201 @@ func (a *App) GetSchoolCalendar(ctx context.Context) (SchoolCalendarView, error)
 	return schoolCalendarView(config, days, slots), nil
 }
 
+// SchoolCalendarCollegeView is one college's exception list in the console.
+type SchoolCalendarCollegeView struct {
+	College    string              `json:"college"`
+	Exceptions []SchoolCalendarDay `json:"exceptions"`
+	UpdatedAt  string              `json:"updatedAt"`
+}
+
+// SchoolCalendarAdminView adds the per-college overrides to the global view.
+type SchoolCalendarAdminView struct {
+	SchoolCalendarView
+	Colleges       []SchoolCalendarCollegeView `json:"colleges"`
+	CollegeOptions []string                    `json:"collegeOptions"`
+}
+
+// SchoolCalendarExceptionsInput is the console payload for one college (or the
+// global calendar when College is empty).
+type SchoolCalendarExceptionsInput struct {
+	College    string              `json:"college"`
+	Exceptions []SchoolCalendarDay `json:"exceptions"`
+}
+
+// calendarExceptions keeps only the days that carry a name or an adjustment.
+func calendarExceptions(days []SchoolCalendarDay) []SchoolCalendarDay {
+	out := make([]SchoolCalendarDay, 0, len(days))
+	for _, day := range days {
+		if day.Name != "" || day.Adjustment != "" {
+			out = append(out, day)
+		}
+	}
+	return out
+}
+
+// GetSchoolCalendarForCollege returns the calendar for one college: its own
+// exceptions when configured, otherwise the global calendar.
+func (a *App) GetSchoolCalendarForCollege(ctx context.Context, college string) (SchoolCalendarView, error) {
+	base, err := a.GetSchoolCalendar(ctx)
+	if err != nil {
+		return SchoolCalendarView{}, err
+	}
+	college = strings.TrimSpace(college)
+	if college == "" {
+		return base, nil
+	}
+	override, ok, err := a.Store.GetSchoolCalendarCollege(ctx, college)
+	if err != nil || !ok {
+		return base, nil
+	}
+	days, decodeErr := decodeStoredSchoolCalendar(override.DaysJSON)
+	if decodeErr != nil || len(days) == 0 {
+		return base, nil
+	}
+	base.Days = days
+	return base, nil
+}
+
+// GetSchoolCalendarAdmin returns the global calendar plus every college
+// override and the college names the console can pick from.
+func (a *App) GetSchoolCalendarAdmin(ctx context.Context) (SchoolCalendarAdminView, error) {
+	base, err := a.GetSchoolCalendar(ctx)
+	if err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	overrides, err := a.Store.ListSchoolCalendarColleges(ctx)
+	if err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	views := make([]SchoolCalendarCollegeView, 0, len(overrides))
+	for _, item := range overrides {
+		days, decodeErr := decodeStoredSchoolCalendar(item.DaysJSON)
+		if decodeErr != nil {
+			continue
+		}
+		views = append(views, SchoolCalendarCollegeView{
+			College: item.College, Exceptions: calendarExceptions(days), UpdatedAt: configVersion(item.UpdatedAt),
+		})
+	}
+	options, err := a.Store.ListUserColleges(ctx)
+	if err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	return SchoolCalendarAdminView{
+		SchoolCalendarView: base, Colleges: views, CollegeOptions: options,
+	}, nil
+}
+
+// SaveSchoolCalendarExceptions stores the exception list of one college, or of
+// the global calendar when College is empty. The full day range is rebuilt from
+// the global calendar so only names and course adjustments change.
+func (a *App) SaveSchoolCalendarExceptions(ctx context.Context, in SchoolCalendarExceptionsInput, actor string) (SchoolCalendarAdminView, error) {
+	college := strings.TrimSpace(in.College)
+	if len(college) > 128 || strings.ContainsAny(college, "\r\n\x00") {
+		return SchoolCalendarAdminView{}, Err("invalid_college", "学院名称无效", http.StatusBadRequest)
+	}
+	if len(in.Exceptions) > 1000 {
+		return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "例外日期数量无效", http.StatusBadRequest)
+	}
+	base, err := a.GetSchoolCalendar(ctx)
+	if err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	days := make([]SchoolCalendarDay, len(base.Days))
+	copy(days, base.Days)
+	for i := range days {
+		days[i].Name, days[i].Adjustment = "", ""
+	}
+	index := make(map[string]int, len(days))
+	for i, day := range days {
+		index[day.Date] = i
+	}
+	seen := make(map[string]bool, len(in.Exceptions))
+	for _, exception := range in.Exceptions {
+		_, normalizedDate, dateErr := parseSchoolCalendarDate(exception.Date)
+		if dateErr != nil {
+			return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "例外日期格式无效", http.StatusBadRequest)
+		}
+		position, ok := index[normalizedDate]
+		if !ok {
+			return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "例外日期必须位于当前校历范围内", http.StatusBadRequest)
+		}
+		if seen[normalizedDate] {
+			return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "例外日期不能重复", http.StatusBadRequest)
+		}
+		seen[normalizedDate] = true
+		name := strings.TrimSpace(exception.Name)
+		if len(name) > 64 || strings.ContainsAny(name, "\r\n\x00") {
+			return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "校历名称无效", http.StatusBadRequest)
+		}
+		adjustment := strings.TrimSpace(exception.Adjustment)
+		if adjustment != "" && adjustment != "/" {
+			if !schoolCalendarAdjustmentPattern.MatchString(adjustment) {
+				return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "课程调整日期格式无效", http.StatusBadRequest)
+			}
+			if _, parseErr := time.Parse("20060102", adjustment); parseErr != nil {
+				return SchoolCalendarAdminView{}, Err("invalid_school_calendar", "课程调整日期无效", http.StatusBadRequest)
+			}
+		}
+		days[position].Name, days[position].Adjustment = name, adjustment
+	}
+	encoded, err := json.Marshal(days)
+	if err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	now := time.Now().UTC()
+	if college == "" {
+		encodedSlots, slots, slotErr := validateSchoolCalendarSlots(base.Slots)
+		if slotErr != nil {
+			return SchoolCalendarAdminView{}, slotErr
+		}
+		if _, err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{
+			DaysJSON: string(encoded), SlotsJSON: encodedSlots, UpdatedAt: now,
+		}); err != nil {
+			return SchoolCalendarAdminView{}, err
+		}
+		_ = a.Store.AddAudit(ctx, actor, "school_calendar_exceptions", "school_calendar", "global",
+			controlcrypto.JSON(map[string]any{"exceptions": len(in.Exceptions), "slots": len(slots)}), now)
+	} else {
+		if err := a.Store.SaveSchoolCalendarCollege(ctx, college, string(encoded), now); err != nil {
+			return SchoolCalendarAdminView{}, err
+		}
+		a.touchSchoolCalendarVersion(ctx, now)
+		_ = a.Store.AddAudit(ctx, actor, "school_calendar_exceptions", "school_calendar", college,
+			controlcrypto.JSON(map[string]any{"exceptions": len(in.Exceptions)}), now)
+	}
+	return a.GetSchoolCalendarAdmin(ctx)
+}
+
+// touchSchoolCalendarVersion bumps the global calendar version so clients
+// notice a change in a college override and refetch their scoped calendar.
+func (a *App) touchSchoolCalendarVersion(ctx context.Context, now time.Time) {
+	config, err := a.Store.GetSchoolCalendarConfig(ctx)
+	if err != nil {
+		return
+	}
+	if _, err := a.Store.UpdateSchoolCalendarConfig(ctx, sqlite.SchoolCalendarConfig{
+		DaysJSON: config.DaysJSON, SlotsJSON: config.SlotsJSON, UpdatedAt: now,
+	}); err != nil {
+		a.Logger.Warn("touch school calendar version failed", "error", err)
+	}
+}
+
+// DeleteSchoolCalendarExceptions removes a college override so it falls back to
+// the global calendar.
+func (a *App) DeleteSchoolCalendarExceptions(ctx context.Context, college, actor string) (SchoolCalendarAdminView, error) {
+	college = strings.TrimSpace(college)
+	if college == "" {
+		return SchoolCalendarAdminView{}, Err("invalid_college", "学院名称无效", http.StatusBadRequest)
+	}
+	if err := a.Store.DeleteSchoolCalendarCollege(ctx, college); err != nil {
+		return SchoolCalendarAdminView{}, err
+	}
+	a.touchSchoolCalendarVersion(ctx, time.Now().UTC())
+	_ = a.Store.AddAudit(ctx, actor, "school_calendar_exception_clear", "school_calendar", college, "{}", time.Now().UTC())
+	return a.GetSchoolCalendarAdmin(ctx)
+}
+
 func (a *App) resetSchoolCalendar(ctx context.Context) (SchoolCalendarView, error) {
 	encoded, days, err := validateSchoolCalendarInput(SchoolCalendarInput{Days: defaultSchoolCalendarDays()})
 	if err != nil {

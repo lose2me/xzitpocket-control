@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Server) schoolCalendar(w http.ResponseWriter, r *http.Request) {
-	out, err := s.App.GetSchoolCalendar(r.Context())
+	out, err := s.App.GetSchoolCalendarForCollege(r.Context(), r.URL.Query().Get("college"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -19,7 +19,7 @@ func (s *Server) adminSchoolCalendar(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authAdmin(w, r); !ok {
 		return
 	}
-	out, err := s.App.GetSchoolCalendar(r.Context())
+	out, err := s.App.GetSchoolCalendarAdmin(r.Context())
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -38,6 +38,37 @@ func (s *Server) adminSchoolCalendarUpdate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	out, err := s.App.UpdateSchoolCalendar(r.Context(), in, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminSchoolCalendarExceptions(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	var in app.SchoolCalendarExceptionsInput
+	if err := decodeJSON(r, &in, 512<<10); err != nil {
+		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	out, err := s.App.SaveSchoolCalendarExceptions(r.Context(), in, p.Admin.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) adminSchoolCalendarExceptionsClear(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	out, err := s.App.DeleteSchoolCalendarExceptions(r.Context(), r.URL.Query().Get("college"), p.Admin.ID)
 	if err != nil {
 		writeError(w, r, err)
 		return
