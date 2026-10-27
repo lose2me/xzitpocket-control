@@ -873,6 +873,13 @@ import { template } from './template.js';
           [...names].sort().map(name => ({ title: name, value: name, hasConfig: configured.has(name) })),
         );
       });
+      // 已有院级配置的学院在下拉里显示成 info 蓝色并带勾选图标。
+      const schoolCalendarScopeItemProps = (item) => {
+        const raw = item && item.raw ? item.raw : item || {};
+        return raw.hasConfig
+          ? { prependIcon: 'mdi-check-circle-outline', class: 'text-info font-weight-medium' }
+          : {};
+      };
       const schoolCalendarExceptionsOf = (scope) => {
         const days = scope
           ? (schoolCalendarColleges.value.find(item => item.college === scope) || {}).exceptions || []
@@ -2343,7 +2350,7 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, aiPromptSettingFields, aiPromptSettingTab, aiPromptSettingField, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarTableKey, schoolCalendarRebuildDialog, schoolCalendarColleges, schoolCalendarCollegeOptions, schoolCalendarScope, schoolCalendarScopeItems, schoolCalendarExceptionsJson, selectSchoolCalendarScope, saveSchoolCalendarExceptions, clearSchoolCalendarCollege,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, aiPromptSettingFields, aiPromptSettingTab, aiPromptSettingField, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarTableKey, schoolCalendarRebuildDialog, schoolCalendarColleges, schoolCalendarCollegeOptions, schoolCalendarScope, schoolCalendarScopeItems, schoolCalendarScopeItemProps, schoolCalendarExceptionsJson, selectSchoolCalendarScope, saveSchoolCalendarExceptions, clearSchoolCalendarCollege,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
         textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, rejectSubmission, submissionFilesDialog, submissionFilesKind, submissionFilesItem, submissionFileRows, openSubmissionFiles, downloadSubmissionFile, deleteSubmissionFile,
