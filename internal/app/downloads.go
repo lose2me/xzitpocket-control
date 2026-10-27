@@ -2,13 +2,17 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
-// OpenTextbookDownload counts the download and returns the stored file stream
-// plus the attachment filename. Callers must close resp.Body.
+// OpenTextbookDownload streams a textbook for the console. Admin downloads do
+// not count toward the popularity numbers. Callers must close resp.Body.
 func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Response, string, error) {
 	item, err := a.requireTextbook(ctx, id)
 	if err != nil {
@@ -21,11 +25,11 @@ func (a *App) OpenTextbookDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordTextbookDownload(ctx, item.ID, true)
 	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
-// OpenResourceDownload counts the download and returns the stored file stream.
+// OpenResourceDownload streams a paper for the console. Admin downloads do not
+// count toward the popularity numbers.
 func (a *App) OpenResourceDownload(ctx context.Context, id string) (*http.Response, string, error) {
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
@@ -38,13 +42,13 @@ func (a *App) OpenResourceDownload(ctx context.Context, id string) (*http.Respon
 	if err != nil {
 		return nil, "", err
 	}
-	a.RecordResourceDownload(ctx, item.ID, true)
 	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
 }
 
-// OpenSubmissionDownload streams a pending upload for review. It is not
-// counted as a textbook/exam download because the submission is not published.
-func (a *App) OpenSubmissionDownload(ctx context.Context, id, kind string) (*http.Response, string, error) {
+// OpenSubmissionDownload streams one file of a pending upload for review. It
+// is not counted as a textbook/exam download because the submission is not
+// published. fileID identifies the file inside the submission.
+func (a *App) OpenSubmissionDownload(ctx context.Context, id, kind, fileID string) (*http.Response, string, error) {
 	kind, ok := normalizeSubmissionKind(kind)
 	if !ok {
 		return nil, "", Err("invalid_kind", "资料类型无效", 400)
@@ -53,14 +57,25 @@ func (a *App) OpenSubmissionDownload(ctx context.Context, id, kind string) (*htt
 	if err != nil {
 		return nil, "", err
 	}
-	if item.PdfKey == "" {
+	if len(item.Files) == 0 {
 		return nil, "", Err("resource_missing", "该提交没有文件", 404)
 	}
-	resp, err := a.openStoredFile(ctx, item.PdfKey)
+	file := item.Files[0]
+	if strings.TrimSpace(fileID) != "" {
+		found, err := a.Store.GetSubmissionFile(ctx, strings.TrimSpace(fileID))
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && found.SubmissionID != item.ID) {
+			return nil, "", ErrNotFound
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		file = found
+	}
+	resp, err := a.openStoredFile(ctx, file.ObjectKey)
 	if err != nil {
 		return nil, "", err
 	}
-	return resp, downloadFileName(item.Name, storedFileFormat(item.PdfKey)), nil
+	return resp, downloadFileName(file.Name, storedFileFormat(file.ObjectKey)), nil
 }
 
 func (a *App) openStoredFile(ctx context.Context, key string) (*http.Response, error) {
@@ -146,15 +161,21 @@ func (a *App) GetUploadStats(ctx context.Context, p SessionPrincipal) (UploadSta
 	return view, nil
 }
 
-// RecordTextbookDownload is best-effort: a failed counter update must not
-// break the download. Every counted download, app or admin, also counts toward
-// the contributor's profile.
-func (a *App) RecordTextbookDownload(ctx context.Context, id string, includeContributor bool) {
-	if err := a.Store.IncrementTextbookDownloads(ctx, id); err != nil {
-		a.Logger.Warn("record textbook download failed", "error", err, "textbook", id)
+// RecordTextbookDownload counts one app download per user and day, so retries
+// and repeated taps do not inflate the numbers. Admin downloads never come
+// through here. Best-effort: a failed counter update must not break the
+// download.
+func (a *App) RecordTextbookDownload(ctx context.Context, id, userID string) {
+	counted, err := a.Store.MarkDownloadOnce(ctx, "textbook", id, userID, time.Now().UTC())
+	if err != nil {
+		a.Logger.Warn("mark textbook download failed", "error", err, "textbook", id)
 		return
 	}
-	if !includeContributor {
+	if !counted {
+		return
+	}
+	if err := a.Store.IncrementTextbookDownloads(ctx, id); err != nil {
+		a.Logger.Warn("record textbook download failed", "error", err, "textbook", id)
 		return
 	}
 	item, err := a.Store.GetTextbook(ctx, id)
@@ -166,15 +187,19 @@ func (a *App) RecordTextbookDownload(ctx context.Context, id string, includeCont
 	}
 }
 
-// RecordResourceDownload is best-effort: a failed counter update must not
-// break the download. Every counted download, app or admin, also counts toward
-// the contributor's profile.
-func (a *App) RecordResourceDownload(ctx context.Context, id string, includeContributor bool) {
-	if err := a.Store.IncrementResourceDownloads(ctx, id); err != nil {
-		a.Logger.Warn("record resource download failed", "error", err, "resource", id)
+// RecordResourceDownload counts one app download per user and day; see
+// RecordTextbookDownload.
+func (a *App) RecordResourceDownload(ctx context.Context, id, userID string) {
+	counted, err := a.Store.MarkDownloadOnce(ctx, "resource", id, userID, time.Now().UTC())
+	if err != nil {
+		a.Logger.Warn("mark resource download failed", "error", err, "resource", id)
 		return
 	}
-	if !includeContributor {
+	if !counted {
+		return
+	}
+	if err := a.Store.IncrementResourceDownloads(ctx, id); err != nil {
+		a.Logger.Warn("record resource download failed", "error", err, "resource", id)
 		return
 	}
 	item, err := a.Store.GetResource(ctx, id)

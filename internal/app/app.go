@@ -80,6 +80,14 @@ func (a *App) cfg() config.Config {
 	return a.Cfg
 }
 
+// SetConfigForTesting swaps the configuration snapshot. Tests use it to exercise
+// console switches without going through the settings API.
+func (a *App) SetConfigForTesting(cfg config.Config) {
+	a.cfgMu.Lock()
+	a.Cfg = cfg
+	a.cfgMu.Unlock()
+}
+
 // aiRuntime is the AI worker's view of the runtime settings.
 type aiRuntime struct {
 	model    *ai.Model

@@ -239,3 +239,49 @@ func TestResourceAIVisibility(t *testing.T) {
 		t.Fatalf("manual ai = %#v, err = %v", manual, err)
 	}
 }
+
+func TestResourceAIForUserCombinedReports(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "合并解析.pdf"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/combined.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := "succeeded"
+	basicMarkdown := "# 精简版"
+	moreMarkdown := "# 小学生版"
+	basicKey := "ai/papers/" + resource.ID + "/" + task.ID + ".pdf"
+	moreKey := "ai/papers/" + resource.ID + "/" + task.ID + "-more.pdf"
+	basicSize := int64(100)
+	moreSize := int64(200)
+	totalPages := 5
+	solvable := 1
+	if err := store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
+		Status: &status, Markdown: &basicMarkdown, OutputKey: &basicKey, OutputSize: &basicSize,
+		MoreMarkdown: &moreMarkdown, MoreOutputKey: &moreKey, MoreOutputSize: &moreSize,
+		TotalPages: &totalPages, Solvable: &solvable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	basic, err := a.ResourceAIForUser(ctx, resource.ID, "basic", 0)
+	if err != nil || !basic.Available || basic.Markdown != basicMarkdown || basic.OutputSize != basicSize {
+		t.Fatalf("basic = %#v, err = %v", basic, err)
+	}
+	more, err := a.ResourceAIForUser(ctx, resource.ID, "more", 0)
+	if err != nil || !more.Available || more.Markdown != moreMarkdown || more.OutputSize != moreSize {
+		t.Fatalf("more = %#v, err = %v", more, err)
+	}
+	legacyName, err := a.ResourceAIForUser(ctx, resource.ID, "advanced", 0)
+	if err != nil || !legacyName.Available || legacyName.Markdown != moreMarkdown {
+		t.Fatalf("advanced alias = %#v, err = %v", legacyName, err)
+	}
+}

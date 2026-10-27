@@ -14,7 +14,7 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
-var questionBankIDPattern = regexp.MustCompile(`^QB-[0-9]{3,}$`)
+var questionBankIDPattern = regexp.MustCompile(`^QB-[A-Za-z0-9]{3,}$`)
 
 // QuestionBankInput is used by the administrator API. The bank ID is only
 // used when updating an existing bank; create requests receive a server ID.
@@ -132,7 +132,7 @@ func validateQuestionBankInput(in QuestionBankInput, requireID bool) (sqlite.Que
 	if status == "" {
 		status = "active"
 	}
-	if status != "active" && status != "draft" && status != "disabled" {
+	if status != "active" && status != "disabled" {
 		return sqlite.QuestionBank{}, Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
 	}
 	if len(in.Questions) > 1000 {
@@ -282,7 +282,7 @@ func (a *App) ListQuestionBanks(ctx context.Context, limit, offset int, status s
 		offset = 0
 	}
 	status = strings.TrimSpace(status)
-	if status != "" && status != "active" && status != "draft" && status != "disabled" {
+	if status != "" && status != "active" && status != "disabled" {
 		return nil, 0, Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
 	}
 	items, err := a.Store.ListQuestionBanks(ctx, limit, offset, status, archived, sort, order)
@@ -373,7 +373,7 @@ func (a *App) UpdateQuestionBank(ctx context.Context, id string, in QuestionBank
 func (a *App) SetQuestionBankStatus(ctx context.Context, id, status, actor string) error {
 	id = strings.TrimSpace(id)
 	status = strings.TrimSpace(status)
-	if status != "active" && status != "draft" && status != "disabled" {
+	if status != "active" && status != "disabled" {
 		return Err("invalid_question_bank_status", "题库状态无效", http.StatusBadRequest)
 	}
 	if err := a.Store.SetQuestionBankStatus(ctx, id, status, time.Now().UTC()); err != nil {

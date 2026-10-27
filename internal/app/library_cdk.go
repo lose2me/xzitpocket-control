@@ -255,7 +255,7 @@ func (a *App) ListQuestionBanksForUser(ctx context.Context, limit, offset int, u
 	return result, total, nil
 }
 
-// QuestionBankStatusView identifies a disabled or draft bank without exposing
+// QuestionBankStatusView identifies a disabled bank without exposing
 // its content. Clients mark these as hidden and keep local collections until the
 // bank is re-enabled or actually deleted.
 type QuestionBankStatusView struct {

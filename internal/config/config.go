@@ -49,13 +49,21 @@ type Config struct {
 
 	// AIAnalysis configures the DeepSeek-compatible vision model used to
 	// analyse exam PDFs. The API key is never logged.
+	// Ingest switches. Every report a client sends can be turned off from the
+	// console without shipping a new app build. The zero value accepts, so a
+	// config built by hand keeps ingesting.
+	IngestCourses     IngestSwitch
+	IngestTextbooks   IngestSwitch
+	IngestSubmissions IngestSwitch
+	IngestUserInfo    IngestSwitch
+	IngestEvents      IngestSwitch
+
 	AIAnalysisEnabled bool
 	AIAPIKey          string
 	AIBaseURL         string
 	AIModel           string
 	AIWindows         string
 	AITimezone        string
-	AIPagesPerChunk   int
 	AIRequestTimeout  time.Duration
 	AIMaxAttempts     int
 	AIImageQuality    int
@@ -65,13 +73,10 @@ type Config struct {
 
 	// Prompts are editable runtime settings; empty values fall back to the
 	// built-in templates in the ai package.
-	AIPrecheckSystem           string
-	AIAnalysisSystem           string
-	AIAdvancedAnalysisSystem   string
-	AIPrecheckInstruction      string
-	AIChunkInstruction         string
-	AIAdvancedChunkInstruction string
-	AIContinuePrompt           string
+	AIPrecheckSystem      string
+	AIAnalysisSystem      string
+	AIPrecheckInstruction string
+	AIAnalysisInstruction string
 }
 
 // AdminPages are the console pages that can be granted read/write access.
@@ -99,53 +104,51 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Path:                       configPath,
-		Addr:                       configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
-		DBPath:                     dbPath,
-		PublicBaseURL:              strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
-		WebDir:                     configValue(values, "CONTROL_WEB_DIR", ""),
-		AdminKey:                   configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
-		EventRetentionDays:         intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
-		AuditRetentionDays:         intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
-		OverviewScalePercent:       intConfigValue(values, "CONTROL_OVERVIEW_SCALE_PERCENT", 100),
-		RiskLoginWindow:            durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
-		RiskLoginCount:             intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
-		RiskDeviceCount:            intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
-		COSRegion:                  configValue(values, "CONTROL_COS_REGION", ""),
-		COSBucket:                  configValue(values, "CONTROL_COS_BUCKET", ""),
-		COSSecretID:                configValue(values, "CONTROL_COS_SECRET_ID", ""),
-		COSSecretKey:               configValue(values, "CONTROL_COS_SECRET_KEY", ""),
-		COSWebsiteBucket:           configValue(values, "CONTROL_COS_WEBSITE_BUCKET", ""),
-		CDNDomain:                  strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
-		CDNAuthKey:                 configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
-		CDNURLTTL:                  durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
-		MonitorSecretID:            configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
-		MonitorSecretKey:           configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
-		AIAPIKey:                   strings.TrimSpace(values["CONTROL_AI_API_KEY"]),
-		AIBaseURL:                  configValue(values, "CONTROL_AI_BASE_URL", "https://api.deepseek.com/v1"),
-		AIModel:                    configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
-		AIWindows:                  configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
-		AITimezone:                 configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
-		AIPagesPerChunk:            intConfigValue(values, "CONTROL_AI_PAGES_PER_CHUNK", 30),
-		AIRequestTimeout:           durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
-		AIMaxAttempts:              intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
-		AIImageQuality:             intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
-		AIImageMaxEdge:             intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
-		AIWorkDir:                  configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
-		AIMathJaxDir:               configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
-		AIPrecheckSystem:           configValue(values, SettingAIPrecheckSystem, ai.DefaultPrecheckSystem),
-		AIAnalysisSystem:           configValue(values, SettingAIAnalysisSystem, ai.DefaultAnalysisSystem),
-		AIAdvancedAnalysisSystem:   configValue(values, SettingAIAnalysisSystemAdvanced, ai.DefaultAdvancedAnalysisSystem),
-		AIPrecheckInstruction:      configValue(values, SettingAIPrecheckInstruction, ai.DefaultPrecheckInstruction),
-		AIChunkInstruction:         configValue(values, SettingAIChunkInstruction, ai.DefaultChunkInstruction),
-		AIAdvancedChunkInstruction: configValue(values, SettingAIChunkInstructionAdvanced, ai.DefaultAdvancedChunkInstruction),
-		AIContinuePrompt:           configValue(values, SettingAIContinuePrompt, ai.DefaultContinuePrompt),
+		Path:                  configPath,
+		Addr:                  configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
+		DBPath:                dbPath,
+		PublicBaseURL:         strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
+		WebDir:                configValue(values, "CONTROL_WEB_DIR", ""),
+		AdminKey:              configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
+		EventRetentionDays:    intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
+		AuditRetentionDays:    intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
+		OverviewScalePercent:  intConfigValue(values, "CONTROL_OVERVIEW_SCALE_PERCENT", 100),
+		RiskLoginWindow:       durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
+		RiskLoginCount:        intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
+		RiskDeviceCount:       intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
+		COSRegion:             configValue(values, "CONTROL_COS_REGION", ""),
+		COSBucket:             configValue(values, "CONTROL_COS_BUCKET", ""),
+		COSSecretID:           configValue(values, "CONTROL_COS_SECRET_ID", ""),
+		COSSecretKey:          configValue(values, "CONTROL_COS_SECRET_KEY", ""),
+		COSWebsiteBucket:      configValue(values, "CONTROL_COS_WEBSITE_BUCKET", ""),
+		CDNDomain:             strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
+		CDNAuthKey:            configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
+		CDNURLTTL:             durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
+		MonitorSecretID:       configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
+		MonitorSecretKey:      configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
+		IngestCourses:         ingestSwitch(values, SettingAcceptCourses),
+		IngestTextbooks:       ingestSwitch(values, SettingAcceptTextbooks),
+		IngestSubmissions:     ingestSwitch(values, SettingAcceptSubmissions),
+		IngestUserInfo:        ingestSwitch(values, SettingAcceptUserInfo),
+		IngestEvents:          ingestSwitch(values, SettingAcceptEvents),
+		AIAPIKey:              strings.TrimSpace(values["CONTROL_AI_API_KEY"]),
+		AIBaseURL:             configValue(values, "CONTROL_AI_BASE_URL", "https://api.deepseek.com/v1"),
+		AIModel:               configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
+		AIWindows:             configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
+		AITimezone:            configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
+		AIRequestTimeout:      durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
+		AIMaxAttempts:         intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
+		AIImageQuality:        intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
+		AIImageMaxEdge:        intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
+		AIWorkDir:             configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
+		AIMathJaxDir:          configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
+		AIPrecheckSystem:      configValue(values, SettingAIPrecheckSystem, ai.DefaultPrecheckSystem),
+		AIAnalysisSystem:      configValue(values, SettingAIAnalysisSystem, ai.DefaultAnalysisSystem),
+		AIPrecheckInstruction: configValue(values, SettingAIPrecheckInstruction, ai.DefaultPrecheckInstruction),
+		AIAnalysisInstruction: configValue(values, SettingAIAnalysisInstruction, ai.DefaultAnalysisInstruction),
 	}
 	// AI is enabled whenever a key is configured; there is no separate switch.
 	cfg.AIAnalysisEnabled = strings.TrimSpace(cfg.AIAPIKey) != ""
-	if cfg.AIPagesPerChunk < 1 || cfg.AIPagesPerChunk > 200 {
-		cfg.AIPagesPerChunk = 30
-	}
 	if cfg.AIMaxAttempts < 1 || cfg.AIMaxAttempts > 10 {
 		cfg.AIMaxAttempts = 3
 	}
@@ -420,6 +423,27 @@ func configValue(values map[string]string, key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// IngestSwitch is one ingestion toggle. The zero value means "accept": a
+// configuration that never mentions the switch keeps ingesting, which matters
+// for tests and for hand-written configs.
+type IngestSwitch struct{ Disabled bool }
+
+// Enabled reports whether reports of this kind are stored.
+func (s IngestSwitch) Enabled() bool { return !s.Disabled }
+
+// ingestSwitch reads a bootstrap value ("true" = accept).
+func ingestSwitch(values map[string]string, key string) IngestSwitch {
+	raw, ok := values[key]
+	if !ok {
+		return IngestSwitch{}
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return IngestSwitch{}
+	}
+	return IngestSwitch{Disabled: !value}
 }
 
 func intConfigValue(values map[string]string, key string, fallback int) int {

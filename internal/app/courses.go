@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -107,18 +108,27 @@ func (a *App) UploadCourses(ctx context.Context, p SessionPrincipal, in CourseUp
 		return nil, Err("invalid_courses", "课程数量必须为 1-200", 400)
 	}
 	now := time.Now().UTC()
-	accepted, err := a.Store.UploadCourses(ctx, courses, now)
-	if err != nil {
-		a.Logger.Warn("upload courses failed", "error", err)
-		return nil, err
+	var err error
+	accepted, acceptedBooks := 0, 0
+	if a.cfg().IngestCourses.Enabled() {
+		accepted, err = a.Store.UploadCourses(ctx, courses, now)
+		if err != nil {
+			a.Logger.Warn("upload courses failed", "error", err)
+			return nil, err
+		}
 	}
-	acceptedBooks, err := a.Store.UploadTextbooks(ctx, textbooks, now)
-	if err != nil {
-		a.Logger.Warn("upload textbooks failed", "error", err)
-		return nil, err
+	if a.cfg().IngestTextbooks.Enabled() {
+		acceptedBooks, err = a.Store.UploadTextbooks(ctx, textbooks, now)
+		if err != nil {
+			a.Logger.Warn("upload textbooks failed", "error", err)
+			return nil, err
+		}
 	}
 	_ = a.Store.AddAudit(ctx, p.User.ID, "course_upload", "course", "",
-		controlcrypto.JSON(map[string]any{"accepted": accepted, "submitted": len(courses), "books": acceptedBooks}), now)
+		controlcrypto.JSON(map[string]any{
+			"accepted": accepted, "submitted": len(courses), "books": acceptedBooks,
+			"courses_disabled": !a.cfg().IngestCourses.Enabled(), "textbooks_disabled": !a.cfg().IngestTextbooks.Enabled(),
+		}), now)
 	return map[string]any{"accepted": accepted, "accepted_books": acceptedBooks}, nil
 }
 
@@ -206,6 +216,13 @@ func (a *App) UpdateCourseForAdmin(ctx context.Context, id string, in CourseWrit
 		return CourseView{}, err
 	}
 	now := time.Now().UTC()
+	previous, err := a.Store.GetCourse(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CourseView{}, ErrNotFound
+	}
+	if err != nil {
+		return CourseView{}, err
+	}
 	if err := a.Store.UpdateCourse(ctx, id, input, now); err != nil {
 		if err == sqlite.ErrCourseExists {
 			return CourseView{}, Err("course_exists", "该课程编号已存在", 409)
@@ -215,7 +232,16 @@ func (a *App) UpdateCourseForAdmin(ctx context.Context, id string, in CourseWrit
 		}
 		return CourseView{}, err
 	}
-	_ = a.Store.AddAudit(ctx, actor, "course_update", "course", id, "{}", now)
+	// The course number is the join key everywhere else, so a rename has to
+	// move the content with it instead of leaving it detached.
+	if previous.Code != input.Code {
+		if err := a.Store.RenameCourseCode(ctx, previous.Code, input.Code, now); err != nil {
+			a.Logger.Error("move course content failed", "error", err, "from", previous.Code, "to", input.Code)
+			return CourseView{}, Err("course_rename_failed", "课程编号已修改，但内容迁移失败，请检查日志", 500)
+		}
+	}
+	_ = a.Store.AddAudit(ctx, actor, "course_update", "course", id,
+		controlcrypto.JSON(map[string]string{"code": input.Code, "previous_code": previous.Code}), now)
 	item, err := a.Store.GetCourse(ctx, id)
 	if err != nil {
 		return CourseView{}, err
@@ -239,6 +265,24 @@ func (a *App) DeleteCourseForAdmin(ctx context.Context, id, actor string) error 
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Err("invalid_course_id", "课程标识无效", 400)
+	}
+	item, err := a.Store.GetCourse(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	// Content is joined by course number, so deleting the course would leave it
+	// unreachable. Ask for the content to be moved or deleted first.
+	textbooks, resources, banks, submissions, err := a.Store.CourseContentCounts(ctx, item.Code)
+	if err != nil {
+		return err
+	}
+	if textbooks+resources+banks+submissions > 0 {
+		return Err("course_in_use", fmt.Sprintf(
+			"该课程下还有教材 %d / 试卷 %d / 题库 %d / 待审核提交 %d，请先删除或改归其他课程",
+			textbooks, resources, banks, submissions), 409)
 	}
 	if err := a.Store.DeleteCourse(ctx, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,8 +25,8 @@ func TestQuestionBankCreateAndListSortsByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ID != "QB-001" {
-		t.Fatalf("unexpected first bank allocation: %#v", first)
+	if !strings.HasPrefix(first.ID, "QB-") || len(first.ID) < 10 {
+		t.Fatalf("unexpected bank id: %#v", first)
 	}
 	if _, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "alpha", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -36,6 +37,65 @@ func TestQuestionBankCreateAndListSortsByName(t *testing.T) {
 	}
 	if len(items) != 2 || items[0].Name != "alpha" || items[1].Name != "beta" {
 		t.Fatalf("banks were not sorted by name: %#v", items)
+	}
+}
+
+func TestUpdateQuestionBankKeepsQuestionIDs(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	bank, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "题库", Status: "active", CreatedAt: now, UpdatedAt: now, Questions: []Question{
+		{ID: "q_one", QuestionNumber: 1, Type: "单选题", Title: "第一题", QuestionText: "题干一", CorrectAnswer: "A", Options: []QuestionOption{
+			{ID: "opt_a", Label: "A", Text: "甲"}, {ID: "opt_b", Label: "B", Text: "乙"},
+		}},
+		{ID: "q_two", QuestionNumber: 2, Type: "填空题", Title: "第二题", QuestionText: "题干二", CorrectAnswer: "42"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Edit: rename question 1, fix its option text, drop question 2 and add 3.
+	updated := bank
+	updated.UpdatedAt = now.Add(time.Minute)
+	updated.Questions = []Question{
+		{ID: "q_new1", QuestionNumber: 1, Type: "单选题", Title: "第一题（修订）", QuestionText: "题干一", CorrectAnswer: "A", Options: []QuestionOption{
+			{ID: "opt_newa", Label: "A", Text: "甲（改）"}, {ID: "opt_newb", Label: "B", Text: "乙"}, {ID: "opt_newc", Label: "C", Text: "丙"},
+		}},
+		{ID: "q_new3", QuestionNumber: 3, Type: "填空题", Title: "第三题", QuestionText: "题干三", CorrectAnswer: "7"},
+	}
+	if err := store.UpdateQuestionBank(ctx, updated); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Questions) != 2 {
+		t.Fatalf("questions = %#v", stored.Questions)
+	}
+	first := stored.Questions[0]
+	if first.ID != "q_one" || first.Title != "第一题（修订）" {
+		t.Fatalf("question 1 lost its id or title: %#v", first)
+	}
+	options := map[string]QuestionOption{}
+	for _, option := range first.Options {
+		options[option.Label] = option
+	}
+	if options["A"].ID != "opt_a" || options["A"].Text != "甲（改）" || options["B"].ID != "opt_b" {
+		t.Fatalf("options lost their ids: %#v", first.Options)
+	}
+	if options["C"].ID == "" || options["C"].ID == "opt_a" {
+		t.Fatalf("new option needs a fresh id: %#v", options["C"])
+	}
+	if stored.Questions[1].ID != "q_new3" || stored.Questions[1].QuestionNumber != 3 {
+		t.Fatalf("new question = %#v", stored.Questions[1])
 	}
 }
 

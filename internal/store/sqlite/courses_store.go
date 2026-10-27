@@ -210,6 +210,71 @@ func (s *Store) UpdateCourse(ctx context.Context, id string, input CourseInput, 
 	return nil
 }
 
+// RenameCourseCode moves every association from one course number to another
+// inside a single transaction. Course numbers are the join key for textbooks,
+// resources, question banks and submissions, so renaming without this would
+// detach all of their content. Affected rows bump updated_at so clients see a
+// new version and reload.
+func (s *Store) RenameCourseCode(ctx context.Context, oldCode, newCode string, now time.Time) error {
+	oldCode, newCode = strings.TrimSpace(oldCode), strings.TrimSpace(newCode)
+	if oldCode == "" || newCode == "" || oldCode == newCode {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stamp := millis(now)
+	// Multi-course joins first: a row may already be linked to both codes.
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO textbook_courses(textbook_id, course_code)
+		SELECT textbook_id, ? FROM textbook_courses WHERE course_code = ?`, newCode, oldCode); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM textbook_courses WHERE course_code = ?`, oldCode); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO question_bank_courses(question_bank_id, course_code)
+		SELECT question_bank_id, ? FROM question_bank_courses WHERE course_code = ?`, newCode, oldCode); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM question_bank_courses WHERE course_code = ?`, oldCode); err != nil {
+		return err
+	}
+	for _, statement := range []string{
+		`UPDATE textbooks SET course_code = ?, updated_at = ? WHERE course_code = ?`,
+		`UPDATE resources SET course_code = ?, updated_at = ? WHERE course_code = ?`,
+		`UPDATE question_banks SET course_code = ?, updated_at = ? WHERE course_code = ?`,
+		`UPDATE resource_submissions SET course_code = ?, updated_at = ? WHERE course_code = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, newCode, stamp, oldCode); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// CourseContentCounts reports how much content still points at a course number.
+// Deleting a course is refused while any of these is non-zero.
+func (s *Store) CourseContentCounts(ctx context.Context, code string) (textbooks, resources, banks, submissions int, err error) {
+	code = strings.TrimSpace(code)
+	queries := []struct {
+		query string
+		dest  *int
+	}{
+		{`SELECT COUNT(*) FROM textbook_courses WHERE course_code = ?`, &textbooks},
+		{`SELECT COUNT(*) FROM resources WHERE course_code = ?`, &resources},
+		{`SELECT COUNT(*) FROM question_bank_courses WHERE course_code = ?`, &banks},
+		{`SELECT COUNT(*) FROM resource_submissions WHERE course_code = ?`, &submissions},
+	}
+	for _, item := range queries {
+		if err := s.DB.QueryRowContext(ctx, item.query, code).Scan(item.dest); err != nil {
+			return 0, 0, 0, 0, err
+		}
+	}
+	return textbooks, resources, banks, submissions, nil
+}
+
 func (s *Store) DeleteCourse(ctx context.Context, id string) error {
 	result, err := s.DB.ExecContext(ctx, "DELETE FROM courses WHERE id = ?", id)
 	if err != nil {
@@ -247,7 +312,7 @@ type CourseAnalysisStats struct {
 	Analyzed   int64
 }
 
-// AnalysisStatsByCourse returns basic+advanced completion counts per course.
+// AnalysisStatsByCourse returns basic+more completion counts per course.
 func (s *Store) AnalysisStatsByCourse(ctx context.Context, codes []string) (map[string]CourseAnalysisStats, error) {
 	out := make(map[string]CourseAnalysisStats, len(codes))
 	if len(codes) == 0 {
@@ -263,7 +328,8 @@ func (s *Store) AnalysisStatsByCourse(ctx context.Context, codes []string) (map[
 			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0
 				AND EXISTS (SELECT 1 FROM resource_ai_tasks b WHERE b.resource_id = r.id AND b.mode = 'basic' AND b.status = 'succeeded')
-				AND EXISTS (SELECT 1 FROM resource_ai_tasks a WHERE a.resource_id = r.id AND a.mode = 'advanced' AND a.status = 'succeeded')
+				AND EXISTS (SELECT 1 FROM resource_ai_tasks a WHERE a.resource_id = r.id AND a.status = 'succeeded'
+					AND ((a.mode = 'more' AND a.output_key <> '') OR (a.mode = 'basic' AND a.more_output_key <> '')))
 				THEN 1 ELSE 0 END)
 		FROM resources r WHERE r.course_code IN (`+strings.Join(placeholders, ",")+`)
 		GROUP BY r.course_code`, args...)

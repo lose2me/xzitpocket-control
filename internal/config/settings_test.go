@@ -47,7 +47,6 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 		AIModel:               "model",
 		AIWindows:             "00:00-08:50",
 		AITimezone:            "Asia/Shanghai",
-		AIPagesPerChunk:       10,
 		AIRequestTimeout:      90 * time.Second,
 		AIMaxAttempts:         2,
 		AIImageQuality:        70,
@@ -55,8 +54,7 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 		AIPrecheckSystem:      "自定义预检系统提示词",
 		AIAnalysisSystem:      "自定义解析系统提示词",
 		AIPrecheckInstruction: "预检 %s %d/%d",
-		AIChunkInstruction:    "分段 %s %d-%d/%d",
-		AIContinuePrompt:      "继续写",
+		AIAnalysisInstruction: "解析 %s %d",
 	}
 	var parsed Config
 	if err := ApplyRuntime(&parsed, RuntimeValues(source)); err != nil {
@@ -65,7 +63,7 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 	if parsed.PublicBaseURL != "https://con.example.com" || parsed.CDNDomain != "https://dl.example.com" {
 		t.Fatalf("urls not normalized: %q %q", parsed.PublicBaseURL, parsed.CDNDomain)
 	}
-	if parsed.EventRetentionDays != 45 || parsed.RiskLoginCount != 9 || parsed.AIPagesPerChunk != 10 {
+	if parsed.EventRetentionDays != 45 || parsed.RiskLoginCount != 9 {
 		t.Fatalf("numbers not applied: %+v", parsed)
 	}
 	if parsed.RiskLoginWindow != 3*time.Minute || parsed.CDNURLTTL != time.Hour || parsed.AIRequestTimeout != 90*time.Second {
@@ -74,9 +72,31 @@ func TestApplyRuntimeRoundTrip(t *testing.T) {
 	if !parsed.AIAnalysisEnabled || parsed.AIAPIKey != "ai-key" || parsed.AIImageMaxEdge != 1200 {
 		t.Fatalf("ai settings not applied: %+v", parsed)
 	}
-	if parsed.AIChunkInstruction != "分段 %s %d-%d/%d" || parsed.AIPrecheckSystem != "自定义预检系统提示词" ||
-		parsed.AIContinuePrompt != "继续写" {
+	if parsed.AIAnalysisInstruction != "解析 %s %d" || parsed.AIPrecheckSystem != "自定义预检系统提示词" {
 		t.Fatalf("ai prompts not applied: %+v", parsed)
+	}
+}
+
+func TestAcceptSwitchesDefaultOnAndParse(t *testing.T) {
+	cfg := Config{}
+	values := RuntimeValues(cfg)
+	for _, key := range []string{SettingAcceptCourses, SettingAcceptTextbooks, SettingAcceptSubmissions, SettingAcceptUserInfo, SettingAcceptEvents} {
+		if values[key] != "true" {
+			t.Fatalf("%s default = %q, want true for a zero value", key, values[key])
+		}
+	}
+	if err := ApplyRuntime(&cfg, map[string]string{
+		SettingAcceptCourses:     "true",
+		SettingAcceptSubmissions: "false",
+		SettingAcceptEvents:      "1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.IngestCourses.Enabled() || cfg.IngestSubmissions.Enabled() || !cfg.IngestEvents.Enabled() {
+		t.Fatalf("switches not applied: %#v", cfg)
+	}
+	if err := ApplyRuntime(&cfg, map[string]string{SettingAcceptCourses: "yes-please"}); err == nil {
+		t.Fatal("a non-boolean value must be rejected")
 	}
 }
 
@@ -99,13 +119,13 @@ func TestRuntimeDerivesAIEnabledFromKey(t *testing.T) {
 func TestPromptsFallBackToDefaultsWhenBlank(t *testing.T) {
 	var cfg Config
 	if err := ApplyRuntime(&cfg, map[string]string{
-		SettingAIChunkInstruction:    "  ",
+		SettingAIAnalysisInstruction: "  ",
 		SettingAIPrecheckInstruction: "",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AIChunkInstruction != ai.DefaultChunkInstruction || cfg.AIPrecheckInstruction != ai.DefaultPrecheckInstruction {
-		t.Fatalf("blank prompts must fall back to the built-in templates: %+v", cfg.AIChunkInstruction)
+	if cfg.AIAnalysisInstruction != ai.DefaultAnalysisInstruction || cfg.AIPrecheckInstruction != ai.DefaultPrecheckInstruction {
+		t.Fatalf("blank prompts must fall back to the built-in templates: %+v", cfg.AIAnalysisInstruction)
 	}
 }
 
@@ -114,7 +134,6 @@ func TestApplyRuntimeRejectsInvalid(t *testing.T) {
 		SettingEventRetentionDays:   "0",
 		SettingOverviewScalePercent: "-1",
 		SettingRiskLoginWindow:      "soon",
-		SettingAIPagesPerChunk:      "999",
 		SettingAIImageMaxEdge:       "10",
 	} {
 		cfg := Config{}

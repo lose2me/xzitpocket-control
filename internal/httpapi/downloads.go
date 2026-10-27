@@ -42,7 +42,7 @@ func (s *Server) adminSubmissionDownload(w http.ResponseWriter, r *http.Request,
 	if _, ok := s.authAdmin(w, r); !ok {
 		return
 	}
-	resp, filename, err := s.App.OpenSubmissionDownload(r.Context(), id, kind)
+	resp, filename, err := s.App.OpenSubmissionDownload(r.Context(), id, kind, r.URL.Query().Get("file"))
 	if err != nil {
 		writeError(w, r, err)
 		return

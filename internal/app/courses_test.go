@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -31,6 +32,56 @@ func newCourseApp(t *testing.T) (*App, *sqlite.Store) {
 		t.Fatal(err)
 	}
 	return a, store
+}
+
+func TestCourseRenameMovesContentAndDeleteIsBlocked(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	course, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C1", Name: "课程一"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷甲", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bank, err := store.CreateQuestionBankAuto(ctx, sqlite.QuestionBank{
+		Name: "题库甲", Status: "active", CourseCode: "C1", CourseCodes: []string{"C1"}, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.UpdateCourseForAdmin(ctx, course.ID, CourseWriteInput{Code: "C2", Name: "课程一改名"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	storedTextbook, err := store.GetTextbook(ctx, textbook.ID)
+	if err != nil || len(storedTextbook.CourseCodes) != 1 || storedTextbook.CourseCodes[0] != "C2" {
+		t.Fatalf("textbook did not follow the rename: %#v err=%v", storedTextbook, err)
+	}
+	storedResource, err := store.GetResource(ctx, resource.ID)
+	if err != nil || storedResource.CourseCode != "C2" {
+		t.Fatalf("resource did not follow the rename: %#v err=%v", storedResource, err)
+	}
+	storedBank, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil || len(storedBank.CourseCodes) != 1 || storedBank.CourseCodes[0] != "C2" {
+		t.Fatalf("question bank did not follow the rename: %#v err=%v", storedBank, err)
+	}
+
+	// Content still points at the course, so deleting it must be refused.
+	err = a.DeleteCourseForAdmin(ctx, course.ID, "admin")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "course_in_use" {
+		t.Fatalf("deleting a course with content = %v", err)
+	}
+	if _, err := store.GetCourse(ctx, course.ID); err != nil {
+		t.Fatalf("course should still exist: %v", err)
+	}
 }
 
 func TestUploadCoursesValidation(t *testing.T) {

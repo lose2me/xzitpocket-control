@@ -12,7 +12,15 @@ import (
 
 // removedSettings are keys that no longer exist as settings. They are deleted
 // on open so an upgraded database does not keep dead rows.
-var removedSettings = []string{"CONTROL_AI_ENABLED"}
+var removedSettings = []string{
+	"CONTROL_AI_ENABLED",
+	"CONTROL_AI_PAGES_PER_CHUNK",
+	"CONTROL_AI_PROMPT_ANALYSIS_SYSTEM",
+	"CONTROL_AI_PROMPT_ADVANCED_ANALYSIS_SYSTEM",
+	"CONTROL_AI_PROMPT_CHUNK",
+	"CONTROL_AI_PROMPT_ADVANCED_CHUNK",
+	"CONTROL_AI_PROMPT_CONTINUE",
+}
 
 // settingSecretPrefix marks values encrypted with CONTROL_ENCRYPTION_KEY. Cloud
 // credentials (and the AI key) must not be readable from a database backup.

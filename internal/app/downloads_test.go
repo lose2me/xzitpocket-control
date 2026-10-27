@@ -39,9 +39,14 @@ func TestOpenDownloadsCountsAndNames(t *testing.T) {
 	if !strings.HasPrefix(string(body), "%PDF") || filename != "高等数学.pdf" {
 		t.Fatalf("body = %q, filename = %q", body, filename)
 	}
+	// Admin downloads are not counted as popularity.
 	stored, err := store.GetTextbook(ctx, textbook.ID)
-	if err != nil || stored.DownloadCount != 1 {
+	if err != nil || stored.DownloadCount != 0 {
 		t.Fatalf("textbook download count = %#v, err = %v", stored, err)
+	}
+	a.RecordTextbookDownload(ctx, textbook.ID, "usr-upload")
+	if stored, err = store.GetTextbook(ctx, textbook.ID); err != nil || stored.DownloadCount != 1 {
+		t.Fatalf("app download not counted: %#v, err = %v", stored, err)
 	}
 
 	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "期末试卷.pdf", CourseCode: "C1"}, now)
@@ -60,8 +65,12 @@ func TestOpenDownloadsCountsAndNames(t *testing.T) {
 		t.Fatalf("resource filename = %q", filename)
 	}
 	storedResource, err := store.GetResource(ctx, resource.ID)
-	if err != nil || storedResource.DownloadCount != 1 {
+	if err != nil || storedResource.DownloadCount != 0 {
 		t.Fatalf("resource download count = %#v, err = %v", storedResource, err)
+	}
+	a.RecordResourceDownload(ctx, resource.ID, "usr-upload")
+	if storedResource, err = store.GetResource(ctx, resource.ID); err != nil || storedResource.DownloadCount != 1 {
+		t.Fatalf("resource app download not counted: %#v, err = %v", storedResource, err)
 	}
 
 	courses, total, err := a.ListCoursesForAdmin(ctx, 50, 0, "", "", "")

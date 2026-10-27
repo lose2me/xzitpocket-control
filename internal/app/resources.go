@@ -31,7 +31,7 @@ type ResourceView struct {
 	UpdatedAt            string `json:"updated_at"`
 	HasAI                bool   `json:"has_ai"`
 	HasBasicAI           bool   `json:"has_basic_ai"`
-	HasAdvancedAI        bool   `json:"has_advanced_ai"`
+	HasMoreAI            bool   `json:"has_more_ai"`
 	HasManualAI          bool   `json:"has_manual_ai"`
 	manualUpdatedAt      time.Time
 	AIModes              []string `json:"ai_modes,omitempty"`
@@ -126,11 +126,15 @@ func (a *App) enrichAIStatus(ctx context.Context, views []ResourceView) error {
 				newest = task.UpdatedAt
 			}
 		}
-		if task, ok := byMode["advanced"]; ok {
-			views[i].HasAdvancedAI = true
-			modes = append(modes, "advanced")
-			if task.UpdatedAt.After(newest) {
-				newest = task.UpdatedAt
+		moreTask, hasMore := byMode["more"]
+		if !hasMore {
+			moreTask, hasMore = byMode["advanced"]
+		}
+		if hasMore {
+			views[i].HasMoreAI = true
+			modes = append(modes, "more")
+			if moreTask.UpdatedAt.After(newest) {
+				newest = moreTask.UpdatedAt
 			}
 		}
 		if views[i].HasManualAI {
@@ -297,8 +301,12 @@ func (a *App) DeleteResourceForAdmin(ctx context.Context, id, actor string) erro
 	manualKey := item.ManualAIKey
 	if tasks, taskErr := a.Store.ListAITasksByResource(ctx, item.ID); taskErr == nil {
 		for _, task := range tasks {
-			if task.OutputKey != "" {
-				aiOutputKeys = append(aiOutputKeys, task.OutputKey)
+			// One run stores both PDFs: the concise report and the
+			// primary-school one, so both objects must go with the paper.
+			for _, key := range []string{task.OutputKey, task.MoreOutputKey} {
+				if key != "" {
+					aiOutputKeys = append(aiOutputKeys, key)
+				}
 			}
 			a.cancelAIRequest(task.ID)
 		}
@@ -407,7 +415,11 @@ func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (Re
 // A resource that has been queued but has no finished run reports its status
 // so the app can show "解析中".
 func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.Duration) (ResourceAIView, error) {
-	if mode != "basic" && mode != "advanced" && mode != "manual" {
+	switch mode {
+	case "more", "advanced":
+		mode = "more"
+	case "manual", "basic":
+	default:
 		mode = "basic"
 	}
 	item, err := a.requireResource(ctx, id)
@@ -440,42 +452,58 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 	if err != nil {
 		return ResourceAIView{}, err
 	}
-	filtered := make([]sqlite.AITask, 0, len(tasks))
-	for _, task := range tasks {
-		if task.Mode == mode {
-			filtered = append(filtered, task)
+	// A combined run stores the concise report as its primary output and the
+	// primary-school report in MoreOutputKey. Legacy rows only have one.
+	supportsMode := func(task sqlite.AITask) bool {
+		if mode == "basic" {
+			return task.Mode == "basic"
+		}
+		return task.MoreOutputKey != "" || task.Mode == "more" || task.Mode == "advanced"
+	}
+	var relevant *sqlite.AITask
+	for i := len(tasks) - 1; i >= 0; i-- {
+		if supportsMode(tasks[i]) {
+			relevant = &tasks[i]
+			break
 		}
 	}
-	if len(filtered) == 0 {
+	if relevant == nil {
 		return ResourceAIView{Mode: mode}, nil
 	}
-	latest := filtered[len(filtered)-1]
 	var succeeded *sqlite.AITask
-	for i := len(filtered) - 1; i >= 0; i-- {
-		if filtered[i].Status == "succeeded" {
-			succeeded = &filtered[i]
+	for i := len(tasks) - 1; i >= 0; i-- {
+		if tasks[i].Status == "succeeded" && supportsMode(tasks[i]) {
+			succeeded = &tasks[i]
 			break
 		}
 	}
 	if succeeded == nil {
-		return ResourceAIView{Mode: mode, Status: latest.Status, Error: latest.Error}, nil
+		return ResourceAIView{Mode: mode, Status: relevant.Status, Error: relevant.Error}, nil
+	}
+	markdown := succeeded.Markdown
+	outputKey := succeeded.OutputKey
+	outputSize := succeeded.OutputSize
+	if mode == "more" && succeeded.MoreOutputKey != "" {
+		markdown = succeeded.MoreMarkdown
+		outputKey = succeeded.MoreOutputKey
+		outputSize = succeeded.MoreOutputSize
 	}
 	view := ResourceAIView{
 		Available:    true,
 		Mode:         mode,
 		Status:       succeeded.Status,
-		Markdown:     succeeded.Markdown,
+		Markdown:     markdown,
 		UpdatedAt:    succeeded.UpdatedAt.Format(time.RFC3339),
-		OutputSize:   succeeded.OutputSize,
+		OutputSize:   outputSize,
 		TotalPages:   succeeded.TotalPages,
 		Solvable:     succeeded.Solvable,
 		PrecheckNote: succeeded.PrecheckNote,
 	}
-	if succeeded.OutputKey != "" && a.cfg().CDNDomain != "" && a.cfg().CDNAuthKey != "" {
+	if outputKey != "" && a.cfg().CDNDomain != "" && a.cfg().CDNAuthKey != "" {
 		if ttl <= 0 || ttl > 7*24*time.Hour {
 			ttl = a.cfg().CDNURLTTL
 		}
-		view.PDFURL = cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+succeeded.OutputKey, ttl)
+		view.PDFURL = cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+outputKey, ttl)
 	}
 	return view, nil
 }

@@ -65,7 +65,8 @@ func (s *Server) userResourceAI(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id string) {
-	if _, ok := s.authSession(w, r); !ok {
+	p, ok := s.authSession(w, r)
+	if !ok {
 		return
 	}
 	out, err := s.App.ResourceURL(r.Context(), id, userURLTTL(r))
@@ -73,12 +74,13 @@ func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id stri
 		writeError(w, r, err)
 		return
 	}
-	s.App.RecordResourceDownload(r.Context(), id, true)
+	s.App.RecordResourceDownload(r.Context(), id, p.User.ID)
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id string) {
-	if _, ok := s.authSession(w, r); !ok {
+	p, ok := s.authSession(w, r)
+	if !ok {
 		return
 	}
 	kind := r.URL.Query().Get("kind")
@@ -88,7 +90,7 @@ func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 	if kind == "" || kind == "pdf" {
-		s.App.RecordTextbookDownload(r.Context(), id, true)
+		s.App.RecordTextbookDownload(r.Context(), id, p.User.ID)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

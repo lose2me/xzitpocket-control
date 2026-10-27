@@ -39,11 +39,12 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if created.QuestionBank.CourseCode != "3007B0001" || len(created.QuestionBank.CourseCodes) != 2 {
 		t.Fatalf("unexpected course codes: %q %#v", created.QuestionBank.CourseCode, created.QuestionBank.CourseCodes)
 	}
-	got, err := a.GetQuestionBank(context.Background(), "QB-001")
+	bankID := created.QuestionBank.ID
+	got, err := a.GetQuestionBank(context.Background(), bankID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.QuestionBank.ID != "QB-001" || got.QuestionBank.CourseCode != "3007B0001" || len(got.QuestionBank.CourseCodes) != 2 || len(got.QuestionBank.Questions) != 2 || got.QuestionBank.Questions[0].Options == nil || len(got.QuestionBank.Questions[1].Options) != 2 {
+	if got.QuestionBank.ID != bankID || got.QuestionBank.CourseCode != "3007B0001" || len(got.QuestionBank.CourseCodes) != 2 || len(got.QuestionBank.Questions) != 2 || got.QuestionBank.Questions[0].Options == nil || len(got.QuestionBank.Questions[1].Options) != 2 {
 		t.Fatalf("unexpected public bank: %#v", got)
 	}
 	listed, _, err := a.ListQuestionBanks(context.Background(), 10, 0, "", false, "", "")
@@ -53,10 +54,10 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 	if len(listed) != 1 || listed[0].CourseCode != "3007B0001" || len(listed[0].CourseCodes) != 2 {
 		t.Fatalf("unexpected listed bank: %#v", listed)
 	}
-	if err := a.SetQuestionBankStatus(context.Background(), "QB-001", "disabled", "admin"); err != nil {
+	if err := a.SetQuestionBankStatus(context.Background(), bankID, "disabled", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.GetQuestionBank(context.Background(), "QB-001"); err == nil {
+	if _, err := a.GetQuestionBank(context.Background(), bankID); err == nil {
 		t.Fatal("disabled bank should not be publicly readable")
 	}
 }

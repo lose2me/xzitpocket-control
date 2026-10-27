@@ -383,6 +383,64 @@ func TestMigrateBackfillsCourseAssociations(t *testing.T) {
 	}
 }
 
+func TestDropQuestionBankDraftStatusRebuildsTable(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE question_banks (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
+		requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
+		course_code TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		archived_at INTEGER NOT NULL DEFAULT 0
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at, archived_at) VALUES
+		('QB-draft', '草稿题库', 'draft', 0, 'C1', 1, 1, 0),
+		('QB-off', '停用题库', 'disabled', 1, 'C1', 1, 1, 7),
+		('QB-on', '启用的题库', 'active', 0, 'C1', 1, 1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.dropQuestionBankDraftStatus(ctx); err != nil {
+		t.Fatalf("drop draft status: %v", err)
+	}
+	var ddl string
+	if err := store.DB.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'question_banks'`).Scan(&ddl); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ddl, "'draft'") {
+		t.Fatalf("question_banks still allows draft: %s", ddl)
+	}
+	statuses := map[string]string{}
+	archived := map[string]int64{}
+	rows, err := store.DB.QueryContext(ctx, `SELECT id, status, archived_at FROM question_banks`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		var archivedAt int64
+		if err := rows.Scan(&id, &status, &archivedAt); err != nil {
+			t.Fatal(err)
+		}
+		statuses[id], archived[id] = status, archivedAt
+	}
+	if statuses["QB-draft"] != "disabled" || statuses["QB-off"] != "disabled" || statuses["QB-on"] != "active" {
+		t.Fatalf("statuses = %#v", statuses)
+	}
+	if archived["QB-off"] != 7 {
+		t.Fatalf("archived_at = %#v", archived)
+	}
+}
+
 func TestDropQuestionBankOrderColumnRebuildsTable(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {

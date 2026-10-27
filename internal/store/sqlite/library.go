@@ -2,10 +2,10 @@ package sqlite
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
-	"fmt"
-	"math"
 	"strings"
 	"time"
 )
@@ -153,7 +153,7 @@ func (s *Store) ListAccessibleQuestionBanks(ctx context.Context, limit, offset i
 }
 
 // QuestionBankStatus is the minimal identity of a bank that is not published to
-// users. Clients use it to hide disabled/draft banks without mistaking them for
+// users. Clients use it to hide disabled banks without mistaking them for
 // deleted ones.
 type QuestionBankStatus struct {
 	ID     string
@@ -269,7 +269,18 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 	return tx.Commit()
 }
 
-// CreateQuestionBankAuto allocates a monotonic QB identifier and inserts the
+// newQuestionBankID returns an opaque "QB-" identifier: the prefix stays part
+// of the client contract, while the suffix is random so bank IDs cannot be
+// enumerated.
+func newQuestionBankID() (string, error) {
+	token := make([]byte, 9)
+	if _, err := rand.Read(token); err != nil {
+		return "", err
+	}
+	return "QB-" + hex.EncodeToString(token), nil
+}
+
+// CreateQuestionBankAuto allocates a random QB identifier and inserts the
 // complete aggregate in one transaction. Identifiers are never reused.
 func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (QuestionBank, error) {
 	bank.CreatedAt = fromMillis(millis(bank.CreatedAt))
@@ -279,45 +290,28 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 		return QuestionBank{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for {
-		var next int64
-		if err := tx.QueryRowContext(ctx, "SELECT next_number FROM question_bank_id_counter WHERE id = 1").Scan(&next); err != nil {
-			return QuestionBank{}, err
-		}
-		if next < 1 {
-			next = 1
-		}
-		if next == math.MaxInt64 {
-			return QuestionBank{}, errors.New("question bank ID counter exhausted")
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE question_bank_id_counter SET next_number = ? WHERE id = 1", next+1); err != nil {
-			return QuestionBank{}, err
-		}
-		candidate := fmt.Sprintf("QB-%03d", next)
-		var exists int
-		err := tx.QueryRowContext(ctx, "SELECT 1 FROM question_banks WHERE id = ? LIMIT 1", candidate).Scan(&exists)
-		if err == nil {
-			continue
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return QuestionBank{}, err
-		}
-		bank.ID = candidate
-		if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
-			return QuestionBank{}, err
-		}
-		if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
-			return QuestionBank{}, err
-		}
-		if err := insertQuestions(ctx, tx, bank); err != nil {
-			return QuestionBank{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return QuestionBank{}, err
-		}
-		return bank, nil
+	// Bank IDs are public (they appear in the app and on CDKs), so they are
+	// random instead of sequential to keep one bank from being guessed from
+	// another. The QB- prefix is part of the client contract.
+	bankID, err := newQuestionBankID()
+	if err != nil {
+		return QuestionBank{}, err
 	}
+	bank.ID = bankID
+	if _, err := tx.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
+		return QuestionBank{}, err
+	}
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+		return QuestionBank{}, err
+	}
+	if err := insertQuestions(ctx, tx, bank); err != nil {
+		return QuestionBank{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return QuestionBank{}, err
+	}
+	return bank, nil
 }
 
 func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error {
@@ -351,6 +345,13 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 		return err
 	}
 	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+		return err
+	}
+	// Reuse the ID of an existing question (matched by number) and of an
+	// existing option (matched by label). Students keep favourites and their
+	// mistake list locally by question ID, so an edit must not renumber them.
+	reuseQuestionIDs(bank.Questions, existing.Questions)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE bank_id = ?)", bank.ID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM questions WHERE bank_id = ?", bank.ID); err != nil {
@@ -477,7 +478,7 @@ func equalStringSlices(a, b []string) bool {
 }
 
 func (s *Store) SetQuestionBankStatus(ctx context.Context, id, status string, now time.Time) error {
-	if status != "active" && status != "draft" && status != "disabled" {
+	if status != "active" && status != "disabled" {
 		return errors.New("invalid question bank status")
 	}
 	result, err := s.DB.ExecContext(ctx, "UPDATE question_banks SET updated_at = CASE WHEN status <> ? THEN MAX(updated_at + 1, ?) ELSE updated_at END, status = ? WHERE id = ?", status, millis(now), status, id)
@@ -538,6 +539,32 @@ func (s *Store) DeleteQuestionBank(ctx context.Context, id string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// reuseQuestionIDs copies stable IDs from the stored bank onto the incoming
+// questions: questions match by number, options by label. New questions and
+// options keep the IDs generated during validation.
+func reuseQuestionIDs(next, previous []Question) {
+	byNumber := make(map[int]Question, len(previous))
+	for _, question := range previous {
+		byNumber[question.QuestionNumber] = question
+	}
+	for i := range next {
+		old, ok := byNumber[next[i].QuestionNumber]
+		if !ok {
+			continue
+		}
+		next[i].ID = old.ID
+		optionIDs := make(map[string]string, len(old.Options))
+		for _, option := range old.Options {
+			optionIDs[option.Label] = option.ID
+		}
+		for j := range next[i].Options {
+			if id, ok := optionIDs[next[i].Options[j].Label]; ok {
+				next[i].Options[j].ID = id
+			}
+		}
+	}
 }
 
 func insertQuestions(ctx context.Context, tx *sql.Tx, bank QuestionBank) error {

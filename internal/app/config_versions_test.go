@@ -117,7 +117,7 @@ func TestQuestionBankVersionsTrackSameMillisecondWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertVersion(want) // Unchanged content keeps the cache version.
-	if err := store.SetQuestionBankStatus(ctx, id, "draft", base); err != nil {
+	if err := store.SetQuestionBankStatus(ctx, id, "disabled", base); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetQuestionBankStatus(ctx, id, "active", base); err != nil {

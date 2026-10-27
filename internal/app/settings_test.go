@@ -156,7 +156,6 @@ func TestAIEnablementFollowsAPIKey(t *testing.T) {
 		config.SettingAIModel:          "test-model",
 		config.SettingAIWindows:        "00:00-24:00",
 		config.SettingAITimezone:       "UTC",
-		config.SettingAIPagesPerChunk:  "30",
 		config.SettingAIRequestTimeout: "10m",
 		config.SettingAIMaxAttempts:    "3",
 		config.SettingAIImageQuality:   "80",
@@ -215,18 +214,18 @@ func TestAIPromptSettingsHotApply(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Values: map[string]string{
-		config.SettingAIChunkInstruction:    "自定义分段 %s %d-%d/%d",
+		config.SettingAIAnalysisInstruction: "自定义解析 %s %d",
 		config.SettingAIPrecheckInstruction: "自定义预检 %s %d/%d",
 	}}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if a.cfg().AIChunkInstruction != "自定义分段 %s %d-%d/%d" || a.cfg().AIPrecheckInstruction != "自定义预检 %s %d/%d" {
-		t.Fatalf("prompts not applied: %+v", a.cfg().AIChunkInstruction)
+	if a.cfg().AIAnalysisInstruction != "自定义解析 %s %d" || a.cfg().AIPrecheckInstruction != "自定义预检 %s %d/%d" {
+		t.Fatalf("prompts not applied: %+v", a.cfg().AIAnalysisInstruction)
 	}
-	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Clear: []string{config.SettingAIChunkInstruction}}, "admin"); err != nil {
+	if _, err := a.UpdateSettings(ctx, SettingsUpdate{Clear: []string{config.SettingAIAnalysisInstruction}}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if a.cfg().AIChunkInstruction != ai.DefaultChunkInstruction {
-		t.Fatalf("cleared prompt must fall back to default: %q", a.cfg().AIChunkInstruction)
+	if a.cfg().AIAnalysisInstruction != ai.DefaultAnalysisInstruction {
+		t.Fatalf("cleared prompt must fall back to default: %q", a.cfg().AIAnalysisInstruction)
 	}
 }

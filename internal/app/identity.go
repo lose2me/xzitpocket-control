@@ -276,8 +276,10 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 		return SessionOutput{}, Err("account_disabled", "账号已被停用，无法登录", http.StatusForbidden)
 	}
 	now := time.Now().UTC()
-	if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, in.CollegeName, in.ClassName, in.MajorName, now); err != nil {
-		return SessionOutput{}, err
+	if a.cfg().IngestUserInfo.Enabled() {
+		if err := a.Store.UpdateUserLogin(ctx, user.ID, in.DisplayName, in.CollegeName, in.ClassName, in.MajorName, now); err != nil {
+			return SessionOutput{}, err
+		}
 	}
 	if err := a.Store.BindUserDevice(ctx, user.ID, device.ID, now); err != nil {
 		return SessionOutput{}, err
@@ -305,14 +307,16 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	a.recordLoginAttemptWithSource(ctx, user.ID, device.ID, "success", sourceHash)
 	a.recordRiskForDevices(ctx, user.ID, device.ID)
 	user.LastLoginAt = now
-	if in.DisplayName != "" {
-		user.DisplayName = in.DisplayName
-	}
-	if in.CollegeName != "" {
-		user.CollegeName = in.CollegeName
-	}
-	if in.ClassName != "" {
-		user.ClassName = in.ClassName
+	if a.cfg().IngestUserInfo.Enabled() {
+		if in.DisplayName != "" {
+			user.DisplayName = in.DisplayName
+		}
+		if in.CollegeName != "" {
+			user.CollegeName = in.CollegeName
+		}
+		if in.ClassName != "" {
+			user.ClassName = in.ClassName
+		}
 	}
 	return SessionOutput{User: toUserView(user, identity.StudentAlias), Device: toDeviceView(device), AccessToken: access, RefreshToken: refresh, ExpiresAt: accessExpiry.Format(time.RFC3339), RefreshExpiresAt: refreshExpiry.Format(time.RFC3339)}, nil
 }

@@ -57,8 +57,8 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 		"requiresCDK": true, "name": "受保护题库", "questions": []any{map[string]any{"questionNumber": 1, "type": "填空题", "title": "第1题", "questionText": "答案", "options": []any{}, "correctAnswer": "答案"}},
 	}}, adminHeaders)
 	bankID := bank["questionBank"].(map[string]any)["id"].(string)
-	if bankID != "QB-001" {
-		t.Fatalf("server did not allocate question bank ID: %q", bankID)
+	if !strings.HasPrefix(bankID, "QB-") || len(bankID) < 10 {
+		t.Fatalf("server did not allocate a question bank ID: %q", bankID)
 	}
 	if bank["questionBank"].(map[string]any)["requiresCDK"] != true {
 		t.Fatalf("question bank unlock flag missing: %#v", bank)

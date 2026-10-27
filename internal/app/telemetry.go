@@ -43,6 +43,11 @@ func validateProperties(properties map[string]any) (string, error) {
 }
 
 func (a *App) InsertTelemetry(ctx context.Context, device DevicePrincipal, session *SessionPrincipal, input []TelemetryEventInput) (map[string]any, error) {
+	// Reporting can be switched off in the console. Answer 202 with nothing
+	// accepted so the client drops the batch instead of retrying it.
+	if !a.cfg().IngestEvents.Enabled() {
+		return map[string]any{"accepted": 0, "duplicates": 0, "disabled": true}, nil
+	}
 	if len(input) == 0 || len(input) > 200 {
 		return nil, Err("invalid_events", "事件数量必须为 1-200", http.StatusBadRequest)
 	}
