@@ -50,9 +50,12 @@ var currentSchemaTables = []struct {
 	{name: "textbooks", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "cover_key", "download_count", "contributor_user_id", "created_at", "updated_at", "archived_at"}},
 	{name: "textbook_courses", columns: []string{"textbook_id", "course_code"}},
 	{name: "resources", columns: []string{"id", "name", "tags", "course_code", "pdf_key", "download_count", "contributor_user_id", "manual_ai_key", "manual_ai_size", "manual_ai_updated_at", "created_at", "updated_at", "archived_at"}},
-	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "mode", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
+	{name: "resource_ai_tasks", columns: []string{"id", "resource_id", "mode", "status", "solvable", "precheck_note", "attempt", "next_page", "total_pages", "messages_json", "markdown", "output_key", "output_size", "more_markdown", "more_output_key", "more_output_size", "error", "model", "created_by", "created_at", "updated_at", "started_at", "finished_at", "prompts_json"}},
 	{name: "app_settings", columns: []string{"key", "value", "updated_at"}},
-	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "pdf_key", "size_bytes", "manual_pdf_key", "manual_size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
+	{name: "resource_submissions", columns: []string{"id", "kind", "course_code", "name", "tags", "note", "size_bytes", "status", "submitted_by_user_id", "submitted_by_name", "student_id_ciphertext", "target_id", "created_at", "updated_at"}},
+	{name: "submission_files", columns: []string{"id", "submission_id", "name", "object_key", "format", "size_bytes", "duplicate", "created_at"}},
+	{name: "download_marks", columns: []string{"kind", "item_id", "user_id", "day", "created_at"}},
+	{name: "school_calendar_colleges", columns: []string{"college", "days_json", "updated_at"}},
 }
 
 type Store struct {
@@ -128,6 +131,7 @@ var additiveMigrations = []struct {
 	{"resources", "contributor_user_id", `ALTER TABLE resources ADD COLUMN contributor_user_id TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "student_id_ciphertext", `ALTER TABLE resource_submissions ADD COLUMN student_id_ciphertext TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "target_id", `ALTER TABLE resource_submissions ADD COLUMN target_id TEXT NOT NULL DEFAULT ''`},
+	{"resource_submissions", "note", `ALTER TABLE resource_submissions ADD COLUMN note TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "manual_pdf_key", `ALTER TABLE resource_submissions ADD COLUMN manual_pdf_key TEXT NOT NULL DEFAULT ''`},
 	{"resource_submissions", "manual_size_bytes", `ALTER TABLE resource_submissions ADD COLUMN manual_size_bytes INTEGER NOT NULL DEFAULT 0`},
 	{"textbooks", "archived_at", `ALTER TABLE textbooks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
@@ -138,6 +142,9 @@ var additiveMigrations = []struct {
 	{"question_banks", "archived_at", `ALTER TABLE question_banks ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 	{"resource_ai_tasks", "prompts_json", `ALTER TABLE resource_ai_tasks ADD COLUMN prompts_json TEXT NOT NULL DEFAULT ''`},
 	{"resource_ai_tasks", "mode", `ALTER TABLE resource_ai_tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'basic'`},
+	{"resource_ai_tasks", "more_markdown", `ALTER TABLE resource_ai_tasks ADD COLUMN more_markdown TEXT NOT NULL DEFAULT ''`},
+	{"resource_ai_tasks", "more_output_key", `ALTER TABLE resource_ai_tasks ADD COLUMN more_output_key TEXT NOT NULL DEFAULT ''`},
+	{"resource_ai_tasks", "more_output_size", `ALTER TABLE resource_ai_tasks ADD COLUMN more_output_size INTEGER NOT NULL DEFAULT 0`},
 }
 
 func (s *Store) applyAdditiveMigrations(ctx context.Context) error {
@@ -212,6 +219,9 @@ var removedColumns = []struct {
 }{
 	{"courses", "books"},
 	{"question_banks", "is_new"},
+	{"resource_submissions", "pdf_key"},
+	{"resource_submissions", "manual_pdf_key"},
+	{"resource_submissions", "manual_size_bytes"},
 }
 
 func (s *Store) applyColumnRemovals(ctx context.Context) error {
@@ -236,6 +246,9 @@ func (s *Store) applyColumnRemovals(ctx context.Context) error {
 		}
 	}
 	if err := s.dropQuestionBankOrderColumn(ctx); err != nil {
+		return err
+	}
+	if err := s.dropQuestionBankDraftStatus(ctx); err != nil {
 		return err
 	}
 	for _, removal := range removedColumns {
@@ -334,6 +347,75 @@ func (s *Store) dropQuestionBankOrderColumn(ctx context.Context) error {
 	return rows.Err()
 }
 
+// dropQuestionBankDraftStatus rebuilds question_banks without the draft
+// status. draft and disabled hide a bank from the app in exactly the same way,
+// so the two states were merged: existing drafts become disabled.
+func (s *Store) dropQuestionBankDraftStatus(ctx context.Context) error {
+	var ddl string
+	err := s.DB.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'question_banks'`).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(ddl, "'draft'") {
+		return nil
+	}
+	if s.lastMigrationBackup == "" {
+		backup, backupErr := s.backupIncompatibleDatabase(ctx)
+		if backupErr != nil {
+			return fmt.Errorf("snapshot before rebuilding question_banks: %w", backupErr)
+		}
+		s.lastMigrationBackup = backup
+	}
+	if _, err := s.DB.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer func() { _, _ = s.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = ON") }()
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		`CREATE TABLE question_banks_new (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+			requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
+			course_code TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			archived_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`INSERT INTO question_banks_new(id, name, status, requires_cdk, course_code, created_at, updated_at, archived_at)
+			SELECT id, name, CASE WHEN status = 'draft' THEN 'disabled' ELSE status END,
+				requires_cdk, course_code, created_at, updated_at, archived_at
+			FROM question_banks`,
+		`DROP TABLE question_banks`,
+		`ALTER TABLE question_banks_new RENAME TO question_banks`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("rebuild question_banks: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("check question_banks foreign keys: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return errors.New("question_banks rebuild left foreign key violations")
+	}
+	return rows.Err()
+}
+
 // allowMultipleAITasksPerResource rebuilds resource_ai_tasks without the
 // legacy UNIQUE(resource_id) constraint. Re-analysing a paper must create a
 // new history row instead of resetting (and destroying) the previous result.
@@ -346,7 +428,9 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(ddl, "resource_id TEXT NOT NULL UNIQUE") {
+	legacyUnique := strings.Contains(ddl, "resource_id TEXT NOT NULL UNIQUE")
+	legacyAdvanced := strings.Contains(ddl, "'advanced'")
+	if !legacyUnique && !legacyAdvanced {
 		return nil
 	}
 	if s.lastMigrationBackup == "" {
@@ -370,7 +454,7 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 		`CREATE TABLE resource_ai_tasks_new (
 			id TEXT PRIMARY KEY,
 			resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-			mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
+			mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'more')),
 			status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
 			solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
 			precheck_note TEXT NOT NULL DEFAULT '',
@@ -381,6 +465,9 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 			markdown TEXT NOT NULL DEFAULT '',
 			output_key TEXT NOT NULL DEFAULT '',
 			output_size INTEGER NOT NULL DEFAULT 0,
+			more_markdown TEXT NOT NULL DEFAULT '',
+			more_output_key TEXT NOT NULL DEFAULT '',
+			more_output_size INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
 			created_by TEXT NOT NULL DEFAULT '',
@@ -390,8 +477,8 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 			finished_at INTEGER NOT NULL DEFAULT 0,
 			prompts_json TEXT NOT NULL DEFAULT ''
 		)`,
-		`INSERT INTO resource_ai_tasks_new(id, resource_id, mode, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json)
-			SELECT id, resource_id, mode, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json FROM resource_ai_tasks`,
+		`INSERT INTO resource_ai_tasks_new(id, resource_id, mode, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, more_markdown, more_output_key, more_output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json)
+			SELECT id, resource_id, CASE WHEN mode = 'advanced' THEN 'more' ELSE mode END, status, solvable, precheck_note, attempt, next_page, total_pages, messages_json, markdown, output_key, output_size, more_markdown, more_output_key, more_output_size, error, model, created_by, created_at, updated_at, started_at, finished_at, prompts_json FROM resource_ai_tasks`,
 		`DROP TABLE resource_ai_tasks`,
 		`ALTER TABLE resource_ai_tasks_new RENAME TO resource_ai_tasks`,
 	}
@@ -412,6 +499,107 @@ func (s *Store) allowMultipleAITasksPerResource(ctx context.Context) error {
 		return errors.New("resource_ai_tasks rebuild left foreign key violations")
 	}
 	return rows.Err()
+}
+
+// migrateAdvancedAIMode renames the legacy "advanced" mode to "more" even when
+// the table was created without a CHECK constraint (the common case for older
+// deployments). Active rows only move when there is no active "more" row for
+// the same resource, so the partial unique index cannot be violated.
+func (s *Store) migrateAdvancedAIMode(ctx context.Context) error {
+	var exists int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'resource_ai_tasks'`).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE resource_ai_tasks SET mode = 'more'
+		WHERE mode = 'advanced' AND status NOT IN ('queued', 'running', 'paused')`); err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE resource_ai_tasks SET mode = 'more'
+		WHERE mode = 'advanced' AND status IN ('queued', 'running', 'paused')
+		AND NOT EXISTS (SELECT 1 FROM resource_ai_tasks more
+			WHERE more.resource_id = resource_ai_tasks.resource_id AND more.mode = 'more'
+			AND more.status IN ('queued', 'running', 'paused'))`)
+	return err
+}
+
+// mergeLegacyAIReports folds the old one-row-per-mode reports into the
+// combined row introduced with single-pass analysis. The newest succeeded
+// basic row receives the more_* fields of the newest succeeded "more" row and
+// the now-redundant "more" row is removed (its PDF stays referenced by the
+// combined row). Redundant terminal "more" rows without output are dropped so
+// the console lists one row per paper.
+func (s *Store) mergeLegacyAIReports(ctx context.Context) error {
+	var exists int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'resource_ai_tasks'`).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT b.id, m.id, m.markdown, m.output_key, m.output_size, m.updated_at
+		FROM resource_ai_tasks b
+		JOIN resource_ai_tasks m ON m.resource_id = b.resource_id
+		WHERE b.status = 'succeeded' AND b.mode = 'basic' AND b.output_key <> '' AND b.more_output_key = ''
+		  AND m.status = 'succeeded' AND m.mode = 'more' AND m.output_key <> ''
+		  AND b.rowid = (SELECT MAX(rowid) FROM resource_ai_tasks x
+			WHERE x.resource_id = b.resource_id AND x.mode = 'basic' AND x.status = 'succeeded')
+		  AND m.rowid = (SELECT MAX(rowid) FROM resource_ai_tasks y
+			WHERE y.resource_id = m.resource_id AND y.mode = 'more' AND y.status = 'succeeded')`)
+	if err != nil {
+		return err
+	}
+	type mergeRow struct {
+		basicID, moreID         string
+		markdown, outputKey     string
+		outputSize, moreUpdated int64
+	}
+	merges := make([]mergeRow, 0)
+	for rows.Next() {
+		var item mergeRow
+		if err := rows.Scan(&item.basicID, &item.moreID, &item.markdown, &item.outputKey, &item.outputSize, &item.moreUpdated); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		merges = append(merges, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range merges {
+		if _, err := tx.ExecContext(ctx, `UPDATE resource_ai_tasks
+			SET more_markdown = ?, more_output_key = ?, more_output_size = ?, updated_at = MAX(updated_at, ?)
+			WHERE id = ?`,
+			item.markdown, item.outputKey, item.outputSize, item.moreUpdated, item.basicID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM resource_ai_tasks WHERE id = ?`, item.moreID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM resource_ai_tasks
+		WHERE mode = 'more' AND status IN ('skipped', 'failed', 'cancelled')
+		  AND output_key = '' AND more_output_key = ''
+		  AND EXISTS (SELECT 1 FROM resource_ai_tasks b
+			WHERE b.resource_id = resource_ai_tasks.resource_id AND b.mode = 'basic')`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
@@ -449,6 +637,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if err := s.allowMultipleAITasksPerResource(ctx); err != nil {
 		return fmt.Errorf("allow multiple AI tasks: %w", err)
+	}
+	if err := s.migrateAdvancedAIMode(ctx); err != nil {
+		return fmt.Errorf("migrate advanced AI mode: %w", err)
+	}
+	if err := s.mergeLegacyAIReports(ctx); err != nil {
+		return fmt.Errorf("merge legacy AI reports: %w", err)
 	}
 	if _, err := s.DB.ExecContext(ctx, embeddedSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)

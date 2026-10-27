@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS error_report_ignored_students (
 CREATE TABLE IF NOT EXISTS question_banks (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
     course_code TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
@@ -246,6 +246,15 @@ CREATE TABLE IF NOT EXISTS school_calendar_config (
 INSERT OR IGNORE INTO school_calendar_config(id, days_json, slots_json, updated_at)
 VALUES (1, '[]', '[]', 0);
 
+-- Per-college school-calendar exceptions. A row replaces the global exception
+-- list for students whose profile belongs to that college; days_json keeps the
+-- full day range with the college's own names and course adjustments.
+CREATE TABLE IF NOT EXISTS school_calendar_colleges (
+    college TEXT PRIMARY KEY,
+    days_json TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
 -- Runtime settings edited from the console. Bootstrap settings (listen address,
 -- database path, web directory, peppers, super admin key, AI work directories)
 -- stay in data/.env; every row here is applied without a restart.
@@ -355,10 +364,8 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
     course_code TEXT NOT NULL,
     name TEXT NOT NULL,
     tags TEXT NOT NULL DEFAULT '',
-    pdf_key TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
     size_bytes INTEGER NOT NULL DEFAULT 0,
-    manual_pdf_key TEXT NOT NULL DEFAULT '',
-    manual_size_bytes INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_upload', 'pending_review')),
     submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     submitted_by_name TEXT NOT NULL DEFAULT '',
@@ -371,6 +378,36 @@ CREATE TABLE IF NOT EXISTS resource_submissions (
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_kind ON resource_submissions(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissions(status, kind, created_at);
 
+-- Files of one upload. One submission is one submit: the app may send several
+-- files and the administrator reviews them as a list. duplicate marks a file
+-- whose content is already published (same object key under the published
+-- prefix) when it was uploaded.
+CREATE TABLE IF NOT EXISTS submission_files (
+    id TEXT PRIMARY KEY,
+    submission_id TEXT NOT NULL REFERENCES resource_submissions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '',
+    object_key TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT 'pdf',
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    duplicate INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_submission_files_submission ON submission_files(submission_id);
+CREATE INDEX IF NOT EXISTS idx_submission_files_key ON submission_files(object_key);
+
+-- One row per (content, user, day) that already counted as a download, so a
+-- retry or a second tap does not inflate the counters. Older days are pruned
+-- when a new mark is written.
+CREATE TABLE IF NOT EXISTS download_marks (
+    kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (kind, item_id, user_id, day)
+);
+
 -- AI analysis of an exam PDF. One row per analysis run; older rows are kept
 -- as history so re-analysing a paper never overwrites a previous result. The
 -- row is also the resumable job state so a restart can continue from the last
@@ -380,7 +417,7 @@ CREATE INDEX IF NOT EXISTS idx_resource_submissions_status ON resource_submissio
 CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     id TEXT PRIMARY KEY,
     resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-    mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
+    mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'more')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
     solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
     precheck_note TEXT NOT NULL DEFAULT '',
@@ -391,6 +428,9 @@ CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     markdown TEXT NOT NULL DEFAULT '',
     output_key TEXT NOT NULL DEFAULT '',
     output_size INTEGER NOT NULL DEFAULT 0,
+    more_markdown TEXT NOT NULL DEFAULT '',
+    more_output_key TEXT NOT NULL DEFAULT '',
+    more_output_size INTEGER NOT NULL DEFAULT 0,
     error TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',

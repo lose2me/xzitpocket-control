@@ -325,14 +325,16 @@ func TestControlFlow(t *testing.T) {
 		t.Fatalf("API base without a resource should return JSON 404, got %d", status)
 	}
 	createdBank := requestWithHeaders(t, ts.URL+"/api/v1/admin/question-banks", http.MethodPost, questionBank, map[string]string{"Authorization": "Bearer " + adminAccess})
-	if createdBank["questionBank"] == nil {
+	createdBankBody, _ := createdBank["questionBank"].(map[string]any)
+	createdBankID, _ := createdBankBody["id"].(string)
+	if createdBankID == "" {
 		t.Fatalf("question bank was not created: %#v", createdBank)
 	}
-	adminPreview := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/QB-001", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
+	adminPreview := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+createdBankID, http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + adminAccess})
 	if adminPreview["questionBank"] == nil {
 		t.Fatalf("admin question bank preview failed: %#v", adminPreview)
 	}
-	publicBank := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/QB-001", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access})
+	publicBank := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+createdBankID, http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access})
 	if publicBank["questionBank"] == nil {
 		t.Fatalf("question bank read failed: %#v", publicBank)
 	}

@@ -285,6 +285,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminSchoolCalendar(w, r)
 	case r.Method == http.MethodPut && path == "/admin/school-calendar":
 		s.adminSchoolCalendarUpdate(w, r)
+	case r.Method == http.MethodPut && path == "/admin/school-calendar/exceptions":
+		s.adminSchoolCalendarExceptions(w, r)
+	case r.Method == http.MethodDelete && path == "/admin/school-calendar/exceptions":
+		s.adminSchoolCalendarExceptionsClear(w, r)
 	case r.Method == http.MethodGet && path == "/admin/question-banks":
 		s.adminQuestionBanks(w, r)
 	case r.Method == http.MethodPost && path == "/admin/question-banks":
@@ -339,20 +343,20 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.adminTextbookDownload(w, r, segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/textbook-submissions":
 		s.adminSubmissions(w, r, "textbook")
-	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "approve", "admin", "textbook-submissions"):
-		s.adminSubmissionApprove(w, r, "textbook", segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "reject", "admin", "textbook-submissions"):
 		s.adminSubmissionReject(w, r, "textbook", segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesIDSuffix(path, "file", "admin", "textbook-submissions"):
+		s.adminSubmissionFileDelete(w, r, "textbook", segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "textbook-submissions"):
 		s.adminSubmissionResourceURL(w, r, "textbook", segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "textbook-submissions"):
 		s.adminSubmissionDownload(w, r, "textbook", segment(path, 2))
 	case r.Method == http.MethodGet && path == "/admin/resource-submissions":
 		s.adminSubmissions(w, r, "resource")
-	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "approve", "admin", "resource-submissions"):
-		s.adminSubmissionApprove(w, r, "resource", segment(path, 2))
 	case r.Method == http.MethodPost && pathMatchesIDSuffix(path, "reject", "admin", "resource-submissions"):
 		s.adminSubmissionReject(w, r, "resource", segment(path, 2))
+	case r.Method == http.MethodDelete && pathMatchesIDSuffix(path, "file", "admin", "resource-submissions"):
+		s.adminSubmissionFileDelete(w, r, "resource", segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "resource-url", "admin", "resource-submissions"):
 		s.adminSubmissionResourceURL(w, r, "resource", segment(path, 2))
 	case r.Method == http.MethodGet && pathMatchesIDSuffix(path, "download", "admin", "resource-submissions"):

@@ -476,13 +476,8 @@ import { template } from './template.js';
       const schoolCalendarConfig = ref({ days: [], updatedAt: '' });
       const schoolCalendarDays = ref([]);
       const schoolCalendarRange = ref('');
-      const schoolCalendarDayDialog = ref(false);
       const schoolCalendarRebuildDialog = ref(false);
       const schoolCalendarTableKey = ref(0);
-      const schoolCalendarEditingDate = ref('');
-      const schoolCalendarEditingAdjustment = ref('');
-      const schoolCalendarEditingName = ref('');
-      const schoolCalendarEditingNew = ref(false);
       const schoolCalendarSlotsText = ref('');
       const formatSchoolCalendarSlots = (slots) => (Array.isArray(slots) ? slots : [])
         .map(slot => {
@@ -722,14 +717,14 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '21%' }
       ];
       const submissionHeaders = [
-        { title: '名称', key: 'name', width: '22%' },
-        { title: '类型', key: 'format', align: 'center', width: '7%' },
-        { title: '学号', key: 'student_id', width: '13%' },
-        { title: '关联课程', key: 'course_code', width: '11%' },
-        { title: '提交人', key: 'submitted_by_name', width: '12%' },
-        { title: '大小', key: 'size_bytes', align: 'center', width: '7%' },
+        { title: '备注', key: 'note', width: '24%' },
+        { title: '文件', key: 'file_count', align: 'center', width: '8%' },
+        { title: '学号', key: 'student_id', width: '14%' },
+        { title: '关联课程', key: 'course_code', width: '13%' },
+        { title: '提交人', key: 'submitted_by_name', width: '13%' },
+        { title: '大小', key: 'size_bytes', align: 'center', width: '8%' },
         { title: '提交时间', key: 'created_at', width: '12%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '16%' }
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '8%' }
       ];
       const resourceHeaders = [
         { title: '课程编号', key: 'code', sortable: true, width: '19%' },
@@ -742,7 +737,7 @@ import { template } from './template.js';
         { title: '文件名', key: 'name', width: '18%' },
         { title: '可解析', key: 'ai_solvable', align: 'center', width: '8%' },
         { title: '精简版', key: 'has_basic_ai', align: 'center', width: '8%' },
-        { title: '小学生版', key: 'has_advanced_ai', align: 'center', width: '9%' },
+        { title: '小学生版', key: 'has_more_ai', align: 'center', width: '9%' },
         { title: '原版', key: 'has_manual_ai', align: 'center', width: '7%' },
         { title: '贡献者学号', key: 'contributor_student_id', width: '12%' },
         { title: '下载量', key: 'download_count', align: 'center', width: '7%' },
@@ -754,7 +749,7 @@ import { template } from './template.js';
         { title: '课程', key: 'course_code', width: '8%' },
         { title: '可解析', key: 'ai_solvable', align: 'center', width: '7%' },
         { title: '精简版', key: 'has_basic_ai', align: 'center', width: '7%' },
-        { title: '小学生版', key: 'has_advanced_ai', align: 'center', width: '8%' },
+        { title: '小学生版', key: 'has_more_ai', align: 'center', width: '8%' },
         { title: '原版', key: 'has_manual_ai', align: 'center', width: '6%' },
         { title: '贡献者学号', key: 'contributor_student_id', width: '11%' },
         { title: '下载量', key: 'download_count', align: 'center', width: '6%' },
@@ -769,15 +764,13 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '27%' }
       ];
       const aiHeaders = [
-        { title: '试卷', key: 'resource_name', width: '22%' },
-        { title: '课程号', key: 'course_code', width: '10%' },
-        { title: '类型', key: 'mode', align: 'center', width: '9%' },
-        { title: '状态', key: 'status', align: 'center', width: '9%' },
-        { title: '耗时', key: 'elapsed', align: 'center', width: '10%' },
-        { title: '更新时间', key: 'updated_at', width: '15%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '25%' }
+        { title: '试卷', key: 'resource_name', width: '20%' },
+        { title: '课程号', key: 'course_code', width: '9%' },
+        { title: '状态', key: 'status', align: 'center', width: '8%' },
+        { title: '耗时', key: 'elapsed', align: 'center', width: '8%' },
+        { title: '更新时间', key: 'updated_at', width: '14%' },
+        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '28%' }
       ];
-      const aiModeLabel = (mode) => mode === 'advanced' ? '小学生版' : mode === 'manual' ? '原版' : '精简版';
       const aiDoneIcon = (done) => done ? 'mdi-check-circle' : 'mdi-minus-circle-outline';
       const aiDoneColor = (done) => done ? 'success' : 'grey';
       const aiSolvableLabel = (value) => value === 1 ? '可解析' : value === 0 ? '不可解析' : '未检测';
@@ -809,17 +802,10 @@ import { template } from './template.js';
         const latest = aiTaskForResource(item.resource_id, item.mode);
         return latest ? latest.id === item.id : false;
       };
-      const aiLatestOutputTask = (resourceId, mode) => (aiTasks.value || []).reduce((latest, task) => {
-        if (task.resource_id !== resourceId || !task.has_output) return latest;
-        if (mode && task.mode !== mode) return latest;
-        if (!latest) return task;
-        const current = Date.parse(task.created_at || '') || 0;
-        const previous = Date.parse(latest.created_at || '') || 0;
-        return current > previous || (current === previous && task.id > latest.id) ? task : latest;
-      }, null);
       const aiIsLatestOutput = (row) => {
         const item = rawItem(row);
-        const latest = aiLatestOutputTask(item.resource_id, item.mode);
+        if (!item.has_output && !item.has_more_output) return false;
+        const latest = aiTaskForResource(item.resource_id);
         return latest ? latest.id === item.id : false;
       };
       const aiActionLabel = (resourceId) => {
@@ -848,19 +834,31 @@ import { template } from './template.js';
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '6%' }
       ];
       const riskOptions = [{ title: '全部', value: '' }, { title: '未查看', value: 'false' }, { title: '已查看', value: 'true' }];
-      const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '草稿', value: 'draft' }, { title: '停用', value: 'disabled' }];
+      const bankStatusOptions = [{ title: '启用', value: 'active' }, { title: '停用', value: 'disabled' }];
       const questionTypeOptions = ['单选题', '多选题', '判断题', '填空题'];
       const bankPageCount = computed(() => Math.max(1, Math.ceil(bankTotal.value / bankItemsPerPage.value)));
-      const schoolCalendarEditingDateLabel = computed(() =>
-        schoolCalendarEditingDate.value || '添加例外日期',
-      );
-      const schoolCalendarHeaders = [
-        { title: '日期', key: 'date', width: '22%' },
-        { title: '名称', key: 'name', width: '31%' },
-        { title: '课程调整', key: 'adjustment', width: '31%' },
-        { title: '操作', key: 'actions', sortable: false, align: 'center', width: '16%' },
-      ];
-      const schoolCalendarExceptions = computed(() => schoolCalendarDays.value.filter(day => day.name || day.adjustment));
+
+      // 例外时间：全局默认，某个学院单独配置后该学院的学生用院级配置。
+      const schoolCalendarColleges = ref([]);
+      const schoolCalendarCollegeOptions = ref([]);
+      const schoolCalendarScope = ref('');
+      const schoolCalendarExceptionsJson = ref('[]');
+      const schoolCalendarScopeItems = computed(() => {
+        const names = new Set(schoolCalendarCollegeOptions.value);
+        for (const item of schoolCalendarColleges.value) names.add(item.college);
+        return [{ title: '全局（默认）', value: '' }].concat(
+          [...names].sort().map(name => ({ title: name, value: name })),
+        );
+      });
+      const schoolCalendarExceptionsOf = (scope) => {
+        const days = scope
+          ? (schoolCalendarColleges.value.find(item => item.college === scope) || {}).exceptions || []
+          : schoolCalendarDays.value.filter(day => day.name || day.adjustment);
+        return days.map(day => ({ date: day.date, name: day.name || '', adjustment: day.adjustment || '' }));
+      };
+      const refreshSchoolCalendarJson = () => {
+        schoolCalendarExceptionsJson.value = JSON.stringify(schoolCalendarExceptionsOf(schoolCalendarScope.value), null, 2);
+      };
 
       const notify = (text, color) => { snackbar.value = { show: true, text, color: color || 'success' }; };
       const closeBankEditor = () => {
@@ -1249,27 +1247,55 @@ import { template } from './template.js';
         const out = await api(submissionBase('resource') + '?limit=200');
         resourceSubmissions.value = out.items || []; resourceSubmissionTotal.value = out.total || 0;
       };
-      const downloadSubmission = (kind, row) => call(async () => {
-        const item = rawItem(row);
-        await downloadFile(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/download', documentFileName(item.name, item.format));
+      // A review row is only a staging area for files. The list dialog shows
+      // every uploaded file; deleting the last file hides the row.
+      const submissionFilesDialog = ref(false);
+      const submissionFilesKind = ref('');
+      const submissionFilesItem = ref(null);
+      const submissionFileRows = computed(() => {
+        const item = submissionFilesItem.value;
+        return (item && Array.isArray(item.files)) ? item.files : [];
+      });
+      const openSubmissionFiles = (kind, row) => {
+        submissionFilesKind.value = kind;
+        submissionFilesItem.value = rawItem(row);
+        submissionFilesDialog.value = true;
+      };
+      const reloadSubmissionQueue = async (kind) => {
+        if (kind === 'textbook') await loadTextbookSubmissions(); else await loadResourceSubmissions();
+      };
+      const syncSubmissionFilesItem = async () => {
+        const item = submissionFilesItem.value;
+        if (!item) return;
+        const kind = submissionFilesKind.value;
+        const list = kind === 'textbook' ? textbookSubmissions.value : resourceSubmissions.value;
+        const found = (list || []).find(row => (row.id || '') === item.id);
+        if (!found) {
+          submissionFilesDialog.value = false;
+          submissionFilesItem.value = null;
+          return;
+        }
+        submissionFilesItem.value = found;
+      };
+      const downloadSubmissionFile = (fileRow) => call(async () => {
+        const item = rawItem(submissionFilesItem.value || {});
+        const query = '?file=' + encodeURIComponent(fileRow.id);
+        await downloadFile(submissionBase(submissionFilesKind.value) + '/' + encodeURIComponent(item.id) + '/download' + query, documentFileName(fileRow.name, fileRow.format));
         notify('已开始下载');
       });
-      const approveSubmission = (kind, row) => call(async () => {
-        const item = rawItem(row);
-        await api(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/approve', { method: 'POST' });
-        notify(kind === 'textbook' ? '已通过审核，教材已加入书单' : '已通过审核，试卷已加入课程');
-        if (kind === 'textbook') {
-          await Promise.all([loadTextbookSubmissions(), loadTextbooks()]);
-        } else {
-          await Promise.all([loadResourceSubmissions(), loadCourses()]);
-          if (resourceDialog.value && resourceCourse.value.code === item.course_code) await loadCourseResources();
-        }
+      const deleteSubmissionFile = (fileRow) => call(async () => {
+        const item = rawItem(submissionFilesItem.value || {});
+        if (!window.confirm('确定删除“' + (fileRow.name || '该文件') + '”吗？对象存储里的文件会一起删除，且无法恢复。')) return;
+        await api(submissionBase(submissionFilesKind.value) + '/' + encodeURIComponent(item.id) + '/file?file=' + encodeURIComponent(fileRow.id), { method: 'DELETE' });
+        notify('文件已删除');
+        await reloadSubmissionQueue(submissionFilesKind.value);
+        await syncSubmissionFilesItem();
       });
       const rejectSubmission = (kind, row) => call(async () => {
         const item = rawItem(row);
-        if (!window.confirm('确定驳回并删除“' + (item.name || '该资料') + '”吗？')) return;
+        if (!window.confirm('确定删除“' + (item.name || '该资料') + '”吗？对象存储里的文件会一起删除，且无法恢复。')) return;
         await api(submissionBase(kind) + '/' + encodeURIComponent(item.id) + '/reject', { method: 'POST' });
-        notify('已驳回');
+        notify('已删除');
         if (kind === 'textbook') await loadTextbookSubmissions(); else await loadResourceSubmissions();
       });
       const sortTextbooks = (sortBy) => call(async () => { textbookSortBy.value = Array.isArray(sortBy) ? sortBy : []; textbookPage.value = 1; await loadTextbooks(); });
@@ -1361,23 +1387,20 @@ import { template } from './template.js';
         const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify(payload) });
         const created = (out.items || []).length;
         const failed = out.failed || [];
-        const createdModes = [...new Set((out.items || []).map(item => aiModeLabel(item.mode) + '解析'))];
-        const suffix = createdModes.length ? '（' + createdModes.join('、') + '）' : '';
-        if (failed.length) notify('已加入 ' + created + ' 个任务' + suffix + '，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
-        else notify('已加入 ' + created + ' 个 AI 解析任务' + suffix);
+        if (failed.length) notify('已加入 ' + created + ' 个任务，失败 ' + failed.length + ' 个：' + failed.map(f => f.reason).join('；'), 'warning');
+        else notify('已加入 ' + created + ' 个 AI 解析任务');
         await loadAITasks();
       });
       const enqueueAIItem = (row) => {
         const item = rawItem(row);
         const task = aiTaskForResource(item.id);
         if (task && task.status === 'paused') return retryAITask(task);
-        return enqueueAIResources([item.id], ['basic', 'advanced']);
+        return enqueueAIResources([item.id], ['basic']);
       };
       const reanalyzeAITask = (row) => {
         const item = rawItem(row);
-        const mode = item.mode || 'basic';
-        if (!window.confirm('确定重新解析“' + (item.resource_name || '试卷') + '”的' + aiModeLabel(mode) + '解析吗？')) return;
-        return enqueueAIResources([item.resource_id], [mode]);
+        if (!window.confirm('确定重新解析“' + (item.resource_name || '试卷') + '”吗？将同时更新精简版和小学生版。')) return;
+        return enqueueAIResources([item.resource_id], ['basic']);
       };
       const retryAITask = (row) => call(async () => {
         const item = rawItem(row);
@@ -1392,9 +1415,11 @@ import { template } from './template.js';
         notify('已取消解析');
         await loadAITasks();
       });
-      const downloadAITask = (row) => call(async () => {
+      const downloadAITask = (row, part) => call(async () => {
         const item = rawItem(row);
-        await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download', (item.resource_name || '试卷') + '-AI解析-' + aiModeLabel(item.mode) + '.pdf');
+        const mode = part === 'more' ? 'more' : 'basic';
+        const label = mode === 'more' ? '小学生版' : '精简版';
+        await downloadFile('/api/v1/admin/ai-analyses/' + encodeURIComponent(item.id) + '/download?mode=' + mode, (item.resource_name || '试卷') + '-AI解析-' + label + '.pdf');
       });
       const loadMathJax = () => {
         if (window.MathJax && window.MathJax.typesetPromise) return Promise.resolve();
@@ -1441,7 +1466,7 @@ import { template } from './template.js';
         } catch (_) {}
         aiPromptCalls.value = Array.isArray(calls) ? calls : [];
         aiPromptText.value = text;
-        aiPromptTitle.value = (item.resource_name || 'Prompt') + ' · ' + aiModeLabel(item.mode) + '解析';
+        aiPromptTitle.value = item.resource_name || 'Prompt';
         aiPromptTab.value = aiPromptCalls.value.length ? '0' : 'json';
         aiPromptDialog.value = true;
       });
@@ -1666,6 +1691,7 @@ import { template } from './template.js';
       const settingGroupIcons = {
         general: 'mdi-tune-variant', risk: 'mdi-shield-alert-outline', storage: 'mdi-cloud-outline',
         cdn: 'mdi-web', monitoring: 'mdi-server-outline', ai: 'mdi-file-search-outline',
+        ingest: 'mdi-download-network-outline',
       };
       const settingGroupIcon = (key) => settingGroupIcons[key] || 'mdi-cog-outline';
       // 卡片标题跟随当前 tab，避免标题和 tab 各说各的。
@@ -1733,14 +1759,22 @@ import { template } from './template.js';
         releaseTestConfig.value = Object.assign({}, out || {}, { updatedAt: formatDateTime(out && out.updatedAt) });
         releaseTestForm.value = { latestVersion: out.latestVersion || '', downloadUrl: out.downloadUrl || '', changelog: out.changelog || '' };
       };
-      const loadSchoolCalendar = async () => {
-        const out = await api('/api/v1/admin/school-calendar');
+      const applySchoolCalendarView = (out) => {
         schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
         schoolCalendarDays.value = (out && out.days || []).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
+        schoolCalendarColleges.value = out && out.colleges ? out.colleges : [];
+        schoolCalendarCollegeOptions.value = out && out.collegeOptions ? out.collegeOptions : [];
         schoolCalendarSlotsText.value = formatSchoolCalendarSlots(out && out.slots);
         schoolCalendarRange.value = schoolCalendarDays.value.length
           ? schoolCalendarDays.value[0].date.replaceAll('-', '') + '-' + schoolCalendarDays.value[schoolCalendarDays.value.length - 1].date.replaceAll('-', '')
           : '';
+        if (schoolCalendarScope.value && !schoolCalendarScopeItems.value.some(item => item.value === schoolCalendarScope.value)) {
+          schoolCalendarScope.value = '';
+        }
+        refreshSchoolCalendarJson();
+      };
+      const loadSchoolCalendar = async () => {
+        applySchoolCalendarView(await api('/api/v1/admin/school-calendar'));
       };
       const normalizeCompactDate = (value) => {
         if (!/^\d{8}$/.test(value)) return '';
@@ -2107,10 +2141,36 @@ import { template } from './template.js';
         if (!schoolCalendarDays.value.length) throw new Error('请至少配置一天校历');
         const slots = parseSchoolCalendarSlots(schoolCalendarSlotsText.value);
         const out = await api('/api/v1/admin/school-calendar', { method: 'PUT', body: JSON.stringify({ days: schoolCalendarDays.value, slots }) });
-        schoolCalendarConfig.value = Object.assign({}, out || {}, { updatedAt: out && out.updatedAt ? out.updatedAt : '' });
-        schoolCalendarDays.value = (out.days || schoolCalendarDays.value).map(day => Object.assign({}, day, { name: day.name || '', adjustment: day.adjustment || '' }));
-        schoolCalendarSlotsText.value = formatSchoolCalendarSlots((out && out.slots) || slots);
+        applySchoolCalendarView(out);
         notify('学校校历已保存');
+      });
+      const selectSchoolCalendarScope = (scope) => {
+        schoolCalendarScope.value = scope;
+        refreshSchoolCalendarJson();
+      };
+      const saveSchoolCalendarExceptions = () => call(async () => {
+        let exceptions;
+        try {
+          exceptions = JSON.parse(schoolCalendarExceptionsJson.value || '[]');
+        } catch (e) {
+          throw new Error('例外时间必须是合法的 JSON 数组');
+        }
+        if (!Array.isArray(exceptions)) throw new Error('例外时间必须是 JSON 数组');
+        const out = await api('/api/v1/admin/school-calendar/exceptions', {
+          method: 'PUT',
+          body: JSON.stringify({ college: schoolCalendarScope.value, exceptions }),
+        });
+        applySchoolCalendarView(out);
+        notify(schoolCalendarScope.value ? '院级例外时间已保存' : '全局例外时间已保存');
+      });
+      const clearSchoolCalendarCollege = () => call(async () => {
+        const scope = schoolCalendarScope.value;
+        if (!scope) return;
+        if (!window.confirm('确定删除“' + scope + '”的例外时间配置吗？删除后该学院使用全局配置。')) return;
+        const out = await api('/api/v1/admin/school-calendar/exceptions?college=' + encodeURIComponent(scope), { method: 'DELETE' });
+        schoolCalendarScope.value = '';
+        applySchoolCalendarView(out);
+        notify('已删除院级配置，改用全局');
       });
       const openSchoolCalendarRebuild = () => {
         error.value = '';
@@ -2119,60 +2179,6 @@ import { template } from './template.js';
       const confirmSchoolCalendarRebuild = () => {
         schoolCalendarRebuildDialog.value = false;
         if (rebuildSchoolCalendar()) saveSchoolCalendar();
-      };
-      const openNewSchoolCalendarDay = () => {
-        schoolCalendarEditingNew.value = true;
-        schoolCalendarEditingDate.value = '';
-        schoolCalendarEditingAdjustment.value = '';
-        schoolCalendarEditingName.value = '';
-        schoolCalendarDayDialog.value = true;
-      };
-      const openSchoolCalendarDay = (day) => {
-        schoolCalendarEditingNew.value = false;
-        schoolCalendarEditingDate.value = day.date.replaceAll('-', '');
-        schoolCalendarEditingAdjustment.value = day.adjustment || '';
-        schoolCalendarEditingName.value = day.name || '';
-        schoolCalendarDayDialog.value = true;
-      };
-      const deleteSchoolCalendarException = (day) => {
-        const item = rawItem(day);
-        const target = schoolCalendarDays.value.find(entry => entry.date === item.date);
-        if (!target) return;
-        target.name = '';
-        target.adjustment = '';
-        schoolCalendarTableKey.value++;
-      };
-      const saveSchoolCalendarDay = () => {
-        const compactDate = (schoolCalendarEditingDate.value || '').trim();
-        const date = normalizeCompactDate(compactDate);
-        if (!date) {
-          error.value = '日期必须是有效的 YYYYMMDD 格式';
-          return;
-        }
-        const day = schoolCalendarDays.value.find(item => item.date === date);
-        if (!day && !schoolCalendarEditingNew.value) return;
-        const value = (schoolCalendarEditingAdjustment.value || '').trim();
-        if (value !== '' && value !== '/' && !/^\d{8}$/.test(value)) {
-          error.value = '调整参数必须是 YYYYMMDD 或 /';
-          return;
-        }
-        if (!day) {
-          const parsed = new Date(date + 'T00:00:00Z');
-          const first = schoolCalendarDays.value[0];
-          const last = schoolCalendarDays.value[schoolCalendarDays.value.length - 1];
-          if (Number.isNaN(parsed.getTime()) || !first || !last || date < first.date || date > last.date) {
-            error.value = '例外日期必须位于当前校历范围内';
-            return;
-          }
-          schoolCalendarDays.value.push({ date, name: '', adjustment: '' });
-          schoolCalendarDays.value.sort((a, b) => a.date.localeCompare(b.date));
-        }
-        const target = schoolCalendarDays.value.find(item => item.date === date);
-        target.name = (schoolCalendarEditingName.value || '').trim();
-        target.adjustment = value;
-        schoolCalendarDayDialog.value = false;
-        schoolCalendarEditingNew.value = false;
-        schoolCalendarTableKey.value++;
       };
       const openNewCDK = () => {
         call(async () => {
@@ -2285,8 +2291,8 @@ import { template } from './template.js';
         return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ? formatDateTime(value) : value;
       };
       const courseCodesText = (codes) => (Array.isArray(codes) ? codes.filter(Boolean).join('、') : '') || '-';
-      const statusColor = (status) => ({ active: 'success', draft: 'info', disabled: 'warning', used: 'info' }[status] || 'secondary');
-      const statusLabel = (status) => ({ active: '启用', draft: '草稿', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
+      const statusColor = (status) => ({ active: 'success', disabled: 'warning', used: 'info' }[status] || 'secondary');
+      const statusLabel = (status) => ({ active: '启用', disabled: '禁用', used: '已兑换' }[status] || valueOrDash(status));
       const riskTypeLabel = (type) => ({ login_attempt_burst: '短时间登录过多', account_device_burst: '账号设备过多' }[type] || valueOrDash(type));
       const eventTypeLabel = (type) => ({ app_start: '启动', foreground: '前台', heartbeat: '心跳', control_login_success: '登录成功', library_open: '打开题库', logout: '退出' }[type] || valueOrDash(type));
       const actionLabel = (action) => ({ admin_login: '管理员登录', admin_logout: '管理员退出', login_attempt: '登录尝试', user_status_change: '用户状态更新', error_report_student_ignore: '忽略学号错误上报', error_report_student_allow: '允许学号错误上报', error_reports_clear: '清空错误记录', question_bank_create: '创建题库', question_bank_update: '更新题库', question_bank_status: '更新题库状态', library_cdk_create: '生成通用 CDK', library_cdk_redeem: '兑换通用 CDK', library_cdk_status: '更新通用 CDK 状态', app_release_update: '更新 APP 发布配置', app_release_test_update: '更新 APP 测试发布配置', school_calendar_update: '更新学校校历', risk_acknowledge: '标记风控记录', risk_clear: '清空风控记录', device_revoke: '封禁设备', device_restore: '恢复设备', textbook_upload: '上传教材', textbook_create: '创建教材', textbook_update: '更新教材', textbook_delete: '删除教材', textbook_archive: '归档教材', textbook_restore: '恢复教材', resource_upload: '上传试卷', resource_delete: '删除试卷', resource_archive: '归档试卷', resource_restore: '恢复试卷', question_bank_archive: '归档题库', question_bank_restore: '恢复题库', textbook_submission_create: '提交教材审核', textbook_submission_approve: '通过教材审核', textbook_submission_reject: '驳回教材审核', resource_submission_create: '提交试卷审核', resource_submission_approve: '通过试卷审核', resource_submission_reject: '驳回试卷审核', admin_create: '创建管理员', admin_update: '更新管理员', admin_delete: '删除管理员', course_upload: '上传课程', course_create: '创建课程', course_update: '更新课程', course_delete: '删除课程', ai_analysis_enqueue: '加入 AI 解析', ai_analysis_retry: '重试 AI 解析', ai_analysis_cancel: '取消 AI 解析' }[action] || valueOrDash(action));
@@ -2314,18 +2320,18 @@ import { template } from './template.js';
 
       return {
         logged, drawer, mdAndUp, view, loading, error, overview, breakdown, series, users, devices, risks, audit, errorReports, errorReportsTotal, errorReportsPage, errorReportsPerPage, errorReportSortBy,
-        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, aiPromptSettingFields, aiPromptSettingTab, aiPromptSettingField, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarExceptions, schoolCalendarHeaders, schoolCalendarTableKey, schoolCalendarDayDialog, schoolCalendarRebuildDialog, schoolCalendarEditingDate, schoolCalendarEditingDateLabel, schoolCalendarEditingAdjustment, schoolCalendarEditingName,
+        banks, bankTotal, bankPage, bankItemsPerPage, bankSortBy, bankDialog, bankEditing, bankJSON, bankCourseCodes, courseCodesText, archivedBanks, archivedBankTotal, archivedBankHeaders, loadArchivedBanks, setBankArchived, releaseConfig, releaseForm, releaseTestConfig, releaseTestForm, settingGroups, settingGroupIcon, settingTabLabel, settingsForm, aiPromptSettingFields, aiPromptSettingTab, aiPromptSettingField, loadSettings, saveSettings, settingTab, appConfigTab, libraryTab, textbookTab, resourceTab, schoolCalendarConfig, schoolCalendarDays, schoolCalendarSlotsText, schoolCalendarRange, schoolCalendarTableKey, schoolCalendarRebuildDialog, schoolCalendarColleges, schoolCalendarCollegeOptions, schoolCalendarScope, schoolCalendarScopeItems, schoolCalendarExceptionsJson, selectSchoolCalendarScope, saveSchoolCalendarExceptions, clearSchoolCalendarCollege,
         cdks, cdkTotal, cdkPage, cdkItemsPerPage, cdkSortBy, cdkDialog, cdkRevealDialog, cdkForm, createdCDKs, cdkSearch, shareCodes, shareCodesTotal, shareCodePage, shareCodeItemsPerPage, shareCodeSortBy, shareCodeDialog, shareCodeJSON, shareCodeKind, createdShareCode, shareCodeDetail, shareCodeDetailDialog, shareCodeDetailJSON, userSearch, userPage, userItemsPerPage, userTotal, userSortBy, adminPage, devicePage, riskPage, auditPage, calendarPage, archivedBankPage, archivedTextbookPage, archivedResourcePage, textbookSubmissionPage, resourceSubmissionPage, aiPage, pageCount, pagedSlice,
         textbooks, textbookTotal, textbookPage, textbookItemsPerPage, textbookSearch, textbookSortBy, textbookDialog, textbookEditingId, textbookForm, textbookHeaders, archivedTextbooks, archivedTextbookTotal, archivedTextbookHeaders, loadArchivedTextbooks, setTextbookArchived, courseOptions,
-        textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, downloadSubmission, approveSubmission, rejectSubmission,
+        textbookSubmissions, textbookSubmissionTotal, resourceSubmissions, resourceSubmissionTotal, submissionHeaders, loadTextbookSubmissions, loadResourceSubmissions, rejectSubmission, submissionFilesDialog, submissionFilesKind, submissionFilesItem, submissionFileRows, openSubmissionFiles, downloadSubmissionFile, deleteSubmissionFile,
         resourceDialog, resourceCourse, courseResources, contributorDialog, contributorKind, contributorId, contributorName, contributorStudentID, resourceFiles, uploading, uploadProgress, manualFileInput, manualTarget, manualUploading, aiDoneIcon, aiDoneColor, aiSolvableLabel, aiSolvableColor, analysisProgressLabel, analysisProgressColor, resourceHeaders, courseResourceHeaders, archivedResources, archivedResourceTotal, archivedResourceHeaders, loadArchivedResources, setResourceArchived,
-        aiTasks, aiTotal, aiSearch, aiHeaders, aiModeLabel, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
+        aiTasks, aiTotal, aiSearch, aiHeaders, aiStatusLabel, aiElapsedLabel, aiActionLabel, aiIsLatestTask, aiIsLatestOutput, aiPromptDialog, aiPromptText, aiPromptTitle, aiPromptCalls, aiPromptActiveCall, aiPromptTab, promptViewEl, renderAIPrompts, loadAITasks, enqueueAIItem, reanalyzeAITask, retryAITask, cancelAITask, downloadAITask, openAIPrompts,
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
         selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, visibleNav, title, statCards, adminName, canRead, canWrite,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
-        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, openNewSchoolCalendarDay, openSchoolCalendarDay, deleteSchoolCalendarException, saveSchoolCalendarDay, loadUsers, searchUsers, filterUsersBy, sortUsers,
+        bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, setBankArchived, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,
         loadTextbooks, searchTextbooks, sortTextbooks, openNewTextbook, editTextbook, saveTextbook, deleteTextbook, openContributorDialog, saveContributor, onPdfSelected, onPdfPageChange, generateCover, downloadTextbook, setTextbookArchived,
         openResourceDialog, loadCourseResources, onResourceDrop, uploadResources, openManualUpload, onManualFileSelected, deleteResource, downloadResource, onTextbookDrop,
