@@ -869,7 +869,9 @@ import { template } from './template.js';
         const configured = new Set(schoolCalendarColleges.value.map(item => item.college));
         const names = new Set(schoolCalendarCollegeOptions.value);
         for (const name of configured) names.add(name);
-        return [{ title: '全局（默认）', value: '', hasConfig: false }].concat(
+        // 全局也有例外时间（校历里带名称或调课的日期），同样要标注。
+        const globalConfigured = schoolCalendarDays.value.some(day => day.name || day.adjustment);
+        return [{ title: '全局（默认）', value: '', hasConfig: globalConfigured }].concat(
           [...names].sort().map(name => ({ title: name, value: name, hasConfig: configured.has(name) })),
         );
       });
