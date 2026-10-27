@@ -22,7 +22,6 @@ type ModelOptions struct {
 	// deploy.
 	PrecheckSystem string
 	AnalysisSystem string
-	ContinuePrompt string
 }
 
 // Model talks to the DeepSeek-compatible chat completions API.
@@ -31,7 +30,6 @@ type Model struct {
 	name           string
 	precheckSystem string
 	analysisSystem string
-	continuePrompt string
 }
 
 // Message is a stored, text-only conversation turn. Images are not persisted:
@@ -128,7 +126,6 @@ func NewModel(opts ModelOptions) (*Model, error) {
 		name:           name,
 		precheckSystem: promptOr(opts.PrecheckSystem, DefaultPrecheckSystem),
 		analysisSystem: promptOr(opts.AnalysisSystem, DefaultAnalysisSystem),
-		continuePrompt: promptOr(opts.ContinuePrompt, DefaultContinuePrompt),
 	}, nil
 }
 
@@ -142,6 +139,16 @@ func promptOr(value, fallback string) string {
 
 // Name is the model id recorded on the task row.
 func (m *Model) Name() string { return m.name }
+
+// ErrResponseTruncated is returned when the model keeps hitting the output
+// limit after the maximum number of continuation calls. Treating a truncated
+// answer as success would silently store an incomplete report.
+var ErrResponseTruncated = errors.New("AI 输出在多次续写后仍被截断")
+
+// maxAnalysisContinues bounds how many times a cut-off answer is resumed in
+// the same conversation. The combined report is longer than a single answer,
+// so this is more generous than the old per-chunk loop.
+const maxAnalysisContinues = 8
 
 // IsPermanentError reports whether the API rejected the request in a way that
 // retrying the same payload cannot fix (bad key, unsupported image, ...).
@@ -201,14 +208,14 @@ func parseVerdict(content string) (Verdict, error) {
 	return verdict, nil
 }
 
-// Analyze sends one page range in the paper's conversation and returns the
-// markdown answer. Long answers are continued in the same conversation.
+// Analyze sends the whole paper and returns the combined markdown. Long
+// answers are continued in the same conversation.
 func (m *Model) Analyze(ctx context.Context, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
 	return m.AnalyzeWithSystem(ctx, m.analysisSystem, history, parts)
 }
 
-// AnalyzeWithSystem runs one analysis pass with an explicit system prompt, so
-// the same model can produce the basic and advanced reports.
+// AnalyzeWithSystem runs the single analysis pass with an explicit system
+// prompt. The same response contains both reports.
 func (m *Model) AnalyzeWithSystem(ctx context.Context, system string, history []Message, parts []openai.ChatMessagePart) (string, []PromptCall, error) {
 	messages := make([]openai.ChatCompletionMessage, 0, len(history)+2)
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: promptOr(system, DefaultAnalysisSystem)})
@@ -221,9 +228,9 @@ func (m *Model) AnalyzeWithSystem(ctx context.Context, system string, history []
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
 
-	calls := make([]PromptCall, 0, 4)
+	calls := make([]PromptCall, 0, maxAnalysisContinues)
 	var output strings.Builder
-	for attempt := 0; attempt < 4; attempt++ {
+	for attempt := 0; attempt < maxAnalysisContinues; attempt++ {
 		kind := "analyze"
 		if attempt > 0 {
 			kind = "continue"
@@ -249,10 +256,10 @@ func (m *Model) AnalyzeWithSystem(ctx context.Context, system string, history []
 		// The response was cut off; keep going in the same conversation.
 		messages = append(messages,
 			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: choice.Message.Content},
-			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: m.continuePrompt},
+			openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: DefaultContinuePrompt},
 		)
 	}
-	return strings.TrimSpace(output.String()), calls, nil
+	return strings.TrimSpace(output.String()), calls, ErrResponseTruncated
 }
 
 // BuildContent renders a page range as multimodal parts and as the plain text

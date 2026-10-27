@@ -85,7 +85,7 @@ func (s *Server) adminAITaskDownload(w http.ResponseWriter, r *http.Request, id 
 	if _, ok := s.authAdmin(w, r); !ok {
 		return
 	}
-	resp, filename, err := s.App.OpenAITaskOutput(r.Context(), id)
+	resp, filename, err := s.App.OpenAITaskOutput(r.Context(), id, r.URL.Query().Get("mode"))
 	if err != nil {
 		writeError(w, r, err)
 		return

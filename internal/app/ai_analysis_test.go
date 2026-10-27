@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -38,13 +39,24 @@ func TestRunAITaskPipeline(t *testing.T) {
 			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		content := `{"choices":[{"index":0,"message":{"role":"assistant","content":"### 第 1 题\n\n**答案：** B\n\n**解析：** 因为 $f'(x)=2x+2$。"},"finish_reason":"stop"}],"model":"deepseek-flash"}`
+		reply := func(text string) string {
+			raw, _ := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{
+					"index":         0,
+					"message":       map[string]any{"role": "assistant", "content": text},
+					"finish_reason": "stop",
+				}},
+				"model": "deepseek-flash",
+			})
+			return string(raw)
+		}
+		content := reply("<!-- BASIC -->\n### 第 1 题\n\n**答案：** B\n\n**解析：** 因为 $f'(x)=2x+2$。\n\n<!-- MORE -->\n### 第 1 题\n\n**答案：** B\n\n**考点：** 导数\n\n**详解：** 先求导再代入。\n\n**易错点：** 无\n\n**难度：** 基础")
 		if len(body.Messages) > 0 {
 			raw, _ := json.Marshal(body.Messages[0].Content)
 			if strings.Contains(string(raw), "试卷识别助手") {
 				sawPrecheck = true
-				content = `{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"solvable\":true,\"reason\":\"完整试卷\",\"subject\":\"数学\",\"question_count\":1}"},"finish_reason":"stop"}],"model":"deepseek-flash"}`
-			} else if strings.Contains(string(raw), "答案与解析") {
+				content = reply(`{"solvable":true,"reason":"完整试卷","subject":"数学","question_count":1}`)
+			} else if strings.Contains(string(raw), "精简版和小学生版") {
 				sawAnalysis = true
 			}
 		}
@@ -64,7 +76,6 @@ func TestRunAITaskPipeline(t *testing.T) {
 	a.aiState.Store(&aiRuntime{model: model, windows: []ai.Window{{Start: 0, End: 1440}}, location: time.UTC})
 	a.aiCancel = make(map[string]context.CancelFunc)
 	a.Cfg.AIWorkDir = t.TempDir()
-	a.Cfg.AIPagesPerChunk = 1
 	a.Cfg.AIMaxAttempts = 2
 	a.Cfg.AIRequestTimeout = time.Minute
 	mathDir := filepath.Join("..", "..", "ai-math")
@@ -100,13 +111,29 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if final.Status != "succeeded" {
 		t.Fatalf("status = %s, error = %s", final.Status, final.Error)
 	}
-	if final.OutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+".pdf" || final.OutputSize == 0 {
-		t.Fatalf("output = %q size=%d", final.OutputKey, final.OutputSize)
+	if final.Mode != "basic" || final.OutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+".pdf" || final.OutputSize == 0 {
+		t.Fatalf("output = %q mode=%q size=%d", final.OutputKey, final.Mode, final.OutputSize)
 	}
-	if !strings.Contains(final.Markdown, "答案") || !sawPrecheck || !sawAnalysis {
+	if final.MoreOutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+"-more.pdf" || final.MoreOutputSize == 0 {
+		t.Fatalf("more output = %q size=%d", final.MoreOutputKey, final.MoreOutputSize)
+	}
+	if !strings.Contains(final.Markdown, "答案") || strings.Contains(final.Markdown, "考点") || !sawPrecheck || !sawAnalysis {
 		t.Fatalf("markdown=%q precheck=%v analysis=%v", final.Markdown, sawPrecheck, sawAnalysis)
 	}
-	if !strings.Contains(final.PromptsJSON, "试卷识别助手") || !strings.Contains(final.PromptsJSON, "答案与解析") {
+	if !strings.Contains(final.MoreMarkdown, "考点") {
+		t.Fatalf("more markdown = %q", final.MoreMarkdown)
+	}
+	tasks, err := store.ListAITasksByResource(ctx, resource.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want one combined run", len(tasks))
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.AIWorkDir, task.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("successful task left its work directory: %v", err)
+	}
+	if !strings.Contains(final.PromptsJSON, "试卷识别助手") || !strings.Contains(final.PromptsJSON, "精简版和小学生版") {
 		t.Fatalf("prompts were not persisted: %.300s", final.PromptsJSON)
 	}
 	if !strings.Contains(final.PromptsJSON, `"role":"assistant"`) || !strings.Contains(final.PromptsJSON, "solvable") {
@@ -119,9 +146,9 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := aiTaskView(row, true, 1)
-	if !view.HasPrompts || view.Prompts == "" {
-		t.Fatalf("prompt detail missing: has=%v len=%d", view.HasPrompts, len(view.Prompts))
+	view := aiTaskView(row, true)
+	if !view.HasPrompts || view.Prompts == "" || !view.HasOutput || !view.HasMoreOutput {
+		t.Fatalf("task view missing outputs: %#v", view)
 	}
 }
 
@@ -204,11 +231,11 @@ func TestEnqueueRestartsActiveAITask(t *testing.T) {
 func TestAITaskViewElapsedUsesServerTime(t *testing.T) {
 	now := time.Now().UTC()
 	queued := sqlite.AITaskRow{AITask: sqlite.AITask{CreatedAt: now.Add(-100 * time.Second), Status: "queued"}}
-	if got := aiTaskView(queued, false, 1).ElapsedSeconds; got != 0 {
+	if got := aiTaskView(queued, false).ElapsedSeconds; got != 0 {
 		t.Fatalf("queued elapsed = %d, want 0", got)
 	}
 	running := sqlite.AITaskRow{AITask: sqlite.AITask{CreatedAt: now.Add(-100 * time.Second), StartedAt: now.Add(-10 * time.Second), Status: "running"}}
-	if got := aiTaskView(running, false, 1).ElapsedSeconds; got < 9 || got > 11 {
+	if got := aiTaskView(running, false).ElapsedSeconds; got < 9 || got > 11 {
 		t.Fatalf("running elapsed = %d", got)
 	}
 	finished := sqlite.AITaskRow{AITask: sqlite.AITask{
@@ -217,7 +244,7 @@ func TestAITaskViewElapsedUsesServerTime(t *testing.T) {
 		FinishedAt: now.Add(-20 * time.Second),
 		Status:     "succeeded",
 	}}
-	if got := aiTaskView(finished, false, 1).ElapsedSeconds; got != 70 {
+	if got := aiTaskView(finished, false).ElapsedSeconds; got != 70 {
 		t.Fatalf("finished elapsed = %d, want 70", got)
 	}
 	paused := sqlite.AITaskRow{AITask: sqlite.AITask{
@@ -226,7 +253,7 @@ func TestAITaskViewElapsedUsesServerTime(t *testing.T) {
 		UpdatedAt: now.Add(-30 * time.Second),
 		Status:    "paused",
 	}}
-	if got := aiTaskView(paused, false, 1).ElapsedSeconds; got != 60 {
+	if got := aiTaskView(paused, false).ElapsedSeconds; got != 60 {
 		t.Fatalf("paused elapsed = %d, want 60", got)
 	}
 }

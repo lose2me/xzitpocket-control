@@ -145,7 +145,7 @@ func ExtractPaper(ctx context.Context, pdfPath, title string, opts ExtractOption
 	}
 
 	paper := &Paper{Title: title, TotalPages: len(doc.Pages), Images: make(map[int]ImageAsset)}
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	nextImageID := 1
 	for _, page := range doc.Pages {
 		items := make([]pageItem, 0, len(page.Texts)+len(page.Images))
@@ -161,12 +161,7 @@ func ExtractPaper(ctx context.Context, pdfPath, title string, opts ExtractOption
 		for i := range page.Images {
 			items = append(items, pageItem{top: page.Images[i].Top, left: page.Images[i].Left, image: &page.Images[i]})
 		}
-		sort.SliceStable(items, func(i, j int) bool {
-			if items[i].top == items[j].top {
-				return items[i].left < items[j].left
-			}
-			return items[i].top < items[j].top
-		})
+		orderPageItems(items, page.Width)
 
 		built := buildPage(ctx, page.Number, page.Height, items, hasText, opts, extractDir, webpDir, seen, &nextImageID, paper.Images)
 		paper.Pages = append(paper.Pages, built)
@@ -204,7 +199,7 @@ func runPDFToHTML(ctx context.Context, pdfPath, dir string) (*pdfXML, error) {
 	return &doc, nil
 }
 
-func buildPage(ctx context.Context, number int, pageHeight float64, items []pageItem, hasText bool, opts ExtractOptions, extractDir, webpDir string, seen map[string]bool, nextImageID *int, images map[int]ImageAsset) Page {
+func buildPage(ctx context.Context, number int, pageHeight float64, items []pageItem, hasText bool, opts ExtractOptions, extractDir, webpDir string, seen map[string]int, nextImageID *int, images map[int]ImageAsset) Page {
 	var parts []Part
 	var pending strings.Builder
 	lastTop := -1.0
@@ -275,6 +270,67 @@ func buildPage(ctx context.Context, number int, pageHeight float64, items []page
 	return page
 }
 
+// orderPageItems sorts a page in reading order. A global top-then-left sort
+// interleaves the two halves of a multi-column paper, so detect a vertical
+// gutter first and read each column top-to-bottom. Single-column pages keep
+// the old behaviour.
+func orderPageItems(items []pageItem, pageWidth float64) {
+	gutter, twoColumns := detectColumnGutter(items, pageWidth)
+	sort.SliceStable(items, func(i, j int) bool {
+		columnI, columnJ := 0, 0
+		if twoColumns {
+			if items[i].left >= gutter {
+				columnI = 1
+			}
+			if items[j].left >= gutter {
+				columnJ = 1
+			}
+		}
+		if columnI != columnJ {
+			return columnI < columnJ
+		}
+		if items[i].top == items[j].top {
+			return items[i].left < items[j].left
+		}
+		return items[i].top < items[j].top
+	})
+}
+
+// detectColumnGutter looks for a wide empty band near the middle of the page
+// with substantial content on both sides. It only reports a gutter when at
+// least three items sit on each side, which keeps indented single-column text
+// and right-aligned page numbers from being mistaken for a second column.
+func detectColumnGutter(items []pageItem, pageWidth float64) (float64, bool) {
+	if pageWidth <= 0 || len(items) < 6 {
+		return 0, false
+	}
+	lefts := make([]float64, 0, len(items))
+	for _, item := range items {
+		lefts = append(lefts, item.left)
+	}
+	sort.Float64s(lefts)
+
+	bestGutter, bestGap := 0.0, 0.0
+	for i := 1; i < len(lefts); i++ {
+		gap := lefts[i] - lefts[i-1]
+		gutter := (lefts[i] + lefts[i-1]) / 2
+		if gutter < pageWidth*0.25 || gutter > pageWidth*0.75 {
+			continue
+		}
+		if gap < pageWidth*0.08 {
+			continue
+		}
+		if i < 3 || len(lefts)-i < 3 {
+			continue
+		}
+		if gap > bestGap {
+			bestGap = gap
+			bestGutter = gutter
+		}
+	}
+	return bestGutter, bestGap > 0
+}
+
 func verticalZone(top, pageHeight float64) string {
 	if pageHeight <= 0 {
 		return "页面中"
@@ -298,10 +354,7 @@ func truncateRunes(text string, maxLen int) string {
 	return string(runes[:maxLen]) + "…"
 }
 
-func registerImage(ctx context.Context, item *pdfImage, page int, extractDir string, opts ExtractOptions, webpDir string, seen map[string]bool, nextImageID *int, images map[int]ImageAsset) (int, bool) {
-	if *nextImageID > opts.MaxImages {
-		return 0, false
-	}
+func registerImage(ctx context.Context, item *pdfImage, page int, extractDir string, opts ExtractOptions, webpDir string, seen map[string]int, nextImageID *int, images map[int]ImageAsset) (int, bool) {
 	src := filepath.Join(extractDir, filepath.Base(item.Src))
 	raw, err := os.ReadFile(src)
 	if err != nil {
@@ -309,10 +362,15 @@ func registerImage(ctx context.Context, item *pdfImage, page int, extractDir str
 	}
 	sum := sha256.Sum256(raw)
 	key := hex.EncodeToString(sum[:])
-	if seen[key] {
+	if id, ok := seen[key]; ok {
+		// The same image can legitimately appear more than once (a reused
+		// diagram, a header logo, ...). Reuse the encoded file but keep the
+		// marker at every occurrence so positions stay accurate.
+		return id, true
+	}
+	if *nextImageID > opts.MaxImages {
 		return 0, false
 	}
-	seen[key] = true
 
 	width, height := 0, 0
 	if cfg, _, err := image.DecodeConfig(bytes.NewReader(raw)); err == nil {
@@ -333,6 +391,7 @@ func registerImage(ctx context.Context, item *pdfImage, page int, extractDir str
 		mime = mimeForExt(filepath.Ext(src))
 	}
 	*nextImageID++
+	seen[key] = id
 	images[id] = ImageAsset{ID: id, Path: dst, MIME: mime, Page: page, Width: width, Height: height}
 	return id, true
 }

@@ -153,6 +153,9 @@ func TestAllowMultipleAITasksPerResource(t *testing.T) {
 		markdown TEXT NOT NULL DEFAULT '',
 		output_key TEXT NOT NULL DEFAULT '',
 		output_size INTEGER NOT NULL DEFAULT 0,
+		more_markdown TEXT NOT NULL DEFAULT '',
+		more_output_key TEXT NOT NULL DEFAULT '',
+		more_output_size INTEGER NOT NULL DEFAULT 0,
 		error TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		created_by TEXT NOT NULL DEFAULT '',
@@ -208,7 +211,7 @@ func TestDeleteOlderAITasksKeepsNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keys, err := store.DeleteOlderAITasks(ctx, resourceID, second.ID, "basic")
+	keys, err := store.DeleteOlderAITasksForResource(ctx, resourceID, second.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +266,46 @@ func TestCreateAITasksForMissingResources(t *testing.T) {
 	}
 }
 
-func TestBasicAndAdvancedAITasksCoexist(t *testing.T) {
+func TestRequeueFailedAITasks(t *testing.T) {
+	store, resourceID := newAITestStore(t)
+	ctx := context.Background()
+
+	task, _, err := store.CreateAITask(ctx, resourceID, "basic", "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := "failed"
+	reason := "解析失败：402 Insufficient Balance"
+	attempt := 2
+	finished := time.Now().UTC()
+	if err := store.UpdateAITask(ctx, task.ID, AITaskPatch{
+		Status: &status, Error: &reason, Attempt: &attempt, FinishedAt: &finished,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh failure waits for the cooldown instead of retrying at once.
+	if count, err := store.RequeueFailedAITasks(ctx, time.Hour, 10); err != nil || count != 0 {
+		t.Fatalf("fresh failure requeued: count=%d err=%v", count, err)
+	}
+	count, err := store.RequeueFailedAITasks(ctx, 0, 10)
+	if err != nil || count != 1 {
+		t.Fatalf("requeue: count=%d err=%v", count, err)
+	}
+	after, err := store.GetAITask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != "queued" || after.Error != "" || after.Attempt != 0 || !after.FinishedAt.IsZero() {
+		t.Fatalf("after requeue = %#v", after)
+	}
+	// The queued run must not be requeued again while it waits for the worker.
+	if count, err := store.RequeueFailedAITasks(ctx, 0, 10); err != nil || count != 0 {
+		t.Fatalf("double requeue: count=%d err=%v", count, err)
+	}
+}
+
+func TestCreateAITaskReusesActiveRunAcrossModes(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
@@ -271,20 +313,22 @@ func TestBasicAndAdvancedAITasksCoexist(t *testing.T) {
 	if err != nil || !inserted {
 		t.Fatalf("basic task = %#v inserted=%v err=%v", basic, inserted, err)
 	}
-	advanced, inserted, err := store.CreateAITask(ctx, resourceID, "advanced", "admin")
-	if err != nil || !inserted {
-		t.Fatalf("advanced task = %#v inserted=%v err=%v", advanced, inserted, err)
+	if _, ok, err := store.ClaimNextAITask(ctx); err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
-	if basic.Mode != "basic" || advanced.Mode != "advanced" || basic.ID == advanced.ID {
-		t.Fatalf("tasks = %#v / %#v", basic, advanced)
+	// One analysis run produces both reports, so a second mode must not start
+	// a parallel run for the same paper.
+	same, inserted, err := store.CreateAITask(ctx, resourceID, "more", "admin")
+	if err != nil || inserted || same.ID != basic.ID {
+		t.Fatalf("second mode = %#v inserted=%v err=%v", same, inserted, err)
 	}
-	active, ok, err := store.GetActiveAITaskByResource(ctx, resourceID, "advanced")
-	if err != nil || !ok || active.ID != advanced.ID {
-		t.Fatalf("active advanced = %#v ok=%v err=%v", active, ok, err)
+	active, ok, err := store.GetActiveAITaskByResource(ctx, resourceID, "")
+	if err != nil || !ok || active.ID != basic.ID {
+		t.Fatalf("active = %#v ok=%v err=%v", active, ok, err)
 	}
 }
 
-func TestDeleteOlderAITasksKeepsOtherModes(t *testing.T) {
+func TestDeleteOlderAITasksRemovesLegacyOtherModes(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
@@ -293,18 +337,159 @@ func TestDeleteOlderAITasksKeepsOtherModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	basicStatus := "succeeded"
-	if err := store.UpdateAITask(ctx, basic.ID, AITaskPatch{Status: &basicStatus}); err != nil {
+	basicKey := "ai/papers/" + resourceID + "/" + basic.ID + ".pdf"
+	if err := store.UpdateAITask(ctx, basic.ID, AITaskPatch{Status: &basicStatus, OutputKey: &basicKey}); err != nil {
 		t.Fatal(err)
 	}
-	advanced, _, err := store.CreateAITask(ctx, resourceID, "advanced", "admin")
+	more, _, err := store.CreateAITask(ctx, resourceID, "more", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DeleteOlderAITasks(ctx, resourceID, advanced.ID, "advanced"); err != nil {
+	keys, err := store.DeleteOlderAITasksForResource(ctx, resourceID, more.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0] != basicKey {
+		t.Fatalf("deleted keys = %#v", keys)
+	}
+	all, err := store.ListAITasksByResource(ctx, resourceID)
+	if err != nil || len(all) != 1 || all[0].ID != more.ID {
+		t.Fatalf("tasks = %#v err=%v", all, err)
+	}
+}
+
+func TestAllowMultipleAITasksRenamesLegacyAdvancedMode(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resources (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
+		id TEXT PRIMARY KEY,
+		resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+		mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
+		status TEXT NOT NULL DEFAULT 'queued',
+		solvable INTEGER NOT NULL DEFAULT -1,
+		precheck_note TEXT NOT NULL DEFAULT '',
+		attempt INTEGER NOT NULL DEFAULT 0,
+		next_page INTEGER NOT NULL DEFAULT 1,
+		total_pages INTEGER NOT NULL DEFAULT 0,
+		messages_json TEXT NOT NULL DEFAULT '[]',
+		markdown TEXT NOT NULL DEFAULT '',
+		output_key TEXT NOT NULL DEFAULT '',
+		output_size INTEGER NOT NULL DEFAULT 0,
+		more_markdown TEXT NOT NULL DEFAULT '',
+		more_output_key TEXT NOT NULL DEFAULT '',
+		more_output_size INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		created_by TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		started_at INTEGER NOT NULL DEFAULT 0,
+		finished_at INTEGER NOT NULL DEFAULT 0,
+		prompts_json TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resources(id) VALUES ('res_1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at)
+		VALUES ('ai_old', 'res_1', 'advanced', 'succeeded', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.allowMultipleAITasksPerResource(ctx); err != nil {
+		t.Fatalf("migrate legacy advanced mode: %v", err)
+	}
+	var mode string
+	if err := store.DB.QueryRowContext(ctx, `SELECT mode FROM resource_ai_tasks WHERE id = 'ai_old'`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "more" {
+		t.Fatalf("mode = %q, want more", mode)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at)
+		VALUES ('ai_more', 'res_1', 'more', 'succeeded', 2, 2)`); err != nil {
+		t.Fatalf("insert more task after migration: %v", err)
+	}
+}
+
+func TestMigrateAdvancedAIModeWithoutCheckConstraint(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
+		id TEXT PRIMARY KEY,
+		resource_id TEXT NOT NULL,
+		mode TEXT NOT NULL DEFAULT 'basic',
+		status TEXT NOT NULL DEFAULT 'queued',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at) VALUES
+		('ai_done', 'res_1', 'advanced', 'succeeded', 1, 1),
+		('ai_active', 'res_2', 'advanced', 'paused', 2, 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrateAdvancedAIMode(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var advanced int
+	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_ai_tasks WHERE mode = 'advanced'`).Scan(&advanced); err != nil {
+		t.Fatal(err)
+	}
+	if advanced != 0 {
+		t.Fatalf("legacy advanced rows = %d, want 0", advanced)
+	}
+}
+
+func TestMergeLegacyAIReports(t *testing.T) {
+	store, resourceID := newAITestStore(t)
+	ctx := context.Background()
+	basic, _, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	basicStatus := "succeeded"
+	basicKey := "ai/papers/" + resourceID + "/" + basic.ID + ".pdf"
+	basicMarkdown := "# 精简版"
+	if err := store.UpdateAITask(ctx, basic.ID, AITaskPatch{
+		Status: &basicStatus, OutputKey: &basicKey, Markdown: &basicMarkdown,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	more, _, err := store.CreateAITask(ctx, resourceID, "more", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moreKey := "ai/papers/" + resourceID + "/" + more.ID + ".pdf"
+	moreMarkdown := "# 小学生版"
+	moreSize := int64(456)
+	if err := store.UpdateAITask(ctx, more.ID, AITaskPatch{
+		Status: &basicStatus, OutputKey: &moreKey, OutputSize: &moreSize, Markdown: &moreMarkdown,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.mergeLegacyAIReports(ctx); err != nil {
 		t.Fatal(err)
 	}
 	all, err := store.ListAITasksByResource(ctx, resourceID)
-	if err != nil || len(all) != 2 {
+	if err != nil || len(all) != 1 {
 		t.Fatalf("tasks = %#v err=%v", all, err)
+	}
+	got := all[0]
+	if got.ID != basic.ID || got.MoreOutputKey != moreKey || got.MoreOutputSize != moreSize || got.MoreMarkdown != moreMarkdown {
+		t.Fatalf("merged task = %#v", got)
 	}
 }
