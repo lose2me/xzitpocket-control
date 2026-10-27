@@ -284,14 +284,36 @@ import { template } from './template.js';
         return VIEW_ROUTES.includes(name) ? name : 'overview';
       };
       const view = ref(viewForPath(window.location.pathname));
+      // 选中的小分类记在本地，刷新页面后回到原来的 tab（页面本身由 URL 决定）。
+      const storedTab = (key, fallback) => {
+        try {
+          return localStorage.getItem(key) || fallback;
+        } catch (_) {
+          return fallback;
+        }
+      };
+      const rememberTab = (tab, key) => {
+        watch(tab, value => {
+          try {
+            localStorage.setItem(key, value || '');
+          } catch (_) {
+            // 隐私模式下 localStorage 不可用，忽略即可。
+          }
+        });
+      };
       // 运行配置按「小分类」分 tab：常规 / 风控 / 存储 / CDN / 监控 / AI。
-      const settingTab = ref('general');
+      const settingTab = ref(storedTab('control_tab_setting', 'general'));
       // APP 配置页的两个小项：发布配置 / 学校校历。
-      const appConfigTab = ref('release');
+      const appConfigTab = ref(storedTab('control_tab_app_config', 'release'));
       // 发布区 / 审核区 / 解析区 / 归档区 等区块用 tab 切换，默认停在发布区。
-      const libraryTab = ref('publish');
-      const textbookTab = ref('publish');
-      const resourceTab = ref('publish');
+      const libraryTab = ref(storedTab('control_tab_library', 'publish'));
+      const textbookTab = ref(storedTab('control_tab_textbook', 'publish'));
+      const resourceTab = ref(storedTab('control_tab_resource', 'publish'));
+      rememberTab(settingTab, 'control_tab_setting');
+      rememberTab(appConfigTab, 'control_tab_app_config');
+      rememberTab(libraryTab, 'control_tab_library');
+      rememberTab(textbookTab, 'control_tab_textbook');
+      rememberTab(resourceTab, 'control_tab_resource');
       const loading = ref(false);
       const error = ref('');
       const overview = ref({});
