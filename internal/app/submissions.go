@@ -16,45 +16,65 @@ import (
 // The file itself goes straight to COS through a short-lived signed URL; the
 // control server only sees the metadata and a short verification range.
 type ResourceSubmissionTicketInput struct {
-	Kind            string `json:"kind"`
-	CourseCode      string `json:"course_code"`
-	Name            string `json:"name"`
-	Tags            string `json:"tags"`
-	TargetID        string `json:"target_id"`
-	Format          string `json:"format"`
-	MD5             string `json:"md5"`
-	SizeBytes       int64  `json:"size_bytes"`
-	ManualMD5       string `json:"manual_md5"`
-	ManualFormat    string `json:"manual_format"`
-	ManualSizeBytes int64  `json:"manual_size_bytes"`
+	Kind       string                        `json:"kind"`
+	CourseCode string                        `json:"course_code"`
+	Name       string                        `json:"name"`
+	Tags       string                        `json:"tags"`
+	Note       string                        `json:"note"`
+	TargetID   string                        `json:"target_id"`
+	Files      []ResourceSubmissionFileInput `json:"files"`
+}
+
+// ResourceSubmissionFileInput describes one file of a submit. The app sends all
+// files of a submit together so the administrator reviews them as one record.
+type ResourceSubmissionFileInput struct {
+	Name      string `json:"name"`
+	Format    string `json:"format"`
+	MD5       string `json:"md5"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // ResourceUploadTicketView is the direct-upload authorization returned to the
-// app. UploadURL is a presigned COS PUT URL for a content-addressed key under
-// books/submissions or papers/submissions.
+// app. Every file gets its own presigned COS PUT URL for a content-addressed
+// key under books/submissions or papers/submissions.
 type ResourceUploadTicketView struct {
-	ID              string `json:"id"`
-	UploadURL       string `json:"upload_url"`
-	ManualUploadURL string `json:"manual_upload_url,omitempty"`
-	ExpiresAt       string `json:"expires_at"`
+	ID        string                   `json:"id"`
+	Files     []ResourceUploadFileView `json:"files"`
+	ExpiresAt string                   `json:"expires_at"`
+}
+
+type ResourceUploadFileView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	UploadURL string `json:"upload_url"`
 }
 
 // SubmissionView is the administrator-facing review queue row.
 type SubmissionView struct {
-	ID                string `json:"id"`
-	Kind              string `json:"kind"`
-	CourseCode        string `json:"course_code"`
-	Name              string `json:"name"`
-	Tags              string `json:"tags"`
-	SizeBytes         int64  `json:"size_bytes"`
-	Status            string `json:"status"`
-	HasPdf            bool   `json:"has_pdf"`
-	Format            string `json:"format"`
-	SubmittedByUserID string `json:"submitted_by_user_id,omitempty"`
-	SubmittedByName   string `json:"submitted_by_name"`
-	StudentID         string `json:"student_id,omitempty"`
-	TargetID          string `json:"target_id,omitempty"`
-	CreatedAt         string `json:"created_at"`
+	ID                string               `json:"id"`
+	Kind              string               `json:"kind"`
+	CourseCode        string               `json:"course_code"`
+	Name              string               `json:"name"`
+	Tags              string               `json:"tags"`
+	Note              string               `json:"note"`
+	SizeBytes         int64                `json:"size_bytes"`
+	Status            string               `json:"status"`
+	Format            string               `json:"format"`
+	SubmittedByUserID string               `json:"submitted_by_user_id,omitempty"`
+	SubmittedByName   string               `json:"submitted_by_name"`
+	StudentID         string               `json:"student_id,omitempty"`
+	TargetID          string               `json:"target_id,omitempty"`
+	CreatedAt         string               `json:"created_at"`
+	Files             []SubmissionFileView `json:"files"`
+}
+
+// SubmissionFileView is one file of a submission in the review queue.
+type SubmissionFileView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Format    string `json:"format"`
+	SizeBytes int64  `json:"size_bytes"`
+	Duplicate bool   `json:"duplicate"`
 }
 
 // SubmissionURLView is a temporary, signed CDN URL for a submission PDF.
@@ -65,6 +85,8 @@ type SubmissionURLView struct {
 
 const (
 	maxSubmissionBytes           = 80 << 20
+	maxSubmissionFiles           = 10
+	maxSubmissionNote            = 500
 	maxPendingSubmissionsPerUser = 10
 	maxUploadingPerUser          = 3
 	submissionTicketTTL          = 30 * time.Minute
@@ -98,12 +120,19 @@ func normalizeSubmissionFormat(format string) (string, bool) {
 }
 
 func submissionView(item sqlite.Submission) SubmissionView {
+	files := make([]SubmissionFileView, 0, len(item.Files))
+	for _, file := range item.Files {
+		files = append(files, SubmissionFileView{
+			ID: file.ID, Name: file.Name, Format: file.Format,
+			SizeBytes: file.SizeBytes, Duplicate: file.Duplicate,
+		})
+	}
 	return SubmissionView{
-		ID: item.ID, Kind: item.Kind, CourseCode: item.CourseCode, Name: item.Name, Tags: item.Tags,
-		SizeBytes: item.SizeBytes, Status: item.Status, HasPdf: item.PdfKey != "",
-		Format:            storedFileFormat(item.PdfKey),
+		ID: item.ID, Kind: item.Kind, CourseCode: item.CourseCode, Name: item.Name, Tags: item.Tags, Note: item.Note,
+		SizeBytes: item.SizeBytes, Status: item.Status,
 		SubmittedByUserID: item.SubmittedByUserID, SubmittedByName: item.SubmittedByName,
 		TargetID: item.TargetID, CreatedAt: item.CreatedAt.Format(time.RFC3339),
+		Files: files,
 	}
 }
 
@@ -134,24 +163,14 @@ func (a *App) submissionViewForAdmin(item sqlite.Submission) SubmissionView {
 	return view
 }
 
-// CreateSubmissionTicket validates metadata, reserves the COS object key and
-// returns a presigned PUT URL. The queue row stays hidden until the app calls
-// CompleteSubmission after the direct upload.
+// CreateSubmissionTicket validates metadata, reserves one COS object key per
+// file and returns presigned PUT URLs. One submit is one review record, so all
+// files of a submit share the ticket. The queue row stays hidden until the app
+// calls CompleteSubmission.
 func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in ResourceSubmissionTicketInput) (ResourceUploadTicketView, error) {
 	kind, ok := normalizeSubmissionKind(in.Kind)
 	if !ok {
 		return ResourceUploadTicketView{}, Err("invalid_kind", "资料类型无效", 400)
-	}
-	format, ok := normalizeSubmissionFormat(in.Format)
-	if !ok {
-		return ResourceUploadTicketView{}, Err("invalid_format", "文件类型无效", 400)
-	}
-	if kind == "textbook" && format != fileFormatPDF {
-		return ResourceUploadTicketView{}, Err("textbook_pdf_only", "教材仅支持 PDF", 400)
-	}
-	hash, ok := normalizeMD5(in.MD5)
-	if !ok {
-		return ResourceUploadTicketView{}, Err("invalid_md5", "请更新 App 后重试", 400)
 	}
 	courseCode, err := normalizeCourseCode(in.CourseCode)
 	if err != nil {
@@ -164,8 +183,18 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if !exists {
 		return ResourceUploadTicketView{}, Err("invalid_course_code", "该课程不存在", 400)
 	}
+	if !a.cfg().IngestSubmissions.Enabled() {
+		return ResourceUploadTicketView{}, Err("ingest_disabled", "上传已关闭，请稍后再试", 503)
+	}
+	if len(in.Files) == 0 || len(in.Files) > maxSubmissionFiles {
+		return ResourceUploadTicketView{}, Err("invalid_files", "请选择 1-10 个文件", 400)
+	}
 	name := strings.TrimSpace(in.Name)
 	tags := strings.TrimSpace(in.Tags)
+	note := strings.TrimSpace(in.Note)
+	if len(note) > maxSubmissionNote {
+		return ResourceUploadTicketView{}, Err("invalid_note", "备注无效", 400)
+	}
 	targetID := ""
 	if kind == "textbook" {
 		targetID = strings.TrimSpace(in.TargetID)
@@ -192,14 +221,49 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		name = textbook.Name
 		tags = textbook.Tags
 	}
-	if name == "" || len(name) > 256 || strings.ContainsAny(name, "\r\n\x00") {
+
+	type preparedFile struct {
+		name         string
+		key          string
+		publishedKey string
+		format       string
+		sizeBytes    int64
+		duplicate    bool
+	}
+	prepared := make([]preparedFile, 0, len(in.Files))
+	for _, file := range in.Files {
+		fileName := strings.TrimSpace(file.Name)
+		if fileName == "" || len(fileName) > 256 || strings.ContainsAny(fileName, "\r\n\x00") {
+			return ResourceUploadTicketView{}, Err("invalid_name", "文件名称无效", 400)
+		}
+		format, ok := normalizeSubmissionFormat(file.Format)
+		if !ok {
+			return ResourceUploadTicketView{}, Err("invalid_format", "文件类型无效", 400)
+		}
+		if kind == "textbook" && format != fileFormatPDF {
+			return ResourceUploadTicketView{}, Err("textbook_pdf_only", "教材仅支持 PDF", 400)
+		}
+		hash, ok := normalizeMD5(file.MD5)
+		if !ok {
+			return ResourceUploadTicketView{}, Err("invalid_md5", "请更新 App 后重试", 400)
+		}
+		if file.SizeBytes <= 0 || file.SizeBytes > maxSubmissionBytes {
+			return ResourceUploadTicketView{}, Err("invalid_size", "文件大小无效", 400)
+		}
+		key := submissionObjectKey(kind, format, hash)
+		prepared = append(prepared, preparedFile{
+			name: fileName, key: key, publishedKey: publishedObjectKey(kind, format, hash),
+			format: format, sizeBytes: file.SizeBytes,
+		})
+	}
+	if name == "" {
+		name = prepared[0].name
+	}
+	if len(name) > 256 || strings.ContainsAny(name, "\r\n\x00") {
 		return ResourceUploadTicketView{}, Err("invalid_name", "资料名称无效", 400)
 	}
 	if len(tags) > 1024 || strings.ContainsAny(tags, "\r\n\x00") {
 		return ResourceUploadTicketView{}, Err("invalid_tags", "标签无效", 400)
-	}
-	if in.SizeBytes <= 0 || in.SizeBytes > maxSubmissionBytes {
-		return ResourceUploadTicketView{}, Err("invalid_size", "文件大小无效", 400)
 	}
 
 	a.cleanupStaleUploads(ctx)
@@ -221,73 +285,51 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 	if err != nil {
 		return ResourceUploadTicketView{}, err
 	}
-
-	key := submissionObjectKey(kind, format, hash)
-	if _, err := client.HeadObject(ctx, key); err == nil {
-		return ResourceUploadTicketView{}, Err("submission_duplicate", "该文件已提交过，请勿重复上传", 409)
-	}
-	manualKey := ""
-	manualSize := int64(0)
-	if kind == "resource" && (strings.TrimSpace(in.ManualMD5) != "" || in.ManualSizeBytes > 0) {
-		manualHash, ok := normalizeMD5(in.ManualMD5)
-		if !ok {
-			return ResourceUploadTicketView{}, Err("invalid_md5", "原版解析文件校验失败，请重试", 400)
+	// Content that is already published is not rejected; the review queue marks
+	// it so the administrator can see the paper/textbook is already on the site.
+	for i := range prepared {
+		if _, headErr := client.HeadObject(ctx, prepared[i].publishedKey); headErr == nil {
+			prepared[i].duplicate = true
 		}
-		if in.ManualSizeBytes <= 0 || in.ManualSizeBytes > maxSubmissionBytes {
-			return ResourceUploadTicketView{}, Err("invalid_size", "原版解析文件大小无效", 400)
-		}
-		manualFormat, ok := normalizeSubmissionFormat(in.ManualFormat)
-		if !ok {
-			return ResourceUploadTicketView{}, Err("invalid_format", "原版解析文件类型无效", 400)
-		}
-		manualKey = submissionManualObjectKey(manualHash, manualFormat)
-		manualSize = in.ManualSizeBytes
 	}
 
 	now := time.Now().UTC()
 	submitterName, studentIDCiphertext := a.submissionIdentity(ctx, p)
 	item, err := a.Store.CreateSubmission(ctx, sqlite.SubmissionInput{
-		Kind: kind, CourseCode: courseCode, Name: name, Tags: tags, SizeBytes: in.SizeBytes, TargetID: targetID,
+		Kind: kind, CourseCode: courseCode, Name: name, Tags: tags, Note: note, TargetID: targetID,
 		Status: "pending_upload", SubmittedByUserID: p.User.ID,
 		SubmittedByName: submitterName, StudentIDCiphertext: studentIDCiphertext,
 	}, now)
 	if err != nil {
 		return ResourceUploadTicketView{}, err
 	}
-	if err := a.Store.SetSubmissionPdfKey(ctx, item.ID, key, in.SizeBytes, now); err != nil {
-		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
-		return ResourceUploadTicketView{}, err
-	}
-	manualUploadURL := ""
-	if manualKey != "" {
-		if err := a.Store.SetSubmissionManualKey(ctx, item.ID, manualKey, manualSize, now); err != nil {
-			_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
+	uploadFiles := make([]ResourceUploadFileView, 0, len(prepared))
+	for _, file := range prepared {
+		row, err := a.Store.AddSubmissionFile(ctx, sqlite.SubmissionFileInput{
+			SubmissionID: item.ID, Name: file.name, ObjectKey: file.key,
+			Format: file.format, SizeBytes: file.sizeBytes, Duplicate: file.duplicate,
+		}, now)
+		if err != nil {
+			_ = a.Store.DeleteSubmission(ctx, item.ID)
 			return ResourceUploadTicketView{}, err
 		}
-		manualUploadURL, err = client.PresignPutURL(manualKey, manualSize, submissionTicketTTL)
+		uploadURL, err := client.PresignPutURL(file.key, file.sizeBytes, submissionTicketTTL)
 		if err != nil {
-			_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
-			a.Logger.Error("presign manual analysis upload failed", "error", err, "submission", item.ID)
-			return ResourceUploadTicketView{}, Err("storage_error", "创建原版解析上传通道失败", 502)
+			_ = a.Store.DeleteSubmission(ctx, item.ID)
+			a.Logger.Error("presign submission upload failed", "error", err, "submission", item.ID)
+			return ResourceUploadTicketView{}, Err("storage_error", "创建上传通道失败", 502)
 		}
+		uploadFiles = append(uploadFiles, ResourceUploadFileView{ID: row.ID, Name: row.Name, UploadURL: uploadURL})
 	}
-	uploadURL, err := client.PresignPutURL(key, in.SizeBytes, submissionTicketTTL)
-	if err != nil {
-		_ = a.Store.DeleteUploadingSubmission(ctx, item.ID)
-		a.Logger.Error("presign submission upload failed", "error", err, "submission", item.ID)
-		return ResourceUploadTicketView{}, Err("storage_error", "创建上传通道失败", 502)
-	}
-	expiresAt := time.Now().Add(submissionTicketTTL).UTC().Format(time.RFC3339)
 	return ResourceUploadTicketView{
-		ID:              item.ID,
-		UploadURL:       uploadURL,
-		ManualUploadURL: manualUploadURL,
-		ExpiresAt:       expiresAt,
+		ID:        item.ID,
+		Files:     uploadFiles,
+		ExpiresAt: time.Now().Add(submissionTicketTTL).UTC().Format(time.RFC3339),
 	}, nil
 }
 
-// CompleteSubmission verifies the directly uploaded object and moves the
-// ticket into the administrator review queue.
+// CompleteSubmission verifies every uploaded object and moves the ticket into
+// the administrator review queue as one record with all of its files.
 func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id string) (SubmissionView, error) {
 	item, err := a.Store.GetSubmission(ctx, strings.TrimSpace(id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -299,7 +341,7 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	if item.Status != "pending_upload" || item.SubmittedByUserID != p.User.ID {
 		return SubmissionView{}, ErrNotFound
 	}
-	if item.PdfKey == "" {
+	if len(item.Files) == 0 {
 		a.discardUpload(ctx, item)
 		return SubmissionView{}, Err("upload_missing", "上传信息无效", 409)
 	}
@@ -307,64 +349,51 @@ func (a *App) CompleteSubmission(ctx context.Context, p SessionPrincipal, id str
 	if err != nil {
 		return SubmissionView{}, err
 	}
-	size, etag, err := client.HeadObjectInfo(ctx, item.PdfKey)
-	if err != nil {
-		return SubmissionView{}, Err("upload_missing", "未检测到上传的文件", 409)
-	}
-	if size <= 0 || size > maxSubmissionBytes {
-		a.discardUpload(ctx, item)
-		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
-	}
-	if expected := objectHashFromKey(item.PdfKey); expected != "" && !strings.EqualFold(etag, expected) {
-		a.discardUpload(ctx, item)
-		return SubmissionView{}, Err("invalid_file", "文件校验失败，请重试", 400)
-	}
-	prefix, err := client.GetObjectRange(ctx, item.PdfKey, 0, 7)
-	if err != nil || !storedFileIsValid(item.PdfKey, prefix) {
-		a.discardUpload(ctx, item)
-		return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
-	}
-	if item.ManualPdfKey != "" {
-		manualSize, manualETag, err := client.HeadObjectInfo(ctx, item.ManualPdfKey)
+	total := int64(0)
+	for _, file := range item.Files {
+		if file.ObjectKey == "" {
+			a.discardUpload(ctx, item)
+			return SubmissionView{}, Err("upload_missing", "上传信息无效", 409)
+		}
+		size, etag, err := client.HeadObjectInfo(ctx, file.ObjectKey)
 		if err != nil {
 			a.discardUpload(ctx, item)
-			return SubmissionView{}, Err("upload_missing", "未检测到原版解析文件", 409)
+			return SubmissionView{}, Err("upload_missing", "未检测到上传的文件", 409)
 		}
-		if manualSize <= 0 || manualSize > maxSubmissionBytes {
+		if size <= 0 || size > maxSubmissionBytes {
 			a.discardUpload(ctx, item)
-			return SubmissionView{}, Err("invalid_file", "原版解析文件内容无效", 400)
+			return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
 		}
-		if expected := objectHashFromKey(item.ManualPdfKey); expected != "" && !strings.EqualFold(manualETag, expected) {
+		if expected := objectHashFromKey(file.ObjectKey); expected != "" && !strings.EqualFold(etag, expected) {
 			a.discardUpload(ctx, item)
-			return SubmissionView{}, Err("invalid_file", "原版解析文件校验失败，请重试", 400)
+			return SubmissionView{}, Err("invalid_file", "文件校验失败，请重试", 400)
 		}
-		manualPrefix, err := client.GetObjectRange(ctx, item.ManualPdfKey, 0, 7)
-		if err != nil || !storedFileIsValid(item.ManualPdfKey, manualPrefix) {
+		prefix, err := client.GetObjectRange(ctx, file.ObjectKey, 0, 7)
+		if err != nil || !storedFileIsValid(file.ObjectKey, prefix) {
 			a.discardUpload(ctx, item)
-			return SubmissionView{}, Err("invalid_file", "原版解析文件内容无效", 400)
+			return SubmissionView{}, Err("invalid_file", "文件内容无效", 400)
 		}
-		now := time.Now().UTC()
-		if err := a.Store.SetSubmissionManualKey(ctx, item.ID, item.ManualPdfKey, manualSize, now); err != nil {
+		if err := a.Store.UpdateSubmissionFileSize(ctx, file.ID, size); err != nil {
 			return SubmissionView{}, err
 		}
-		item.ManualSizeBytes = manualSize
+		total += size
 	}
 	now := time.Now().UTC()
-	if err := a.Store.MarkSubmissionUploaded(ctx, item.ID, size, now); err != nil {
+	if err := a.Store.MarkSubmissionUploaded(ctx, item.ID, total, now); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SubmissionView{}, ErrNotFound
 		}
 		return SubmissionView{}, err
 	}
-	item.Status = "pending_review"
-	item.SizeBytes = size
-	item.UpdatedAt = now
+	stored, err := a.Store.GetSubmission(ctx, item.ID)
+	if err != nil {
+		return SubmissionView{}, err
+	}
 	_ = a.Store.AddAudit(ctx, p.User.ID, item.Kind+"_submission_create", item.Kind+"_submission", item.ID,
-		controlcrypto.JSON(map[string]any{"course_code": item.CourseCode, "name": item.Name, "size_bytes": size}), now)
-	return a.submissionViewForAdmin(item), nil
+		controlcrypto.JSON(map[string]any{"course_code": item.CourseCode, "name": item.Name, "size_bytes": total}), now)
+	return a.submissionViewForAdmin(stored), nil
 }
 
-// AbortSubmission discards a direct-upload ticket after a failed client upload.
 func (a *App) AbortSubmission(ctx context.Context, p SessionPrincipal, id string) error {
 	item, err := a.Store.GetSubmission(ctx, strings.TrimSpace(id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -382,7 +411,7 @@ func (a *App) AbortSubmission(ctx context.Context, p SessionPrincipal, id string
 		}
 		return err
 	}
-	a.removeUploadObject(ctx, item)
+	a.removeSubmissionObjects(ctx, item)
 	return nil
 }
 
@@ -391,36 +420,51 @@ func (a *App) discardUpload(ctx context.Context, item sqlite.Submission) {
 	if err := a.Store.DeleteUploadingSubmission(ctx, item.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		a.Logger.Warn("delete rejected upload ticket failed", "error", err, "submission", item.ID)
 	}
-	a.removeUploadObject(ctx, item)
+	a.removeSubmissionObjects(ctx, item)
 }
 
-// removeUploadObject is best-effort and skips keys that approved content uses.
-func (a *App) removeUploadObject(ctx context.Context, item sqlite.Submission) {
-	if item.ManualPdfKey != "" {
-		if client := a.cosClient(); client.Configured() {
-			if err := client.DeleteObject(ctx, item.ManualPdfKey); err != nil {
-				a.Logger.Warn("delete manual analysis upload object failed", "error", err, "key", item.ManualPdfKey)
-			}
+// removeSubmissionObjects deletes the objects of a discarded ticket, skipping
+// keys another record or published content still points at.
+func (a *App) removeSubmissionObjects(ctx context.Context, item sqlite.Submission) {
+	keys := make([]string, 0, len(item.Files))
+	for _, file := range item.Files {
+		if file.ObjectKey != "" {
+			keys = append(keys, file.ObjectKey)
 		}
-		a.purgeCDN(ctx, item.ManualPdfKey)
 	}
-	if item.PdfKey == "" {
+	for _, key := range keys {
+		a.removeSubmissionObjectIfUnused(ctx, key)
+	}
+}
+
+// removeSubmissionObjectIfUnused deletes one submission object unless any other
+// submission file, resource or textbook still references the same content.
+func (a *App) removeSubmissionObjectIfUnused(ctx context.Context, key string) {
+	if strings.TrimSpace(key) == "" {
 		return
 	}
-	inUse, err := a.Store.PdfKeyInUse(ctx, item.PdfKey)
+	refs, err := a.Store.CountSubmissionFileKeyRefs(ctx, key)
 	if err != nil {
-		a.Logger.Warn("check upload object usage failed", "error", err, "key", item.PdfKey)
+		a.Logger.Warn("count submission object refs failed", "error", err, "key", key)
+		return
+	}
+	if refs > 0 {
+		return
+	}
+	inUse, err := a.Store.PdfKeyInUse(ctx, key)
+	if err != nil {
+		a.Logger.Warn("check upload object usage failed", "error", err, "key", key)
 		return
 	}
 	if inUse {
 		return
 	}
 	if client := a.cosClient(); client.Configured() {
-		if err := client.DeleteObject(ctx, item.PdfKey); err != nil {
-			a.Logger.Warn("delete upload object failed", "error", err, "key", item.PdfKey)
+		if err := client.DeleteObject(ctx, key); err != nil {
+			a.Logger.Warn("delete upload object failed", "error", err, "key", key)
 		}
 	}
-	a.purgeCDN(ctx, item.PdfKey)
+	a.purgeCDN(ctx, key)
 }
 
 // cleanupStaleUploads removes tickets whose client never completed the direct
@@ -438,7 +482,7 @@ func (a *App) cleanupStaleUploads(ctx context.Context) {
 		if err := a.Store.DeleteUploadingSubmission(ctx, item.ID); err != nil {
 			continue
 		}
-		a.removeUploadObject(ctx, item)
+		a.removeSubmissionObjects(ctx, item)
 	}
 }
 
@@ -491,161 +535,43 @@ func (a *App) recordContribution(ctx context.Context, userID string, link func(s
 	}
 }
 
-// ApproveSubmissionForAdmin creates the reviewed textbook or resource with the
-// uploaded PDF and removes the queue row. A name conflict keeps the row so the
-// reviewer can reject it or rename the existing content first.
-func (a *App) ApproveSubmissionForAdmin(ctx context.Context, id, kind, actor string) (map[string]any, error) {
+// DeleteSubmissionFileForAdmin removes one file of a review record, keeps the
+// object when another record or published content shares it, and deletes the
+// record itself once its last file is gone.
+func (a *App) DeleteSubmissionFileForAdmin(ctx context.Context, id, kind, fileID, actor string) error {
 	kind, ok := normalizeSubmissionKind(kind)
 	if !ok {
-		return nil, Err("invalid_kind", "资料类型无效", 400)
+		return Err("invalid_kind", "资料类型无效", 400)
 	}
 	item, err := a.requireSubmission(ctx, id, kind)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if item.PdfKey == "" {
-		return nil, Err("resource_missing", "该提交没有文件", 404)
+	file, err := a.Store.GetSubmissionFile(ctx, strings.TrimSpace(fileID))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && file.SubmissionID != item.ID) {
+		return ErrNotFound
 	}
-	format := storedFileFormat(item.PdfKey)
-	if kind == "resource" && format != fileFormatPDF {
-		return nil, Err("word_requires_pdf", "Word 试卷请转为 PDF 后再发布", 409)
+	if err != nil {
+		return err
 	}
-	hash := objectHashFromKey(item.PdfKey)
-	publishedKey := item.PdfKey
-	var client *cloud.COSClient
-	if hash != "" {
-		client, err = a.requireStorage()
-		if err != nil {
-			return nil, err
-		}
-		achieved := publishedObjectKey(kind, format, hash)
-		if achieved != item.PdfKey {
-			if err := client.CopyObject(ctx, item.PdfKey, achieved); err != nil {
-				a.Logger.Error("copy submission to achieved failed", "error", err, "submission", item.ID)
-				return nil, Err("storage_error", "发布文件失败，请稍后重试", 502)
-			}
-			publishedKey = achieved
-			a.purgeCDN(ctx, achieved)
+	if err := a.Store.DeleteSubmissionFile(ctx, file.ID); err != nil {
+		return err
+	}
+	a.removeSubmissionObjectIfUnused(ctx, file.ObjectKey)
+	remaining, err := a.Store.CountSubmissionFiles(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	if remaining == 0 {
+		if err := a.Store.DeleteSubmission(ctx, item.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
 	}
-	now := time.Now().UTC()
-	var result map[string]any
-	switch kind {
-	case "textbook":
-		var textbook sqlite.Textbook
-		created := false
-		if item.TargetID != "" {
-			existing, err := a.Store.GetTextbook(ctx, item.TargetID)
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, Err("textbook_missing", "教材不存在，请驳回该提交", 409)
-			}
-			if err != nil {
-				return nil, err
-			}
-			textbook = existing
-		} else {
-			createdTextbook, err := a.Store.CreateTextbook(ctx, sqlite.TextbookInput{
-				Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: []string{item.CourseCode},
-			}, now)
-			if errors.Is(err, sqlite.ErrTextbookExists) {
-				return nil, Err("textbook_exists", "同名教材已存在，请驳回该提交", 409)
-			}
-			if err != nil {
-				return nil, err
-			}
-			textbook = createdTextbook
-			created = true
-		}
-		oldPdfKey := textbook.PdfKey
-		oldCoverKey := textbook.CoverKey
-		if err := a.Store.SetTextbookPdfKey(ctx, textbook.ID, publishedKey, now); err != nil {
-			if created {
-				_ = a.Store.DeleteTextbook(ctx, textbook.ID)
-			}
-			return nil, err
-		}
-		if item.SubmittedByUserID != "" {
-			// The latest PDF contributor owns future download attribution.
-			oldContributor := textbook.ContributorUserID
-			if err := a.Store.SetTextbookContributor(ctx, textbook.ID, item.SubmittedByUserID); err != nil {
-				a.Logger.Warn("link contribution failed", "error", err, "textbook", textbook.ID)
-			} else {
-				if oldContributor != item.SubmittedByUserID {
-					a.transferAttribution(ctx, oldContributor, item.SubmittedByUserID, textbook.DownloadCount)
-				}
-				textbook.ContributorUserID = item.SubmittedByUserID
-			}
-		}
-		if oldPdfKey != "" && oldPdfKey != publishedKey {
-			a.removeStoredFileIfUnused(ctx, oldPdfKey)
-		}
-		textbook.PdfKey = publishedKey
-		if hash != "" && oldCoverKey != "" {
-			newCoverKey := textbookCoverKey(hash)
-			if newCoverKey != oldCoverKey {
-				if err := client.CopyObject(ctx, oldCoverKey, newCoverKey); err != nil {
-					a.Logger.Warn("rekey textbook cover failed", "error", err, "textbook", textbook.ID)
-				} else if err := a.Store.SetTextbookCoverKey(ctx, textbook.ID, newCoverKey, now); err != nil {
-					a.Logger.Warn("update textbook cover key failed", "error", err, "textbook", textbook.ID)
-				} else {
-					textbook.CoverKey = newCoverKey
-					a.purgeCDN(ctx, newCoverKey)
-					a.removeCoverIfUnused(ctx, oldCoverKey)
-				}
-			}
-		}
-		textbook.UpdatedAt = now
-		view := textbookView(textbook)
-		view.SizeBytes = item.SizeBytes
-		result = map[string]any{"kind": kind, "textbook": view}
-		_ = a.Store.AddAudit(ctx, actor, "textbook_submission_approve", "textbook_submission", item.ID,
-			controlcrypto.JSON(map[string]any{"textbook_id": textbook.ID, "targeted": item.TargetID != ""}), now)
-	case "resource":
-		resource, err := a.Store.CreateResource(ctx, sqlite.ResourceInput{
-			Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
-		}, now)
-		if errors.Is(err, sqlite.ErrResourceExists) {
-			return nil, Err("resource_exists", "该课程下已有同名试卷，请驳回该提交", 409)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if err := a.Store.SetResourcePdfKey(ctx, resource.ID, publishedKey, now); err != nil {
-			_ = a.Store.DeleteResource(ctx, resource.ID)
-			return nil, err
-		}
-		if item.ManualPdfKey != "" {
-			if err := a.Store.SetResourceManualAnalysis(ctx, resource.ID, item.ManualPdfKey, item.ManualSizeBytes, now); err != nil {
-				_ = a.Store.DeleteResource(ctx, resource.ID)
-				return nil, err
-			}
-			resource.ManualAIKey = item.ManualPdfKey
-			resource.ManualAISize = item.ManualSizeBytes
-			resource.ManualAIUpdatedAt = now
-		}
-		a.recordContribution(ctx, item.SubmittedByUserID, func(userID string) error {
-			return a.Store.SetResourceContributor(ctx, resource.ID, userID)
-		})
-		resource.PdfKey = publishedKey
-		resource.UpdatedAt = now
-		view := resourceView(resource)
-		view.SizeBytes = item.SizeBytes
-		result = map[string]any{"kind": kind, "resource": view}
-		_ = a.Store.AddAudit(ctx, actor, "resource_submission_approve", "resource_submission", item.ID,
-			controlcrypto.JSON(map[string]any{"resource_id": resource.ID}), now)
-	}
-	if err := a.Store.DeleteSubmission(ctx, item.ID); err != nil {
-		// The reviewed content already exists. Leave the queue row in place for
-		// an operator instead of failing a request that has taken effect.
-		a.Logger.Warn("delete reviewed submission failed", "error", err, "submission", item.ID)
-	} else if publishedKey != item.PdfKey {
-		a.removeStoredFileIfUnused(ctx, item.PdfKey)
-	}
-	return result, nil
+	return a.Store.AddAudit(ctx, actor, kind+"_submission_file_delete", kind+"_submission", item.ID,
+		controlcrypto.JSON(map[string]any{"file": file.ID, "name": file.Name}), time.Now().UTC())
 }
 
-// RejectSubmissionForAdmin removes the upload. Its object is deleted unless an
-// approved content row already references the same key.
+// RejectSubmissionForAdmin deletes a whole review record and its objects.
 func (a *App) RejectSubmissionForAdmin(ctx context.Context, id, kind, actor string) error {
 	kind, ok := normalizeSubmissionKind(kind)
 	if !ok {
@@ -661,14 +587,8 @@ func (a *App) RejectSubmissionForAdmin(ctx context.Context, id, kind, actor stri
 		}
 		return err
 	}
-	a.removeSubmissionAssets(ctx, item)
+	a.removeSubmissionObjects(ctx, item)
 	return a.Store.AddAudit(ctx, actor, kind+"_submission_reject", kind+"_submission", item.ID, "{}", time.Now().UTC())
-}
-
-// removeSubmissionAssets is best-effort: the row is already gone. An object
-// still referenced by approved content is kept.
-func (a *App) removeSubmissionAssets(ctx context.Context, item sqlite.Submission) {
-	a.removeUploadObject(ctx, item)
 }
 
 // SubmissionResourceURL returns a temporary signed URL so a reviewer can open
@@ -682,7 +602,7 @@ func (a *App) SubmissionResourceURL(ctx context.Context, id, kind string, ttl ti
 	if err != nil {
 		return SubmissionURLView{}, err
 	}
-	if item.PdfKey == "" {
+	if len(item.Files) == 0 {
 		return SubmissionURLView{}, Err("resource_missing", "该提交没有文件", 404)
 	}
 	if a.cfg().CDNDomain == "" || a.cfg().CDNAuthKey == "" {
@@ -691,7 +611,7 @@ func (a *App) SubmissionResourceURL(ctx context.Context, id, kind string, ttl ti
 	if ttl <= 0 || ttl > 7*24*time.Hour {
 		ttl = a.cfg().CDNURLTTL
 	}
-	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.PdfKey, ttl)
+	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.Files[0].ObjectKey, ttl)
 	return SubmissionURLView{
 		URL:       url,
 		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),

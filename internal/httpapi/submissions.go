@@ -68,19 +68,6 @@ func (s *Server) adminSubmissions(w http.ResponseWriter, r *http.Request, kind s
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
 
-func (s *Server) adminSubmissionApprove(w http.ResponseWriter, r *http.Request, kind, id string) {
-	p, ok := s.authAdmin(w, r)
-	if !ok || !checkAdminCSRF(w, r) {
-		return
-	}
-	out, err := s.App.ApproveSubmissionForAdmin(r.Context(), id, kind, p.Admin.ID)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 func (s *Server) adminSubmissionReject(w http.ResponseWriter, r *http.Request, kind, id string) {
 	p, ok := s.authAdmin(w, r)
 	if !ok || !checkAdminCSRF(w, r) {
@@ -91,6 +78,19 @@ func (s *Server) adminSubmissionReject(w http.ResponseWriter, r *http.Request, k
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rejected": true})
+}
+
+func (s *Server) adminSubmissionFileDelete(w http.ResponseWriter, r *http.Request, kind, id string) {
+	p, ok := s.authAdmin(w, r)
+	if !ok || !checkAdminCSRF(w, r) {
+		return
+	}
+	file := r.URL.Query().Get("file")
+	if err := s.App.DeleteSubmissionFileForAdmin(r.Context(), id, kind, file, p.Admin.ID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (s *Server) adminSubmissionResourceURL(w http.ResponseWriter, r *http.Request, kind, id string) {

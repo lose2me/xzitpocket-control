@@ -8,19 +8,17 @@ import (
 	"time"
 )
 
-// Submission is a PDF an app user uploaded for administrator review. An
-// approved submission becomes a textbook or resource row that keeps PdfKey;
-// reviewed rows are removed from this queue.
+// Submission is one upload an app user sent for administrator review. A
+// submit carries one or more files; the console reviews and downloads them as
+// a list, so the row is only a container for its files.
 type Submission struct {
 	ID                  string    `json:"id"`
 	Kind                string    `json:"kind"`
 	CourseCode          string    `json:"course_code"`
 	Name                string    `json:"name"`
 	Tags                string    `json:"tags"`
-	PdfKey              string    `json:"pdf_key"`
+	Note                string    `json:"note"`
 	SizeBytes           int64     `json:"size_bytes"`
-	ManualPdfKey        string    `json:"manual_pdf_key"`
-	ManualSizeBytes     int64     `json:"manual_size_bytes"`
 	Status              string    `json:"status"`
 	SubmittedByUserID   string    `json:"submitted_by_user_id"`
 	SubmittedByName     string    `json:"submitted_by_name"`
@@ -28,6 +26,29 @@ type Submission struct {
 	TargetID            string    `json:"target_id"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	Files               []SubmissionFile
+}
+
+// SubmissionFile is one uploaded file of a submission. duplicate marks content
+// that was already published when it was uploaded.
+type SubmissionFile struct {
+	ID           string    `json:"id"`
+	SubmissionID string    `json:"submission_id"`
+	Name         string    `json:"name"`
+	ObjectKey    string    `json:"object_key"`
+	Format       string    `json:"format"`
+	SizeBytes    int64     `json:"size_bytes"`
+	Duplicate    bool      `json:"duplicate"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type SubmissionFileInput struct {
+	SubmissionID string
+	Name         string
+	ObjectKey    string
+	Format       string
+	SizeBytes    int64
+	Duplicate    bool
 }
 
 type SubmissionInput struct {
@@ -35,7 +56,7 @@ type SubmissionInput struct {
 	CourseCode          string
 	Name                string
 	Tags                string
-	PdfKey              string
+	Note                string
 	SizeBytes           int64
 	Status              string
 	SubmittedByUserID   string
@@ -44,7 +65,9 @@ type SubmissionInput struct {
 	TargetID            string
 }
 
-const submissionColumns = "id, kind, course_code, name, tags, pdf_key, size_bytes, manual_pdf_key, manual_size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at"
+const submissionColumns = "id, kind, course_code, name, tags, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at, note"
+
+const submissionFileColumns = "id, submission_id, name, object_key, format, size_bytes, duplicate, created_at"
 
 func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now time.Time) (Submission, error) {
 	if strings.TrimSpace(input.Status) == "" {
@@ -52,10 +75,10 @@ func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now
 	}
 	id := newStoreIDPrefix("sub")
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO resource_submissions(
-			id, kind, course_code, name, tags, pdf_key, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at)
+			id, kind, course_code, name, tags, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at, note)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, input.Kind, input.CourseCode, input.Name, input.Tags, input.PdfKey, input.SizeBytes, input.Status,
-		input.SubmittedByUserID, input.SubmittedByName, input.StudentIDCiphertext, input.TargetID, millis(now), millis(now))
+		id, input.Kind, input.CourseCode, input.Name, input.Tags, input.SizeBytes, input.Status,
+		input.SubmittedByUserID, input.SubmittedByName, input.StudentIDCiphertext, input.TargetID, millis(now), millis(now), input.Note)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -71,7 +94,7 @@ func (s *Store) ListSubmissions(ctx context.Context, kind string, limit, offset 
 	if offset < 0 {
 		offset = 0
 	}
-	where := " WHERE status = 'pending_review'"
+	where := " WHERE status = 'pending_review' AND EXISTS (SELECT 1 FROM submission_files f WHERE f.submission_id = resource_submissions.id)"
 	args := make([]any, 0, 3)
 	if kind = strings.TrimSpace(kind); kind != "" {
 		where += " AND kind = ?"
@@ -92,11 +115,14 @@ func (s *Store) ListSubmissions(ctx context.Context, kind string, limit, offset 
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.attachSubmissionFiles(ctx, items)
 }
 
 func (s *Store) CountSubmissions(ctx context.Context, kind string) (int, error) {
-	where := " WHERE status = 'pending_review'"
+	where := " WHERE status = 'pending_review' AND EXISTS (SELECT 1 FROM submission_files f WHERE f.submission_id = resource_submissions.id)"
 	args := []any{}
 	if kind = strings.TrimSpace(kind); kind != "" {
 		where += " AND kind = ?"
@@ -145,7 +171,10 @@ func (s *Store) ListStaleSubmissions(ctx context.Context, before time.Time, limi
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.attachSubmissionFiles(ctx, items)
 }
 
 func (s *Store) GetSubmission(ctx context.Context, id string) (Submission, error) {
@@ -154,36 +183,114 @@ func (s *Store) GetSubmission(ctx context.Context, id string) (Submission, error
 	if errors.Is(err, sql.ErrNoRows) {
 		return Submission{}, sql.ErrNoRows
 	}
+	if err != nil {
+		return Submission{}, err
+	}
+	files, err := s.ListSubmissionFiles(ctx, []string{item.ID})
+	if err != nil {
+		return Submission{}, err
+	}
+	item.Files = files[item.ID]
+	return item, nil
+}
+
+// attachSubmissionFiles fills Files for a page of submissions in one query.
+func (s *Store) attachSubmissionFiles(ctx context.Context, items []Submission) ([]Submission, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	files, err := s.ListSubmissionFiles(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Files = files[items[i].ID]
+	}
+	return items, nil
+}
+
+// AddSubmissionFile reserves one file row for a submission ticket.
+func (s *Store) AddSubmissionFile(ctx context.Context, input SubmissionFileInput, now time.Time) (SubmissionFile, error) {
+	id := newStoreIDPrefix("sf")
+	duplicate := 0
+	if input.Duplicate {
+		duplicate = 1
+	}
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO submission_files(
+			id, submission_id, name, object_key, format, size_bytes, duplicate, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, input.SubmissionID, input.Name, input.ObjectKey, input.Format, input.SizeBytes, duplicate, millis(now)); err != nil {
+		return SubmissionFile{}, err
+	}
+	return s.GetSubmissionFile(ctx, id)
+}
+
+// GetSubmissionFile returns one file row by id.
+func (s *Store) GetSubmissionFile(ctx context.Context, id string) (SubmissionFile, error) {
+	item, err := scanSubmissionFile(s.DB.QueryRowContext(ctx, "SELECT "+submissionFileColumns+" FROM submission_files WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return SubmissionFile{}, sql.ErrNoRows
+	}
 	return item, err
 }
 
-func (s *Store) SetSubmissionPdfKey(ctx context.Context, id, key string, sizeBytes int64, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE resource_submissions SET pdf_key = ?, size_bytes = ?, updated_at = ? WHERE id = ?`,
-		key, sizeBytes, millis(now), id)
+// ListSubmissionFiles returns the files of several submissions grouped by
+// submission id.
+func (s *Store) ListSubmissionFiles(ctx context.Context, submissionIDs []string) (map[string][]SubmissionFile, error) {
+	out := make(map[string][]SubmissionFile, len(submissionIDs))
+	if len(submissionIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(submissionIDs)), ",")
+	args := make([]any, len(submissionIDs))
+	for i, id := range submissionIDs {
+		args[i] = id
+	}
+	rows, err := s.DB.QueryContext(ctx, "SELECT "+submissionFileColumns+" FROM submission_files WHERE submission_id IN ("+
+		placeholders+") ORDER BY created_at ASC, id ASC", args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if affected, countErr := result.RowsAffected(); countErr != nil {
-		return countErr
-	} else if affected != 1 {
-		return sql.ErrNoRows
+	defer rows.Close()
+	for rows.Next() {
+		item, scanErr := scanSubmissionFile(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out[item.SubmissionID] = append(out[item.SubmissionID], item)
 	}
-	return nil
+	return out, rows.Err()
 }
 
-// SetSubmissionManualKey records the optional manual analysis PDF.
-func (s *Store) SetSubmissionManualKey(ctx context.Context, id, key string, sizeBytes int64, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE resource_submissions SET manual_pdf_key = ?, manual_size_bytes = ?, updated_at = ? WHERE id = ?`,
-		key, sizeBytes, millis(now), id)
-	if err != nil {
-		return err
-	}
-	if affected, countErr := result.RowsAffected(); countErr != nil {
-		return countErr
-	} else if affected != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+// UpdateSubmissionFileSize stores the size the object reported after upload.
+func (s *Store) UpdateSubmissionFileSize(ctx context.Context, id string, sizeBytes int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE submission_files SET size_bytes = ? WHERE id = ?`, sizeBytes, id)
+	return err
+}
+
+// DeleteSubmissionFile removes one file row.
+func (s *Store) DeleteSubmissionFile(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM submission_files WHERE id = ?`, id)
+	return err
+}
+
+// CountSubmissionFileKeyRefs reports how many files still point at the same
+// object key, so deleting one submission never deletes a shared object.
+func (s *Store) CountSubmissionFileKeyRefs(ctx context.Context, key string) (int, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM submission_files WHERE object_key = ?`, strings.TrimSpace(key)).Scan(&count)
+	return count, err
+}
+
+// CountSubmissionFiles reports how many files a submission still has.
+func (s *Store) CountSubmissionFiles(ctx context.Context, submissionID string) (int, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM submission_files WHERE submission_id = ?`, submissionID).Scan(&count)
+	return count, err
 }
 
 // MarkSubmissionUploaded promotes a verified direct upload into the review queue.
@@ -240,7 +347,7 @@ func (s *Store) PdfKeyInUse(ctx context.Context, key string) (bool, error) {
 	var exists int
 	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM textbooks WHERE pdf_key = ?
 		UNION ALL SELECT 1 FROM resources WHERE pdf_key = ?
-		UNION ALL SELECT 1 FROM resource_submissions WHERE pdf_key = ? LIMIT 1`,
+		UNION ALL SELECT 1 FROM submission_files WHERE object_key = ? LIMIT 1`,
 		key, key, key).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -276,12 +383,26 @@ func scanSubmission(row rowScannerSubmission) (Submission, error) {
 	var item Submission
 	var userID sql.NullString
 	var created, updated int64
-	if err := row.Scan(&item.ID, &item.Kind, &item.CourseCode, &item.Name, &item.Tags, &item.PdfKey,
-		&item.SizeBytes, &item.ManualPdfKey, &item.ManualSizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext, &item.TargetID, &created, &updated); err != nil {
+	if err := row.Scan(&item.ID, &item.Kind, &item.CourseCode, &item.Name, &item.Tags,
+		&item.SizeBytes, &item.Status, &userID, &item.SubmittedByName, &item.StudentIDCiphertext,
+		&item.TargetID, &created, &updated, &item.Note); err != nil {
 		return Submission{}, err
 	}
 	item.SubmittedByUserID = userID.String
 	item.CreatedAt = fromMillis(created)
 	item.UpdatedAt = fromMillis(updated)
+	return item, nil
+}
+
+func scanSubmissionFile(row rowScannerSubmission) (SubmissionFile, error) {
+	var item SubmissionFile
+	var duplicate int
+	var created int64
+	if err := row.Scan(&item.ID, &item.SubmissionID, &item.Name, &item.ObjectKey, &item.Format,
+		&item.SizeBytes, &duplicate, &created); err != nil {
+		return SubmissionFile{}, err
+	}
+	item.Duplicate = duplicate != 0
+	item.CreatedAt = fromMillis(created)
 	return item, nil
 }

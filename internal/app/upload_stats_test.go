@@ -36,7 +36,8 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 	a.cosClientOverride = newStubCOSClientWithHead(http.StatusNotFound, nil, nil, "")
 	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
 	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
-		Kind: "textbook", CourseCode: "C1", Name: "教材甲", TargetID: target.ID, MD5: hash, SizeBytes: int64(len(pdf)),
+		Kind: "textbook", CourseCode: "C1", Name: "教材甲", TargetID: target.ID,
+		Files: []ResourceSubmissionFileInput{{Name: "教材甲.pdf", Format: "pdf", MD5: hash, SizeBytes: int64(len(pdf))}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,16 +58,16 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].StudentID != "2023000001" {
 		t.Fatalf("review items = %#v, err = %v", items, err)
 	}
-	out, err := a.ApproveSubmissionForAdmin(ctx, ticket.ID, "textbook", "admin")
-	if err != nil {
+	// Publishing happens by hand in the console now, so link the contributor
+	// the same way the review flow used to.
+	if err := store.SetTextbookPdfKey(ctx, target.ID, "books/published/"+hash+".pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	textbook, ok := out["textbook"].(TextbookView)
-	if !ok {
-		t.Fatalf("approve = %#v", out)
+	if err := store.SetTextbookContributor(ctx, target.ID, p.User.ID); err != nil {
+		t.Fatal(err)
 	}
-	if textbook.ID != target.ID {
-		t.Fatalf("approved textbook = %q, want target %q", textbook.ID, target.ID)
+	if err := store.IncrementUserContribution(ctx, p.User.ID); err != nil {
+		t.Fatal(err)
 	}
 	stored, err := store.GetTextbook(ctx, target.ID)
 	if err != nil || stored.ContributorUserID != "usr-upload" || stored.PdfKey == "" {
@@ -77,20 +78,28 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 		t.Fatalf("stats = %d/%d, err = %v", contribution, downloads, err)
 	}
 
-	// Admin downloads update the content total but not the contributor profile.
-	a.RecordTextbookDownload(ctx, textbook.ID, false)
-	contribution, downloads, _ = store.GetUserStats(ctx, "usr-upload")
-	if contribution != 1 || downloads != 0 {
-		t.Fatalf("after admin download stats = %d/%d", contribution, downloads)
-	}
-	// App downloads count for the contributor.
-	a.RecordTextbookDownload(ctx, textbook.ID, true)
+	// App downloads count for the contributor once per user per day.
+	a.RecordTextbookDownload(ctx, target.ID, p.User.ID)
 	contribution, downloads, _ = store.GetUserStats(ctx, "usr-upload")
 	if contribution != 1 || downloads != 1 {
 		t.Fatalf("after app download stats = %d/%d", contribution, downloads)
 	}
+	// A second tap on the same day is not counted again.
+	a.RecordTextbookDownload(ctx, target.ID, p.User.ID)
+	if _, again, _ := store.GetUserStats(ctx, "usr-upload"); again != 1 {
+		t.Fatalf("repeat download counted: %d", again)
+	}
+	// Another user counts once more.
+	if err := store.CreateUser(ctx, sqlite.User{ID: "usr-other", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	a.RecordTextbookDownload(ctx, target.ID, "usr-other")
+	contribution, downloads, _ = store.GetUserStats(ctx, "usr-upload")
+	if contribution != 1 || downloads != 2 {
+		t.Fatalf("after second-user download stats = %d/%d", contribution, downloads)
+	}
 	stats, err := a.GetUploadStats(ctx, p)
-	if err != nil || stats.ContributionCount != 1 || stats.DownloadCount != 1 || stats.StudentID != "2023000001" {
+	if err != nil || stats.ContributionCount != 1 || stats.DownloadCount != 2 || stats.StudentID != "2023000001" {
 		t.Fatalf("upload stats = %#v, err = %v", stats, err)
 	}
 }
