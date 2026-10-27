@@ -844,10 +844,11 @@ import { template } from './template.js';
       const schoolCalendarScope = ref('');
       const schoolCalendarExceptionsJson = ref('[]');
       const schoolCalendarScopeItems = computed(() => {
+        const configured = new Set(schoolCalendarColleges.value.map(item => item.college));
         const names = new Set(schoolCalendarCollegeOptions.value);
-        for (const item of schoolCalendarColleges.value) names.add(item.college);
-        return [{ title: '全局（默认）', value: '' }].concat(
-          [...names].sort().map(name => ({ title: name, value: name })),
+        for (const name of configured) names.add(name);
+        return [{ title: '全局（默认）', value: '', hasConfig: false }].concat(
+          [...names].sort().map(name => ({ title: name, value: name, hasConfig: configured.has(name) })),
         );
       });
       const schoolCalendarExceptionsOf = (scope) => {
