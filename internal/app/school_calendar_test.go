@@ -17,7 +17,7 @@ func TestCollegeCalendarExceptionsReplaceGlobal(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -107,7 +107,7 @@ func TestGetSchoolCalendarReinitializesCorruptConfig(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, "UPDATE school_calendar_config SET days_json = ?", "[{\"date\":\"not-a-date\"}]"); err != nil {
@@ -141,7 +141,7 @@ func TestSchoolCalendarSlotsRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{Store: store}

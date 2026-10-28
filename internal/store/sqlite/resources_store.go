@@ -160,7 +160,10 @@ func (s *Store) GetResource(ctx context.Context, id string) (Resource, error) {
 }
 
 func (s *Store) CreateResource(ctx context.Context, input ResourceInput, now time.Time) (Resource, error) {
-	id := newStoreIDPrefix("res")
+	id, err := newStoreID("res")
+	if err != nil {
+		return Resource{}, err
+	}
 	result, err := s.DB.ExecContext(ctx, `INSERT INTO resources(id, name, tags, course_code, pdf_key, created_at, updated_at)
 		VALUES (?, ?, ?, ?, '', ?, ?)`,
 		id, input.Name, input.Tags, input.CourseCode, millis(now), millis(now))

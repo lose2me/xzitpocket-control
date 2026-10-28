@@ -94,7 +94,7 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/abc.pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	task, _, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +111,8 @@ func TestRunAITaskPipeline(t *testing.T) {
 	if final.Status != "succeeded" {
 		t.Fatalf("status = %s, error = %s", final.Status, final.Error)
 	}
-	if final.Mode != "basic" || final.OutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+".pdf" || final.OutputSize == 0 {
-		t.Fatalf("output = %q mode=%q size=%d", final.OutputKey, final.Mode, final.OutputSize)
+	if final.OutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+".pdf" || final.OutputSize == 0 {
+		t.Fatalf("output = %q size=%d", final.OutputKey, final.OutputSize)
 	}
 	if final.MoreOutputKey != aiOutputPrefix+resource.ID+"/"+task.ID+"-more.pdf" || final.MoreOutputSize == 0 {
 		t.Fatalf("more output = %q size=%d", final.MoreOutputKey, final.MoreOutputSize)
@@ -202,7 +202,7 @@ func TestEnqueueRestartsActiveAITask(t *testing.T) {
 	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/restart.pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	first, inserted, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
+	first, inserted, err := store.CreateAITask(ctx, resource.ID, "admin")
 	if err != nil || !inserted {
 		t.Fatalf("create: %#v inserted=%v err=%v", first, inserted, err)
 	}
@@ -211,7 +211,7 @@ func TestEnqueueRestartsActiveAITask(t *testing.T) {
 		t.Fatalf("claim: %#v ok=%v err=%v", claimed, ok, err)
 	}
 
-	created, failed, err := a.EnqueueAIAnalyses(ctx, []string{resource.ID}, []string{"basic"}, "admin")
+	created, failed, err := a.EnqueueAIAnalyses(ctx, []string{resource.ID}, "admin")
 	if err != nil || len(failed) != 0 || len(created) != 1 {
 		t.Fatalf("enqueue: created=%#v failed=%#v err=%v", created, failed, err)
 	}

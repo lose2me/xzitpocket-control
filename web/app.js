@@ -811,9 +811,8 @@ import { template } from './template.js';
         const seconds = rawItem(row).elapsed_seconds;
         return Number.isFinite(seconds) ? Math.max(0, seconds) + 's' : '—';
       };
-      const aiTaskForResource = (resourceId, mode) => (aiTasks.value || []).reduce((latest, task) => {
+      const aiTaskForResource = (resourceId) => (aiTasks.value || []).reduce((latest, task) => {
         if (task.resource_id !== resourceId) return latest;
-        if (mode && task.mode !== mode) return latest;
         if (!latest) return task;
         const current = Date.parse(task.created_at || '') || 0;
         const previous = Date.parse(latest.created_at || '') || 0;
@@ -821,7 +820,7 @@ import { template } from './template.js';
       }, null);
       const aiIsLatestTask = (row) => {
         const item = rawItem(row);
-        const latest = aiTaskForResource(item.resource_id, item.mode);
+        const latest = aiTaskForResource(item.resource_id);
         return latest ? latest.id === item.id : false;
       };
       const aiIsLatestOutput = (row) => {
@@ -1342,7 +1341,7 @@ import { template } from './template.js';
       const editTextbook = (row) => call(async () => {
         const item = rawItem(row);
         textbookEditingId.value = item.id || '';
-        const codes = Array.isArray(item.course_codes) && item.course_codes.length ? item.course_codes : (item.course_code ? [item.course_code] : []);
+        const codes = item.course_codes;
         textbookForm.value = { name: item.name || '', tags: item.tags || '', courseCodes: codes };
         resetPdfState();
         await loadCourseOptions();
@@ -1412,10 +1411,9 @@ import { template } from './template.js';
         aiTasks.value = out.items || [];
         aiTotal.value = out.total || 0;
       };
-      const enqueueAIResources = (ids, modes) => call(async () => {
+      const enqueueAIResources = (ids) => call(async () => {
         if (!ids.length) throw new Error('没有可解析的 PDF 试卷');
         const payload = { resource_ids: ids };
-        if (modes && modes.length) payload.modes = modes;
         const out = await api('/api/v1/admin/ai-analyses', { method: 'POST', body: JSON.stringify(payload) });
         const created = (out.items || []).length;
         const failed = out.failed || [];
@@ -2113,9 +2111,7 @@ import { template } from './template.js';
       const editBank = (row) => call(async () => {
         const out = await api('/api/v1/admin/question-banks/' + encodeURIComponent(rawItem(row).id));
         bankEditing.value = true;
-        bankCourseCodes.value = Array.isArray(out.questionBank.courseCodes) && out.questionBank.courseCodes.length
-          ? out.questionBank.courseCodes.slice()
-          : (out.questionBank.courseCode ? [out.questionBank.courseCode] : []);
+        bankCourseCodes.value = out.questionBank.courseCodes.slice();
         await loadCourseOptions();
         bankJSON.value = JSON.stringify({
           questionBank: {

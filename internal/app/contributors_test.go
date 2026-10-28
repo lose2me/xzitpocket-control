@@ -46,7 +46,7 @@ func TestBindPublishedContentContributor(t *testing.T) {
 		}
 	}
 
-	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

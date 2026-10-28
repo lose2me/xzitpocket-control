@@ -134,19 +134,8 @@ func (a *App) ensureAdmins(ctx context.Context) error {
 		return fmt.Errorf("hash admin %q: %w", superAdminName, err)
 	}
 	existing, err := a.Store.GetAdminByName(ctx, superAdminName)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Adopt the legacy administrator row created before names existed.
-		if first, firstErr := a.Store.GetAdmin(ctx); firstErr == nil && first.Name == "" {
-			existing, err = first, nil
-		}
-	}
 	switch {
 	case err == nil:
-		if existing.Name != superAdminName {
-			if err := a.Store.SetAdminName(ctx, existing.ID, superAdminName); err != nil {
-				return fmt.Errorf("rename admin %q: %w", superAdminName, err)
-			}
-		}
 		if err := a.Store.UpdateAdminAuth(ctx, existing.ID, hash, superAdminPerms, ""); err != nil {
 			return fmt.Errorf("update admin %q: %w", superAdminName, err)
 		}

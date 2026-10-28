@@ -8,7 +8,6 @@ import (
 
 type aiEnqueueInput struct {
 	ResourceIDs []string `json:"resource_ids"`
-	Modes       []string `json:"modes"`
 }
 
 // adminAITasks lists AI analysis jobs.
@@ -34,7 +33,7 @@ func (s *Server) adminAIEnqueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	items, failed, err := s.App.EnqueueAIAnalyses(r.Context(), in.ResourceIDs, in.Modes, p.Admin.ID)
+	items, failed, err := s.App.EnqueueAIAnalyses(r.Context(), in.ResourceIDs, p.Admin.ID)
 	if err != nil {
 		writeError(w, r, err)
 		return

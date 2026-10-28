@@ -14,12 +14,10 @@ import (
 )
 
 // TextbookWriteInput is the administrator create/update payload. CourseCodes
-// holds every associated course; the legacy CourseCode is still accepted and
-// becomes the first association.
+// holds every associated course in primary-first order.
 type TextbookWriteInput struct {
 	Name        string   `json:"name"`
 	Tags        string   `json:"tags"`
-	CourseCode  string   `json:"course_code"`
 	CourseCodes []string `json:"course_codes"`
 }
 
@@ -31,6 +29,7 @@ type TextbookView struct {
 	CourseCode           string   `json:"course_code"`
 	CourseCodes          []string `json:"course_codes"`
 	HasPdf               bool     `json:"has_pdf"`
+	FileVersion          string   `json:"file_version"`
 	HasCover             bool     `json:"has_cover"`
 	SizeBytes            int64    `json:"size_bytes,omitempty"`
 	DownloadCount        int64    `json:"download_count"`
@@ -44,8 +43,9 @@ type TextbookView struct {
 
 // TextbookResourceView is a temporary, signed CDN URL for a textbook asset.
 type TextbookResourceView struct {
-	URL       string `json:"url"`
-	ExpiresAt string `json:"expires_at"`
+	URL         string `json:"url"`
+	FileVersion string `json:"file_version"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 const (
@@ -61,16 +61,17 @@ func textbookView(item sqlite.Textbook) TextbookView {
 	return TextbookView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode, CourseCodes: codes,
 		HasPdf: item.PdfKey != "", HasCover: item.CoverKey != "", DownloadCount: item.DownloadCount,
-		Archived:  !item.ArchivedAt.IsZero(),
-		CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
+		FileVersion: storedFileVersion(item.PdfKey),
+		Archived:    !item.ArchivedAt.IsZero(),
+		CreatedAt:   item.CreatedAt.Format(time.RFC3339), UpdatedAt: configVersion(item.UpdatedAt),
 	}
 }
 
 // normalizeCourseAssociations trims and deduplicates course codes, keeping the
-// caller's order. The first code becomes the legacy primary association.
-func normalizeCourseAssociations(codes []string, fallback string) ([]string, bool) {
-	result := make([]string, 0, len(codes)+1)
-	seen := make(map[string]bool, len(codes)+1)
+// caller's order. The first code becomes the primary association.
+func normalizeCourseAssociations(codes []string) ([]string, bool) {
+	result := make([]string, 0, len(codes))
+	seen := make(map[string]bool, len(codes))
 	add := func(code string) bool {
 		code = strings.TrimSpace(code)
 		if code == "" {
@@ -89,9 +90,6 @@ func normalizeCourseAssociations(codes []string, fallback string) ([]string, boo
 		if !add(code) {
 			return nil, false
 		}
-	}
-	if !add(fallback) {
-		return nil, false
 	}
 	if len(result) > 20 {
 		return nil, false
@@ -142,15 +140,11 @@ func validateTextbookWriteInput(in TextbookWriteInput) (sqlite.TextbookInput, er
 	if len(in.Tags) > 1024 || strings.ContainsAny(in.Tags, "\r\n\x00") {
 		return sqlite.TextbookInput{}, Err("invalid_textbook", "教材标签无效", 400)
 	}
-	codes, ok := normalizeCourseAssociations(in.CourseCodes, in.CourseCode)
+	codes, ok := normalizeCourseAssociations(in.CourseCodes)
 	if !ok {
 		return sqlite.TextbookInput{}, Err("invalid_textbook", "关联课程编号无效", 400)
 	}
-	primary := ""
-	if len(codes) > 0 {
-		primary = codes[0]
-	}
-	return sqlite.TextbookInput{Name: in.Name, Tags: in.Tags, CourseCode: primary, CourseCodes: codes}, nil
+	return sqlite.TextbookInput{Name: in.Name, Tags: in.Tags, CourseCodes: codes}, nil
 }
 
 // ListTextbooksForUpload feeds the app upload picker with every textbook and
@@ -240,10 +234,7 @@ func (a *App) SetTextbookArchived(ctx context.Context, id string, archived bool,
 	if archived == !item.ArchivedAt.IsZero() {
 		return a.textbookViewForAdmin(ctx, item), nil
 	}
-	newPdfKey, newCoverKey, err := textbookAreaKeys(item, archived)
-	if err != nil {
-		return TextbookView{}, err
-	}
+	newPdfKey, newCoverKey := textbookAreaKeys(item, archived)
 	if newPdfKey != item.PdfKey {
 		if err := a.copyStoredObject(ctx, item.PdfKey, newPdfKey); err != nil {
 			return TextbookView{}, err
@@ -280,28 +271,26 @@ func (a *App) SetTextbookArchived(ctx context.Context, id string, archived bool,
 }
 
 // textbookAreaKeys derives the published or archived object keys for a
-// textbook from its content hash. Legacy keys without a hash stay in place.
-func textbookAreaKeys(item sqlite.Textbook, archived bool) (string, string, error) {
+// textbook from its content hash.
+func textbookAreaKeys(item sqlite.Textbook, archived bool) (string, string) {
 	pdfKey, coverKey := item.PdfKey, item.CoverKey
 	if pdfKey != "" {
-		if hash := objectHashFromKey(pdfKey); hash != "" {
-			if archived {
-				pdfKey = archivedObjectKey("textbook", fileFormatPDF, hash)
-			} else {
-				pdfKey = publishedObjectKey("textbook", fileFormatPDF, hash)
-			}
+		hash := objectHashFromKey(pdfKey)
+		if archived {
+			pdfKey = archivedObjectKey("textbook", fileFormatPDF, hash)
+		} else {
+			pdfKey = publishedObjectKey("textbook", fileFormatPDF, hash)
 		}
 	}
 	if coverKey != "" {
-		if hash := objectHashFromKey(coverKey); hash != "" {
-			if archived {
-				coverKey = archivedTextbookCoverKey(hash)
-			} else {
-				coverKey = textbookCoverKey(hash)
-			}
+		hash := objectHashFromKey(coverKey)
+		if archived {
+			coverKey = archivedTextbookCoverKey(hash)
+		} else {
+			coverKey = textbookCoverKey(hash)
 		}
 	}
-	return pdfKey, coverKey, nil
+	return pdfKey, coverKey
 }
 
 // copyStoredObject copies a COS object so the source can be removed once no row
@@ -478,7 +467,8 @@ func (a *App) textbookResourceURL(ctx context.Context, id, kind string, ttl time
 		return TextbookResourceView{}, ErrNotFound
 	}
 	var key string
-	switch strings.TrimSpace(kind) {
+	kind = strings.TrimSpace(kind)
+	switch kind {
 	case "", "pdf":
 		key = item.PdfKey
 	case "cover":
@@ -496,8 +486,14 @@ func (a *App) textbookResourceURL(ctx context.Context, id, kind string, ttl time
 		ttl = a.cfg().CDNURLTTL
 	}
 	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+key, ttl)
+	version := storedFileVersion(key)
+	if kind == "cover" {
+		// Covers can be overwritten at the same PDF-based storage key.
+		version = storedFileVersion(key + ":" + configVersion(item.UpdatedAt))
+	}
 	return TextbookResourceView{
-		URL:       url,
-		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),
+		URL:         url,
+		FileVersion: version,
+		ExpiresAt:   time.Now().Add(ttl).UTC().Format(time.RFC3339),
 	}, nil
 }

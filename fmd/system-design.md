@@ -73,16 +73,15 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 
 | 表 | 用途 |
 | --- | --- |
-| `question_banks` | 题库 ID、顺序 ID、名称、状态、首个关联课程编号和 CDK 解锁开关 |
+| `question_banks` | 随机题库 ID、名称、状态、首个关联课程编号和 CDK 解锁开关 |
 | `question_bank_courses` | 题库与多个课程编号的关联 |
 | `questions` | 题号、题型、题干和答案 |
 | `question_options` | 选择题选项 |
-| `question_bank_id_counter` | 事务内单调分配 `QB-001` 等 ID |
 | `library_cdks` | 单题库、单次使用的 CDK |
 
-题库可关联多个课程编号，`question_banks.course_code` 保留第一个用于排序和旧客户端，完整关联在 `question_bank_courses`。
+题库可关联多个课程编号，`question_banks.course_code` 保留第一个用于排序，完整关联在 `question_bank_courses`。
 
-题库状态只有 `active`、`draft`、`disabled`。创建时客户端不能指定题库 ID，control 自动生成且不复用；`orderId` 是正整数，用于控制 xzitpocket 展示顺序。未填写时按顺序计数器自动分配，管理员可编辑为未占用的顺序 ID；停用只是改为 `disabled`，管理员列表仍显示。
+题库状态只有 `active`、`disabled`。创建时 control 生成带 `QB-` 前缀的随机 ID，列表按名称排序。完整课程关联通过 `courseCodes` 数组提交，不接受旧的单课程字段。题目按题号、选项按标签保留稳定 ID，内容未变化的保存不改写数据库。
 
 题型固定为 `单选题`、`多选题`、`判断题`、`填空题`。服务端校验题号唯一、选项标签唯一及答案引用关系。
 
@@ -93,12 +92,11 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 ```json
 {
   "questionBank": {
-    "id": "QB-001",
-    "orderId": 1,
-    "new": true,
+    "id": "QB-0123456789abcdef12",
     "name": "计算机基础知识测验",
     "requiresCDK": false,
     "courseCode": "3007B0001",
+    "courseCodes": ["3007B0001"],
     "questions": [
       {
         "questionNumber": 1,
@@ -193,7 +191,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | GET/PUT | `/admin/settings`（运行配置，保存后即时生效） |
 | POST/DELETE | `/admin/session` |
 
-题库创建和更新只接受 `{ "questionBank": ... }`；创建不带题库 ID，更新通过 URL 指定 ID。`orderId` 可在创建或更新时设置，必须是未占用的正整数；省略时创建自动分配、更新保留原值。错误统一返回 `error.code`、`error.message` 和 `request_id`。
+题库创建和更新只接受 `{ "questionBank": ... }`；创建不带题库 ID，更新通过 URL 指定 ID。课程关联只通过 `courseCodes` 数组提交，未关联时返回空数组。错误统一返回 `error.code`、`error.message` 和 `request_id`。
 
 ## 7.1 APP 发布配置
 
@@ -219,9 +217,9 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 | `CONTROL_ADDR` | `127.0.0.1:8080` | 监听地址 |
 | `CONTROL_DB` | `data/control.db` | SQLite 路径 |
 | `CONTROL_WEB_DIR` | 空 | 后台静态文件目录，空则用内嵌前端 |
-| `CONTROL_TOKEN_PEPPER` | 自动生成 | 令牌 HMAC（与旧库绑定） |
-| `CONTROL_ID_PEPPER` | 自动生成 | 学号/IP HMAC（与旧库绑定） |
-| `CONTROL_ENCRYPTION_KEY` | 自动生成 | 学号与管理员密钥加密（与旧库绑定） |
+| `CONTROL_TOKEN_PEPPER` | 自动生成 | 令牌 HMAC（与当前数据库绑定） |
+| `CONTROL_ID_PEPPER` | 自动生成 | 学号/IP HMAC（与当前数据库绑定） |
+| `CONTROL_ENCRYPTION_KEY` | 自动生成 | 学号与管理员密钥加密（与当前数据库绑定） |
 | `CONTROL_ADMIN_KEY` | `change-me` | 超管密钥，每次启动同步到 `admin_users` |
 | `CONTROL_AI_WORK_DIR` | `<db 目录>/ai-work` | AI 临时目录 |
 | `CONTROL_AI_MATHJAX_DIR` | `ai-math` | MathJax 渲染目录 |
@@ -232,9 +230,9 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 - Secret 类配置（COS/CDN/监控凭证、AI API Key）写入前用 `CONTROL_ENCRYPTION_KEY` 加密，前缀 `enc:v1:`；`GET /admin/settings` 只返回 `set: true`，不回显明文。
 - 页面权限复用 `config` 页（读写分离），写操作记录 `audit_logs.settings_update`（只记 key 名）。
 
-侧边栏把配置分成两页：「APP 配置」= APP 发布配置（正式/测试）+ 学校校历；「WEB 配置」= 运行配置（`app_settings`），页内再按「常规 / 风控 / 对象存储 / CDN / 主机监控 / AI 试卷解析」分类用 tab 切换。两页共用同一个 `config` 页面授权，`admin_users.permissions` 里的 `config=r/rw` 不需要迁移；旧地址 `/config` 打开「APP 配置」。
+侧边栏把配置分成两页：「APP 配置」= APP 发布配置（正式/测试）+ 学校校历；「WEB 配置」= 运行配置（`app_settings`），页内再按「常规 / 风控 / 对象存储 / CDN / 主机监控 / AI 试卷解析」分类用 tab 切换。两页共用同一个 `config` 页面授权，`admin_users.permissions` 中使用 `config=r/rw` 授权。
 
-当前数据库唯一结构来源为 `internal/store/sqlite/schema.sql`，启动时直接创建表和索引。SQLite 开启外键、WAL 和 `busy_timeout=5000`。
+表和索引定义在 `internal/store/sqlite/schema.sql`，资源版本触发器定义在 `resource_center.go`。`InitSchema` 在事务内初始化当前结构，不再迁移或重置历史数据库；两个项目按当前版本配套全新部署。SQLite 开启外键、WAL 和 `busy_timeout=5000`。
 
 ## 9. 响应式后台
 
@@ -252,3 +250,7 @@ control 验证设备签名、challenge 一次性使用、学号格式和伪名�
 - 管理员可在用户列表直接手动停用用户，停用状态会阻止其会话继续使用；
 - 风控只记录展示；
 - `go test ./...`、`go vet ./...`、`node --check web/app.js` 和 `git diff --check` 通过。
+
+资源中心使用 `resource_revisions` 记录全局及各课程的单调版本，触发器随内容事务更新，跳过无变化的写入和下载计数。响应先读取版本再读取列表，避免把旧列表保存为较新的版本。封面选择首个实际有封面的教材，`cover_version` 由封面地址和该教材更新时间生成，与课程试卷增删解耦；同一封面地址被覆盖上传时，同时刷新所有共享教材。一次 AI 任务生成两份报告，数据库不再保存旧的逐模式任务字段。
+
+教材、试卷列表及其签名下载接口返回 `file_version`，解析结果也携带对应文件版本。版本从不可变文件的存储地址生成，不新增数据库字段，修改名称、标签、封面等元信息不会改变文档版本。app 以资源 ID、格式和文件版本记录下载，以版本区分签名地址缓存；替换后显示“未下载”，保留旧下载文件。签名响应与列表版本不符时刷新列表并提示重试，避免把新文件登记为旧版本。

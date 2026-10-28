@@ -23,7 +23,6 @@ type QuestionBankInput struct {
 	Name        string          `json:"name"`
 	Status      string          `json:"status,omitempty"`
 	RequiresCDK bool            `json:"requiresCDK"`
-	CourseCode  string          `json:"courseCode"`
 	CourseCodes []string        `json:"courseCodes"`
 	Questions   []QuestionInput `json:"questions"`
 }
@@ -53,7 +52,7 @@ type QuestionBankView struct {
 	Name        string         `json:"name"`
 	RequiresCDK bool           `json:"requiresCDK"`
 	CourseCode  string         `json:"courseCode,omitempty"`
-	CourseCodes []string       `json:"courseCodes,omitempty"`
+	CourseCodes []string       `json:"courseCodes"`
 	Questions   []QuestionView `json:"questions"`
 }
 
@@ -120,7 +119,7 @@ func validateQuestionBankInput(in QuestionBankInput, requireID bool) (sqlite.Que
 	if in.Name == "" || len(in.Name) > 256 || strings.ContainsAny(in.Name, "\r\n\x00") {
 		return sqlite.QuestionBank{}, Err("invalid_question_bank", "题库名称无效", http.StatusBadRequest)
 	}
-	codes, ok := normalizeCourseAssociations(in.CourseCodes, in.CourseCode)
+	codes, ok := normalizeCourseAssociations(in.CourseCodes)
 	if !ok {
 		return sqlite.QuestionBank{}, Err("invalid_question_bank_course", "关联课程无效", http.StatusBadRequest)
 	}

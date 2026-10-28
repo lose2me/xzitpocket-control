@@ -16,15 +16,15 @@ func TestUploadTextbooksInsertAndKeepAssociation(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 
 	accepted, err := store.UploadTextbooks(ctx, []TextbookInput{
-		{Name: "数学分析", Tags: "高教社", CourseCode: "3007B2106"},
-		{Name: "数学分析", Tags: "高教社", CourseCode: "3007B2106"},
-		{Name: "离散数学", Tags: "清华社", CourseCode: "3007P0102"},
+		{Name: "数学分析", Tags: "高教社", CourseCodes: []string{"3007B2106"}},
+		{Name: "数学分析", Tags: "高教社", CourseCodes: []string{"3007B2106"}},
+		{Name: "离散数学", Tags: "清华社", CourseCodes: []string{"3007P0102"}},
 	}, now)
 	if err != nil || accepted != 2 {
 		t.Fatalf("accepted = %d, err = %v", accepted, err)
@@ -32,7 +32,7 @@ func TestUploadTextbooksInsertAndKeepAssociation(t *testing.T) {
 
 	// Re-uploading the same key is a no-op and keeps the stored association.
 	accepted, err = store.UploadTextbooks(ctx, []TextbookInput{
-		{Name: "数学分析", Tags: "高教社", CourseCode: "3007B2106"},
+		{Name: "数学分析", Tags: "高教社", CourseCodes: []string{"3007B2106"}},
 	}, now.Add(time.Minute))
 	if err != nil || accepted != 0 {
 		t.Fatalf("duplicate accepted = %d, err = %v", accepted, err)
@@ -60,20 +60,20 @@ func TestTextbookAdminCRUDAndReassign(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 
-	created, err := store.CreateTextbook(ctx, TextbookInput{Name: "高等数学", Tags: "同济版", CourseCode: "C1"}, now)
+	created, err := store.CreateTextbook(ctx, TextbookInput{Name: "高等数学", Tags: "同济版", CourseCodes: []string{"C1"}}, now)
 	if err != nil || created.ID == "" {
 		t.Fatalf("create = %#v, err = %v", created, err)
 	}
-	if _, err := store.CreateTextbook(ctx, TextbookInput{Name: "高等数学", Tags: "同济版", CourseCode: "C1"}, now); !errors.Is(err, ErrTextbookExists) {
+	if _, err := store.CreateTextbook(ctx, TextbookInput{Name: "高等数学", Tags: "同济版", CourseCodes: []string{"C1"}}, now); !errors.Is(err, ErrTextbookExists) {
 		t.Fatalf("duplicate create error = %v, want ErrTextbookExists", err)
 	}
 	// Editing the book and moving it to another course keeps a single row.
-	if err := store.UpdateTextbook(ctx, created.ID, TextbookInput{Name: "高等数学（上）", Tags: "同济版/第7版", CourseCode: "C2"}, now); err != nil {
+	if err := store.UpdateTextbook(ctx, created.ID, TextbookInput{Name: "高等数学（上）", Tags: "同济版/第7版", CourseCodes: []string{"C2"}}, now); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetTextbook(ctx, created.ID)
@@ -98,7 +98,7 @@ func TestTextbookMultipleCourses(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

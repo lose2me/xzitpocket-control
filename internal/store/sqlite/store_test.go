@@ -3,22 +3,21 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestMigrateCreatesCurrentSchema(t *testing.T) {
+func TestInitSchemaCreatesCurrentSchema(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var count int
-	for _, table := range []string{"question_banks", "questions", "question_options", "question_bank_id_counter", "library_cdks", "error_reports", "error_report_ignored_students"} {
+	for _, table := range []string{"question_banks", "questions", "question_options", "library_cdks", "error_reports", "error_report_ignored_students"} {
 		if err := store.DB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
@@ -28,205 +27,13 @@ func TestMigrateCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
-func TestMigrateAddsQuestionBankCourseCode(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, created_at, updated_at)
-		VALUES ('QB-001', '旧题库', 'active', 0, 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate a database created before the course association existed.
-	if _, err := store.DB.ExecContext(ctx, "ALTER TABLE question_banks DROP COLUMN course_code"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	hasCourseCode, err := store.tableHasColumn(ctx, "question_banks", "course_code")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasCourseCode {
-		t.Fatal("question_banks.course_code was not added")
-	}
-	var name, courseCode string
-	if err := store.DB.QueryRowContext(ctx, "SELECT name, course_code FROM question_banks WHERE id = 'QB-001'").Scan(&name, &courseCode); err != nil {
-		t.Fatal(err)
-	}
-	if name != "旧题库" || courseCode != "" {
-		t.Fatalf("unexpected migrated row: name=%q course_code=%q", name, courseCode)
-	}
-}
-
-func TestMigrateRebuildsIncompatibleSchema(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE users (
-		id TEXT PRIMARY KEY,
-		status TEXT NOT NULL DEFAULT 'active',
-		display_name TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL,
-		last_login_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, "INSERT INTO users(id, status, display_name, created_at, last_login_at) VALUES ('usr_old', 'active', '旧用户', 1, 1)"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = 'usr_old'").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("incompatible database data was retained")
-	}
-	var collegeName string
-	if err := store.DB.QueryRowContext(ctx, "SELECT college_name FROM users WHERE id = 'missing'").Scan(&collegeName); err == nil {
-		t.Fatal("missing row unexpectedly returned")
-	}
-}
-
-func TestMigrateDropsRemovedCoursesBooksColumn(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	// Simulate a courses table that still embedded its book list.
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE courses (
-		id TEXT PRIMARY KEY,
-		code TEXT NOT NULL UNIQUE,
-		name TEXT NOT NULL,
-		books TEXT NOT NULL DEFAULT '[]',
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO courses(id, code, name, books, created_at, updated_at)
-		VALUES ('crs_old', '3007B2106', '数学分析（Ⅲ）', '[{"name":"数学分析","tags":"高教社"}]', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	hasBooks, err := store.tableHasColumn(ctx, "courses", "books")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasBooks {
-		t.Fatal("courses.books was not removed")
-	}
-	var count int
-	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM courses").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("course row was lost during migration, got %d", count)
-	}
-	if store.LastMigrationBackup() == "" {
-		t.Fatal("no snapshot was written before removing the column")
-	}
-}
-
-func TestMigrateBacksUpBeforeRebuilding(t *testing.T) {
-	dir := t.TempDir()
-	store, err := Open(filepath.Join(dir, "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE users (
-		id TEXT PRIMARY KEY,
-		status TEXT NOT NULL DEFAULT 'active',
-		display_name TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL,
-		last_login_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, "INSERT INTO users(id, status, display_name, created_at, last_login_at) VALUES ('usr_old', 'active', '旧用户', 1, 1)"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	backup := store.LastResetBackup()
-	if backup == "" {
-		t.Fatal("incompatible schema was rebuilt without a crash backup")
-	}
-	if base := filepath.Base(backup); !strings.HasPrefix(base, "crash-") {
-		t.Fatalf("backup name %q does not start with crash-", base)
-	}
-	backupStore, err := Open(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer backupStore.Close()
-	var displayName string
-	if err := backupStore.DB.QueryRowContext(ctx, "SELECT display_name FROM users WHERE id = 'usr_old'").Scan(&displayName); err != nil {
-		t.Fatalf("backup did not retain the old data: %v", err)
-	}
-	if displayName != "旧用户" {
-		t.Fatalf("backup user display_name = %q", displayName)
-	}
-}
-
-func TestMigrateRebuildsSchemaWithUnexpectedTable(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, "CREATE TABLE legacy_cache (id TEXT PRIMARY KEY, payload TEXT NOT NULL)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, "INSERT INTO legacy_cache(id, payload) VALUES ('legacy', 'old')"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'legacy_cache'").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("unexpected legacy table was retained")
-	}
-}
-
 func TestMetricsHandleAnonymousEventsAndCalendarWindows(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,7 +86,7 @@ func TestMetricsUseShanghaiCalendarDay(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -323,7 +130,7 @@ func TestMetricsBreakdownCountsCDKActivations(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
@@ -347,138 +154,5 @@ func TestMetricsBreakdownCountsCDKActivations(t *testing.T) {
 	}
 	if breakdown.CDKActivationsToday != 1 || breakdown.CDKActivationsWeek != 2 || breakdown.CDKActivationsTotal != 3 {
 		t.Fatalf("CDK activation metrics = today %d, week %d, total %d; want 1, 2, 3", breakdown.CDKActivationsToday, breakdown.CDKActivationsWeek, breakdown.CDKActivationsTotal)
-	}
-}
-
-func TestMigrateBackfillsCourseAssociations(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate rows created before multi-course support: the legacy column is
-	// filled but no association rows exist.
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
-		VALUES ('tbx_old', '旧教材', '', 'C9', '', '', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at)
-		VALUES ('QB-900', '旧题库', 'active', 0, 'C8', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	textbook, err := store.GetTextbook(ctx, "tbx_old")
-	if err != nil || len(textbook.CourseCodes) != 1 || textbook.CourseCodes[0] != "C9" {
-		t.Fatalf("textbook = %#v, err = %v", textbook, err)
-	}
-	bank, err := store.GetQuestionBank(ctx, "QB-900")
-	if err != nil || len(bank.CourseCodes) != 1 || bank.CourseCodes[0] != "C8" {
-		t.Fatalf("question bank = %#v, err = %v", bank, err)
-	}
-}
-
-func TestDropQuestionBankDraftStatusRebuildsTable(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE question_banks (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'disabled')),
-		requires_cdk INTEGER NOT NULL DEFAULT 0 CHECK (requires_cdk IN (0, 1)),
-		course_code TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		archived_at INTEGER NOT NULL DEFAULT 0
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, name, status, requires_cdk, course_code, created_at, updated_at, archived_at) VALUES
-		('QB-draft', '草稿题库', 'draft', 0, 'C1', 1, 1, 0),
-		('QB-off', '停用题库', 'disabled', 1, 'C1', 1, 1, 7),
-		('QB-on', '启用的题库', 'active', 0, 'C1', 1, 1, 0)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.dropQuestionBankDraftStatus(ctx); err != nil {
-		t.Fatalf("drop draft status: %v", err)
-	}
-	var ddl string
-	if err := store.DB.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'question_banks'`).Scan(&ddl); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(ddl, "'draft'") {
-		t.Fatalf("question_banks still allows draft: %s", ddl)
-	}
-	statuses := map[string]string{}
-	archived := map[string]int64{}
-	rows, err := store.DB.QueryContext(ctx, `SELECT id, status, archived_at FROM question_banks`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, status string
-		var archivedAt int64
-		if err := rows.Scan(&id, &status, &archivedAt); err != nil {
-			t.Fatal(err)
-		}
-		statuses[id], archived[id] = status, archivedAt
-	}
-	if statuses["QB-draft"] != "disabled" || statuses["QB-off"] != "disabled" || statuses["QB-on"] != "active" {
-		t.Fatalf("statuses = %#v", statuses)
-	}
-	if archived["QB-off"] != 7 {
-		t.Fatalf("archived_at = %#v", archived)
-	}
-}
-
-func TestDropQuestionBankOrderColumnRebuildsTable(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE question_banks (
-		id TEXT PRIMARY KEY,
-		order_id INTEGER NOT NULL UNIQUE,
-		name TEXT NOT NULL,
-		status TEXT NOT NULL,
-		requires_cdk INTEGER NOT NULL,
-		course_code TEXT NOT NULL,
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO question_banks(id, order_id, name, status, requires_cdk, course_code, created_at, updated_at)
-		VALUES ('QB-001', 7, '旧题库', 'active', 0, 'C1', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.dropQuestionBankOrderColumn(ctx); err != nil {
-		t.Fatalf("drop order column: %v", err)
-	}
-	hasOrder, err := store.tableHasColumn(ctx, "question_banks", "order_id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasOrder {
-		t.Fatal("question_banks.order_id was not removed")
-	}
-	var name, code string
-	if err := store.DB.QueryRowContext(ctx, "SELECT name, course_code FROM question_banks WHERE id = 'QB-001'").Scan(&name, &code); err != nil {
-		t.Fatal(err)
-	}
-	if name != "旧题库" || code != "C1" {
-		t.Fatalf("row was not preserved: name=%q code=%q", name, code)
 	}
 }

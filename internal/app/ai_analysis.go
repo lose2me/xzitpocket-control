@@ -37,7 +37,6 @@ const (
 type AITaskView struct {
 	ID             string `json:"id"`
 	ResourceID     string `json:"resource_id"`
-	Mode           string `json:"mode"`
 	ResourceName   string `json:"resource_name"`
 	CourseCode     string `json:"course_code"`
 	Status         string `json:"status"`
@@ -80,7 +79,7 @@ func aiTaskView(row sqlite.AITaskRow, includeMarkdown bool) AITaskView {
 		elapsedSeconds = int64(end.Sub(row.StartedAt).Seconds())
 	}
 	view := AITaskView{
-		ID: row.ID, ResourceID: row.ResourceID, Mode: row.Mode, ResourceName: row.ResourceName,
+		ID: row.ID, ResourceID: row.ResourceID, ResourceName: row.ResourceName,
 		CourseCode: row.CourseCode, Status: row.Status, Solvable: row.Solvable,
 		PrecheckNote: row.PrecheckNote, Attempt: row.Attempt, NextPage: row.NextPage,
 		TotalPages: row.TotalPages, Progress: progress, Error: row.Error, Model: row.Model,
@@ -298,9 +297,9 @@ func (a *App) scanAIResources(ctx context.Context) {
 	}
 }
 
-// EnqueueAIAnalyses creates a new run for each resource and mode. Earlier
+// EnqueueAIAnalyses creates a new run for each resource. Earlier
 // runs are kept as history.
-func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes []string, actor string) ([]AITaskView, []map[string]string, error) {
+func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, actor string) ([]AITaskView, []map[string]string, error) {
 	if a.ai().model == nil {
 		return nil, nil, Err("ai_disabled", "AI 解析未启用", 503)
 	}
@@ -309,9 +308,6 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes
 	}
 	if len(resourceIDs) > 100 {
 		return nil, nil, Err("invalid_request", "一次最多提交 100 份试卷", 400)
-	}
-	if _, err := normalizeAIModes(modes); err != nil {
-		return nil, nil, err
 	}
 	created := make([]AITaskView, 0, len(resourceIDs))
 	failed := make([]map[string]string, 0)
@@ -325,7 +321,7 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes
 		// One analysis run renders both reports, so only a basic task is
 		// queued. An explicit re-parse restarts the paper: stop any
 		// queued/running attempt (it stays in history as cancelled).
-		if active, ok, err := a.Store.GetActiveAITaskByResource(ctx, id, ""); err != nil {
+		if active, ok, err := a.Store.GetActiveAITaskByResource(ctx, id); err != nil {
 			return nil, nil, err
 		} else if ok && (active.Status == "queued" || active.Status == "running") {
 			if _, err := a.CancelAITask(ctx, active.ID, actor); err != nil {
@@ -335,7 +331,7 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes
 				}
 			}
 		}
-		task, inserted, err := a.Store.CreateAITask(ctx, id, "basic", actor)
+		task, inserted, err := a.Store.CreateAITask(ctx, id, actor)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				failed = append(failed, map[string]string{"resource_id": id, "reason": "试卷不存在、已归档或不是 PDF"})
@@ -369,23 +365,8 @@ func (a *App) EnqueueAIAnalyses(ctx context.Context, resourceIDs []string, modes
 	return created, failed, nil
 }
 
-// normalizeAIModes validates the requested modes. One run now produces both
-// reports, so the returned list is always the single basic primary task.
-func normalizeAIModes(modes []string) ([]string, error) {
-	for _, raw := range modes {
-		mode := strings.ToLower(strings.TrimSpace(raw))
-		if mode == "advanced" {
-			mode = "more"
-		}
-		if mode != "basic" && mode != "more" {
-			return nil, Err("invalid_request", "解析类型必须是 basic 或 more", 400)
-		}
-	}
-	return []string{"basic"}, nil
-}
-
 func aiModeLabel(mode string) string {
-	if mode == "more" || mode == "advanced" {
+	if mode == "more" {
 		return "小学生版"
 	}
 	return "精简版"
@@ -470,7 +451,7 @@ func (a *App) RetryAITask(ctx context.Context, id, actor string) (AITaskView, er
 		return aiTaskView(row, false), nil
 	}
 	// One run produces both reports; a retry always starts the primary task.
-	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, "basic", actor)
+	created, inserted, err := a.Store.CreateAITask(ctx, task.ResourceID, actor)
 	if err != nil {
 		return AITaskView{}, err
 	}
@@ -524,7 +505,7 @@ func (a *App) CancelAITask(ctx context.Context, id, actor string) (AITaskView, e
 
 // OpenAITaskOutput streams one of the generated analysis PDFs. A combined run
 // stores the concise report as its primary output and the primary-school
-// report in MoreOutputKey; legacy rows only have one of the two.
+// report in MoreOutputKey.
 func (a *App) OpenAITaskOutput(ctx context.Context, id, mode string) (*http.Response, string, error) {
 	row, err := a.Store.GetAITaskRow(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -534,24 +515,11 @@ func (a *App) OpenAITaskOutput(ctx context.Context, id, mode string) (*http.Resp
 		return nil, "", err
 	}
 	key := row.OutputKey
-	label := aiModeLabel(row.Mode)
-	switch strings.ToLower(strings.TrimSpace(mode)) {
+	label := aiModeLabel(mode)
+	switch mode {
 	case "", "basic":
-		if row.Mode == "more" || row.Mode == "advanced" {
-			if row.MoreOutputKey == "" {
-				return nil, "", Err("ai_output_missing", "精简版解析尚未生成", 404)
-			}
-			key = row.MoreOutputKey
-		}
 	case "more":
-		if row.MoreOutputKey != "" {
-			key = row.MoreOutputKey
-			label = "小学生版"
-		} else if row.Mode != "more" && row.Mode != "advanced" {
-			return nil, "", Err("ai_output_missing", "小学生版解析尚未生成", 404)
-		} else {
-			label = "小学生版"
-		}
+		key = row.MoreOutputKey
 	default:
 		return nil, "", Err("invalid_request", "解析类型无效", 400)
 	}
@@ -857,9 +825,8 @@ func (a *App) runAITask(parent context.Context, task sqlite.AITask) {
 	moreSize := int64(len(morePDF))
 	nextPage := paper.TotalPages + 1
 	succeeded := "succeeded"
-	basicMode := "basic"
 	if err := a.Store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
-		Status: &succeeded, Mode: &basicMode,
+		Status:    &succeeded,
 		OutputKey: &basicKey, OutputSize: &basicSize,
 		MoreOutputKey: &moreKey, MoreOutputSize: &moreSize,
 		Error: stringPtr(""), FinishedAt: timePtr(time.Now().UTC()), NextPage: &nextPage,

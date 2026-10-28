@@ -14,7 +14,7 @@ func newAITestStore(t *testing.T) (*Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -33,7 +33,7 @@ func TestAITaskLifecycle(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
-	task, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	task, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestAITaskLifecycle(t *testing.T) {
 		t.Fatalf("new task = %#v inserted=%v", task, inserted)
 	}
 
-	same, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	same, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil || inserted || same.ID != task.ID {
 		t.Fatalf("active task should be reused: %#v inserted=%v err=%v", same, inserted, err)
 	}
@@ -77,7 +77,7 @@ func TestAITaskLifecycle(t *testing.T) {
 	}
 
 	// An unfinished run is never duplicated.
-	if _, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin"); err != nil || inserted {
+	if _, inserted, err := store.CreateAITask(ctx, resourceID, "admin"); err != nil || inserted {
 		t.Fatalf("active task should not be duplicated: inserted=%v err=%v", inserted, err)
 	}
 
@@ -86,7 +86,7 @@ func TestAITaskLifecycle(t *testing.T) {
 	if err := store.UpdateAITask(ctx, task.ID, AITaskPatch{Status: &succeeded}); err != nil {
 		t.Fatal(err)
 	}
-	newTask, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	newTask, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil || !inserted || newTask.ID == task.ID {
 		t.Fatalf("re-analysis should create a new row: %#v inserted=%v err=%v", newTask, inserted, err)
 	}
@@ -105,10 +105,42 @@ func TestAITaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestLatestAITaskUsesInsertionOrderWhenTimestampsTie(t *testing.T) {
+	store, resourceID := newAITestStore(t)
+	ctx := context.Background()
+	status := "succeeded"
+	var newest AITask
+	for i := 0; i < 2; i++ {
+		task, _, err := store.CreateAITask(ctx, resourceID, "admin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpdateAITask(ctx, task.ID, AITaskPatch{Status: &status}); err != nil {
+			t.Fatal(err)
+		}
+		newest = task
+	}
+	if _, err := store.DB.ExecContext(ctx, "UPDATE resource_ai_tasks SET created_at = 100 WHERE resource_id = ?", resourceID); err != nil {
+		t.Fatal(err)
+	}
+	succeeded, err := store.LatestSucceededAITasks(ctx, []string{resourceID})
+	if err != nil || succeeded[resourceID].ID != newest.ID {
+		t.Fatalf("latest succeeded = %#v, err = %v", succeeded, err)
+	}
+	latest, err := store.LatestAITasks(ctx, []string{resourceID})
+	if err != nil || latest[resourceID].ID != newest.ID {
+		t.Fatalf("latest = %#v, err = %v", latest, err)
+	}
+	single, ok, err := store.LatestAITaskByResource(ctx, resourceID)
+	if err != nil || !ok || single.ID != newest.ID {
+		t.Fatalf("latest single = %#v, ok = %v, err = %v", single, ok, err)
+	}
+}
+
 func TestAITaskZeroFinishedAt(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
-	task, _, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	task, _, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,71 +161,10 @@ func TestAITaskZeroFinishedAt(t *testing.T) {
 	}
 }
 
-func TestAllowMultipleAITasksPerResource(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resources (id TEXT PRIMARY KEY)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
-		id TEXT PRIMARY KEY,
-		resource_id TEXT NOT NULL UNIQUE REFERENCES resources(id) ON DELETE CASCADE,
-		mode TEXT NOT NULL DEFAULT 'basic',
-		status TEXT NOT NULL DEFAULT 'queued',
-		solvable INTEGER NOT NULL DEFAULT -1,
-		precheck_note TEXT NOT NULL DEFAULT '',
-		attempt INTEGER NOT NULL DEFAULT 0,
-		next_page INTEGER NOT NULL DEFAULT 1,
-		total_pages INTEGER NOT NULL DEFAULT 0,
-		messages_json TEXT NOT NULL DEFAULT '[]',
-		markdown TEXT NOT NULL DEFAULT '',
-		output_key TEXT NOT NULL DEFAULT '',
-		output_size INTEGER NOT NULL DEFAULT 0,
-		more_markdown TEXT NOT NULL DEFAULT '',
-		more_output_key TEXT NOT NULL DEFAULT '',
-		more_output_size INTEGER NOT NULL DEFAULT 0,
-		error TEXT NOT NULL DEFAULT '',
-		model TEXT NOT NULL DEFAULT '',
-		created_by TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		started_at INTEGER NOT NULL DEFAULT 0,
-		finished_at INTEGER NOT NULL DEFAULT 0,
-		prompts_json TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resources(id) VALUES ('res_1')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_at, updated_at)
-		VALUES ('ai_old', 'res_1', 'succeeded', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.allowMultipleAITasksPerResource(ctx); err != nil {
-		t.Fatalf("allow multiple AI tasks: %v", err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, status, created_at, updated_at)
-		VALUES ('ai_new', 'res_1', 'queued', 2, 2)`); err != nil {
-		t.Fatalf("second task for the same resource: %v", err)
-	}
-	var count int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_ai_tasks WHERE resource_id = 'res_1'`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
-		t.Fatalf("task count = %d, want 2", count)
-	}
-}
-
 func TestDeleteOlderAITasksKeepsNewest(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
-	first, _, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	first, _, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +173,7 @@ func TestDeleteOlderAITasksKeepsNewest(t *testing.T) {
 	if err := store.UpdateAITask(ctx, first.ID, AITaskPatch{Status: &succeeded, OutputKey: &firstKey}); err != nil {
 		t.Fatal(err)
 	}
-	second, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	second, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil || !inserted {
 		t.Fatalf("second task: %#v inserted=%v err=%v", second, inserted, err)
 	}
@@ -236,7 +207,7 @@ func TestCreateAITasksForMissingResources(t *testing.T) {
 	if err := store.SetResourcePdfKey(ctx, skipped.ID, "published/papers/skip.pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	skippedTask, _, err := store.CreateAITask(ctx, skipped.ID, "basic", "admin")
+	skippedTask, _, err := store.CreateAITask(ctx, skipped.ID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +241,7 @@ func TestRequeueFailedAITasks(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
-	task, _, err := store.CreateAITask(ctx, resourceID, "basic", "auto")
+	task, _, err := store.CreateAITask(ctx, resourceID, "auto")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,34 +276,34 @@ func TestRequeueFailedAITasks(t *testing.T) {
 	}
 }
 
-func TestCreateAITaskReusesActiveRunAcrossModes(t *testing.T) {
+func TestCreateAITaskReusesActiveRun(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
-	basic, inserted, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	basic, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil || !inserted {
 		t.Fatalf("basic task = %#v inserted=%v err=%v", basic, inserted, err)
 	}
 	if _, ok, err := store.ClaimNextAITask(ctx); err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
-	// One analysis run produces both reports, so a second mode must not start
+	// One analysis run produces both reports, so a second request must not start
 	// a parallel run for the same paper.
-	same, inserted, err := store.CreateAITask(ctx, resourceID, "more", "admin")
+	same, inserted, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil || inserted || same.ID != basic.ID {
 		t.Fatalf("second mode = %#v inserted=%v err=%v", same, inserted, err)
 	}
-	active, ok, err := store.GetActiveAITaskByResource(ctx, resourceID, "")
+	active, ok, err := store.GetActiveAITaskByResource(ctx, resourceID)
 	if err != nil || !ok || active.ID != basic.ID {
 		t.Fatalf("active = %#v ok=%v err=%v", active, ok, err)
 	}
 }
 
-func TestDeleteOlderAITasksRemovesLegacyOtherModes(t *testing.T) {
+func TestDeleteOlderAITasksRemovesPreviousRun(t *testing.T) {
 	store, resourceID := newAITestStore(t)
 	ctx := context.Background()
 
-	basic, _, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
+	basic, _, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +312,7 @@ func TestDeleteOlderAITasksRemovesLegacyOtherModes(t *testing.T) {
 	if err := store.UpdateAITask(ctx, basic.ID, AITaskPatch{Status: &basicStatus, OutputKey: &basicKey}); err != nil {
 		t.Fatal(err)
 	}
-	more, _, err := store.CreateAITask(ctx, resourceID, "more", "admin")
+	more, _, err := store.CreateAITask(ctx, resourceID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,141 +326,5 @@ func TestDeleteOlderAITasksRemovesLegacyOtherModes(t *testing.T) {
 	all, err := store.ListAITasksByResource(ctx, resourceID)
 	if err != nil || len(all) != 1 || all[0].ID != more.ID {
 		t.Fatalf("tasks = %#v err=%v", all, err)
-	}
-}
-
-func TestAllowMultipleAITasksRenamesLegacyAdvancedMode(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resources (id TEXT PRIMARY KEY)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
-		id TEXT PRIMARY KEY,
-		resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-		mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'advanced')),
-		status TEXT NOT NULL DEFAULT 'queued',
-		solvable INTEGER NOT NULL DEFAULT -1,
-		precheck_note TEXT NOT NULL DEFAULT '',
-		attempt INTEGER NOT NULL DEFAULT 0,
-		next_page INTEGER NOT NULL DEFAULT 1,
-		total_pages INTEGER NOT NULL DEFAULT 0,
-		messages_json TEXT NOT NULL DEFAULT '[]',
-		markdown TEXT NOT NULL DEFAULT '',
-		output_key TEXT NOT NULL DEFAULT '',
-		output_size INTEGER NOT NULL DEFAULT 0,
-		more_markdown TEXT NOT NULL DEFAULT '',
-		more_output_key TEXT NOT NULL DEFAULT '',
-		more_output_size INTEGER NOT NULL DEFAULT 0,
-		error TEXT NOT NULL DEFAULT '',
-		model TEXT NOT NULL DEFAULT '',
-		created_by TEXT NOT NULL DEFAULT '',
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		started_at INTEGER NOT NULL DEFAULT 0,
-		finished_at INTEGER NOT NULL DEFAULT 0,
-		prompts_json TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resources(id) VALUES ('res_1')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at)
-		VALUES ('ai_old', 'res_1', 'advanced', 'succeeded', 1, 1)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.allowMultipleAITasksPerResource(ctx); err != nil {
-		t.Fatalf("migrate legacy advanced mode: %v", err)
-	}
-	var mode string
-	if err := store.DB.QueryRowContext(ctx, `SELECT mode FROM resource_ai_tasks WHERE id = 'ai_old'`).Scan(&mode); err != nil {
-		t.Fatal(err)
-	}
-	if mode != "more" {
-		t.Fatalf("mode = %q, want more", mode)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at)
-		VALUES ('ai_more', 'res_1', 'more', 'succeeded', 2, 2)`); err != nil {
-		t.Fatalf("insert more task after migration: %v", err)
-	}
-}
-
-func TestMigrateAdvancedAIModeWithoutCheckConstraint(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if _, err := store.DB.ExecContext(ctx, `CREATE TABLE resource_ai_tasks (
-		id TEXT PRIMARY KEY,
-		resource_id TEXT NOT NULL,
-		mode TEXT NOT NULL DEFAULT 'basic',
-		status TEXT NOT NULL DEFAULT 'queued',
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO resource_ai_tasks(id, resource_id, mode, status, created_at, updated_at) VALUES
-		('ai_done', 'res_1', 'advanced', 'succeeded', 1, 1),
-		('ai_active', 'res_2', 'advanced', 'paused', 2, 2)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.migrateAdvancedAIMode(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var advanced int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_ai_tasks WHERE mode = 'advanced'`).Scan(&advanced); err != nil {
-		t.Fatal(err)
-	}
-	if advanced != 0 {
-		t.Fatalf("legacy advanced rows = %d, want 0", advanced)
-	}
-}
-
-func TestMergeLegacyAIReports(t *testing.T) {
-	store, resourceID := newAITestStore(t)
-	ctx := context.Background()
-	basic, _, err := store.CreateAITask(ctx, resourceID, "basic", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	basicStatus := "succeeded"
-	basicKey := "ai/papers/" + resourceID + "/" + basic.ID + ".pdf"
-	basicMarkdown := "# 精简版"
-	if err := store.UpdateAITask(ctx, basic.ID, AITaskPatch{
-		Status: &basicStatus, OutputKey: &basicKey, Markdown: &basicMarkdown,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	more, _, err := store.CreateAITask(ctx, resourceID, "more", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	moreKey := "ai/papers/" + resourceID + "/" + more.ID + ".pdf"
-	moreMarkdown := "# 小学生版"
-	moreSize := int64(456)
-	if err := store.UpdateAITask(ctx, more.ID, AITaskPatch{
-		Status: &basicStatus, OutputKey: &moreKey, OutputSize: &moreSize, Markdown: &moreMarkdown,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.mergeLegacyAIReports(ctx); err != nil {
-		t.Fatal(err)
-	}
-	all, err := store.ListAITasksByResource(ctx, resourceID)
-	if err != nil || len(all) != 1 {
-		t.Fatalf("tasks = %#v err=%v", all, err)
-	}
-	got := all[0]
-	if got.ID != basic.ID || got.MoreOutputKey != moreKey || got.MoreOutputSize != moreSize || got.MoreMarkdown != moreMarkdown {
-		t.Fatalf("merged task = %#v", got)
 	}
 }

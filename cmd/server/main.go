@@ -91,16 +91,10 @@ func main() {
 	}
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		cancel()
-		logger.Error("migrate database", "error", err)
+		logger.Error("initialize database", "error", err)
 		os.Exit(1)
-	}
-	if backup := store.LastResetBackup(); backup != "" {
-		logger.Warn("incompatible database schema replaced with an empty one", "backup", backup)
-	}
-	if backup := store.LastMigrationBackup(); backup != "" {
-		logger.Warn("removed columns dropped from the schema; snapshot saved", "backup", backup)
 	}
 	cancel()
 	application, err := app.New(cfg, store, logger)

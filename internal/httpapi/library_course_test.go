@@ -41,4 +41,12 @@ func TestQuestionBankAdminCourseCode(t *testing.T) {
 	if got := detail["questionBank"].(map[string]any)["courseCodes"]; len(got.([]any)) != 1 {
 		t.Fatalf("updated question bank courseCodes = %#v, want one course", got)
 	}
+	// The editor reads courseCodes as an array even when no course is selected.
+	unassociated := requestWithHeaders(t, ts.URL+"/api/v1/admin/question-banks", http.MethodPost, map[string]any{
+		"questionBank": map[string]any{"name": "unassociated", "questions": []any{question}},
+	}, headers)
+	codes, ok := unassociated["questionBank"].(map[string]any)["courseCodes"].([]any)
+	if !ok || len(codes) != 0 {
+		t.Fatalf("unassociated bank must return an empty courseCodes array: %#v", unassociated)
+	}
 }

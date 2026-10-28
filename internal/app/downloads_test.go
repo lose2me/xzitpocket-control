@@ -23,7 +23,7 @@ func TestOpenDownloadsCountsAndNames(t *testing.T) {
 		map[string]int64{},
 	)
 
-	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "高等数学", CourseCode: "C1"}, now)
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "高等数学", CourseCodes: []string{"C1"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

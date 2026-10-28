@@ -20,6 +20,7 @@ type ResourceView struct {
 	Tags                 string `json:"tags"`
 	CourseCode           string `json:"course_code"`
 	HasPdf               bool   `json:"has_pdf"`
+	FileVersion          string `json:"file_version"`
 	Format               string `json:"format"`
 	SizeBytes            int64  `json:"size_bytes,omitempty"`
 	DownloadCount        int64  `json:"download_count"`
@@ -41,8 +42,9 @@ type ResourceView struct {
 
 // ResourceURLView is a temporary, signed CDN URL for a resource PDF.
 type ResourceURLView struct {
-	URL       string `json:"url"`
-	ExpiresAt string `json:"expires_at"`
+	URL         string `json:"url"`
+	FileVersion string `json:"file_version"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 // ResourceAIView is the app-facing AI analysis of one paper.
@@ -58,6 +60,7 @@ type ResourceAIView struct {
 	Solvable     int    `json:"solvable,omitempty"`
 	PrecheckNote string `json:"precheck_note,omitempty"`
 	PDFURL       string `json:"pdf_url,omitempty"`
+	FileVersion  string `json:"file_version,omitempty"`
 	Error        string `json:"error,omitempty"`
 }
 
@@ -76,6 +79,7 @@ func resourceView(item sqlite.Resource) ResourceView {
 	return ResourceView{
 		ID: item.ID, Name: item.Name, Tags: item.Tags, CourseCode: item.CourseCode,
 		HasPdf:          item.PdfKey != "",
+		FileVersion:     storedFileVersion(item.PdfKey),
 		Format:          storedFileFormat(item.PdfKey),
 		DownloadCount:   item.DownloadCount,
 		Archived:        !item.ArchivedAt.IsZero(),
@@ -116,26 +120,19 @@ func (a *App) enrichAIStatus(ctx context.Context, views []ResourceView) error {
 		return err
 	}
 	for i := range views {
-		byMode := succeeded[views[i].ID]
+		task, hasAI := succeeded[views[i].ID]
 		modes := make([]string, 0, 3)
 		var newest time.Time
-		if task, ok := byMode["basic"]; ok {
-			views[i].HasBasicAI = true
-			modes = append(modes, "basic")
-			if task.UpdatedAt.After(newest) {
-				newest = task.UpdatedAt
+		if hasAI {
+			views[i].HasBasicAI = task.OutputKey != ""
+			views[i].HasMoreAI = task.MoreOutputKey != ""
+			if views[i].HasBasicAI {
+				modes = append(modes, "basic")
 			}
-		}
-		moreTask, hasMore := byMode["more"]
-		if !hasMore {
-			moreTask, hasMore = byMode["advanced"]
-		}
-		if hasMore {
-			views[i].HasMoreAI = true
-			modes = append(modes, "more")
-			if moreTask.UpdatedAt.After(newest) {
-				newest = moreTask.UpdatedAt
+			if views[i].HasMoreAI {
+				modes = append(modes, "more")
 			}
+			newest = task.UpdatedAt
 		}
 		if views[i].HasManualAI {
 			modes = append(modes, "manual")
@@ -348,12 +345,11 @@ func (a *App) SetResourceArchived(ctx context.Context, id string, archived bool,
 	}
 	newPdfKey := item.PdfKey
 	if newPdfKey != "" {
-		if hash := objectHashFromKey(newPdfKey); hash != "" {
-			if archived {
-				newPdfKey = archivedObjectKey("resource", storedFileFormat(newPdfKey), hash)
-			} else {
-				newPdfKey = publishedObjectKey("resource", storedFileFormat(newPdfKey), hash)
-			}
+		hash := objectHashFromKey(newPdfKey)
+		if archived {
+			newPdfKey = archivedObjectKey("resource", storedFileFormat(newPdfKey), hash)
+		} else {
+			newPdfKey = publishedObjectKey("resource", storedFileFormat(newPdfKey), hash)
 		}
 	}
 	if newPdfKey != item.PdfKey {
@@ -416,11 +412,11 @@ func (a *App) ResourceURL(ctx context.Context, id string, ttl time.Duration) (Re
 // so the app can show "解析中".
 func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.Duration) (ResourceAIView, error) {
 	switch mode {
-	case "more", "advanced":
-		mode = "more"
-	case "manual", "basic":
-	default:
+	case "":
 		mode = "basic"
+	case "basic", "more", "manual":
+	default:
+		return ResourceAIView{}, Err("invalid_request", "解析类型无效", 400)
 	}
 	item, err := a.requireResource(ctx, id)
 	if err != nil {
@@ -434,11 +430,12 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 			return ResourceAIView{Mode: mode}, nil
 		}
 		view := ResourceAIView{
-			Available:  true,
-			Mode:       mode,
-			Format:     storedFileFormat(item.ManualAIKey),
-			UpdatedAt:  item.ManualAIUpdatedAt.Format(time.RFC3339),
-			OutputSize: item.ManualAISize,
+			Available:   true,
+			Mode:        mode,
+			Format:      storedFileFormat(item.ManualAIKey),
+			UpdatedAt:   item.ManualAIUpdatedAt.Format(time.RFC3339),
+			OutputSize:  item.ManualAISize,
+			FileVersion: storedFileVersion(item.ManualAIKey),
 		}
 		if a.cfg().CDNDomain != "" && a.cfg().CDNAuthKey != "" {
 			if ttl <= 0 || ttl > 7*24*time.Hour {
@@ -452,27 +449,13 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 	if err != nil {
 		return ResourceAIView{}, err
 	}
-	// A combined run stores the concise report as its primary output and the
-	// primary-school report in MoreOutputKey. Legacy rows only have one.
-	supportsMode := func(task sqlite.AITask) bool {
-		if mode == "basic" {
-			return task.Mode == "basic"
-		}
-		return task.MoreOutputKey != "" || task.Mode == "more" || task.Mode == "advanced"
-	}
-	var relevant *sqlite.AITask
-	for i := len(tasks) - 1; i >= 0; i-- {
-		if supportsMode(tasks[i]) {
-			relevant = &tasks[i]
-			break
-		}
-	}
-	if relevant == nil {
+	if len(tasks) == 0 {
 		return ResourceAIView{Mode: mode}, nil
 	}
+	relevant := tasks[len(tasks)-1]
 	var succeeded *sqlite.AITask
 	for i := len(tasks) - 1; i >= 0; i-- {
-		if tasks[i].Status == "succeeded" && supportsMode(tasks[i]) {
+		if tasks[i].Status == "succeeded" {
 			succeeded = &tasks[i]
 			break
 		}
@@ -483,10 +466,13 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 	markdown := succeeded.Markdown
 	outputKey := succeeded.OutputKey
 	outputSize := succeeded.OutputSize
-	if mode == "more" && succeeded.MoreOutputKey != "" {
+	if mode == "more" {
 		markdown = succeeded.MoreMarkdown
 		outputKey = succeeded.MoreOutputKey
 		outputSize = succeeded.MoreOutputSize
+	}
+	if outputKey == "" {
+		return ResourceAIView{Mode: mode}, nil
 	}
 	view := ResourceAIView{
 		Available:    true,
@@ -495,6 +481,7 @@ func (a *App) ResourceAIForUser(ctx context.Context, id, mode string, ttl time.D
 		Markdown:     markdown,
 		UpdatedAt:    succeeded.UpdatedAt.Format(time.RFC3339),
 		OutputSize:   outputSize,
+		FileVersion:  storedFileVersion(outputKey),
 		TotalPages:   succeeded.TotalPages,
 		Solvable:     succeeded.Solvable,
 		PrecheckNote: succeeded.PrecheckNote,
@@ -532,7 +519,8 @@ func (a *App) resourceURL(ctx context.Context, id string, ttl time.Duration, all
 	}
 	url := cloud.CDNSignedURL(a.cfg().CDNDomain, a.cfg().CDNAuthKey, "/"+item.PdfKey, ttl)
 	return ResourceURLView{
-		URL:       url,
-		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),
+		URL:         url,
+		FileVersion: storedFileVersion(item.PdfKey),
+		ExpiresAt:   time.Now().Add(ttl).UTC().Format(time.RFC3339),
 	}, nil
 }

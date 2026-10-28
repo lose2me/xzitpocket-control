@@ -238,15 +238,12 @@ func getQuestionBank(ctx context.Context, queryer questionBankQuerier, id string
 	if err != nil {
 		return QuestionBank{}, err
 	}
-	if list := codes[bank.ID]; len(list) > 0 {
-		bank.CourseCodes = list
-	} else if bank.CourseCode != "" {
-		bank.CourseCodes = []string{bank.CourseCode}
-	}
+	bank.CourseCodes = codes[bank.ID]
 	return bank, nil
 }
 
 func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error {
+	normalizeQuestionBankCourses(&bank)
 	if strings.TrimSpace(bank.ID) == "" {
 		_, err := s.CreateQuestionBankAuto(ctx, bank)
 		return err
@@ -260,7 +257,7 @@ func (s *Store) CreateQuestionBank(ctx context.Context, bank QuestionBank) error
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 		return err
 	}
-	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, bank.CourseCodes); err != nil {
 		return err
 	}
 	if err := insertQuestions(ctx, tx, bank); err != nil {
@@ -283,6 +280,7 @@ func newQuestionBankID() (string, error) {
 // CreateQuestionBankAuto allocates a random QB identifier and inserts the
 // complete aggregate in one transaction. Identifiers are never reused.
 func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (QuestionBank, error) {
+	normalizeQuestionBankCourses(&bank)
 	bank.CreatedAt = fromMillis(millis(bank.CreatedAt))
 	bank.UpdatedAt = fromMillis(millis(bank.UpdatedAt))
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -302,7 +300,7 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, bank.ID, bank.Name, bank.Status, boolInt(bank.RequiresCDK), bank.CourseCode, millis(bank.CreatedAt), millis(bank.UpdatedAt)); err != nil {
 		return QuestionBank{}, err
 	}
-	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, bank.CourseCodes); err != nil {
 		return QuestionBank{}, err
 	}
 	if err := insertQuestions(ctx, tx, bank); err != nil {
@@ -315,6 +313,7 @@ func (s *Store) CreateQuestionBankAuto(ctx context.Context, bank QuestionBank) (
 }
 
 func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error {
+	normalizeQuestionBankCourses(&bank)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -325,8 +324,9 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 		return err
 	}
 	if sameQuestionBankContent(existing, bank) {
-		bank.UpdatedAt = existing.UpdatedAt
-	} else if millis(bank.UpdatedAt) <= millis(existing.UpdatedAt) {
+		return tx.Commit()
+	}
+	if millis(bank.UpdatedAt) <= millis(existing.UpdatedAt) {
 		bank.UpdatedAt = existing.UpdatedAt.Add(time.Millisecond)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE question_banks SET name = ?, status = ?, requires_cdk = ?, course_code = ?, updated_at = ? WHERE id = ?`,
@@ -344,7 +344,7 @@ func (s *Store) UpdateQuestionBank(ctx context.Context, bank QuestionBank) error
 	if _, err := tx.ExecContext(ctx, "DELETE FROM question_bank_courses WHERE question_bank_id = ?", bank.ID); err != nil {
 		return err
 	}
-	if err := insertQuestionBankCourses(ctx, tx, bank.ID, questionBankCourseCodes(bank)); err != nil {
+	if err := insertQuestionBankCourses(ctx, tx, bank.ID, bank.CourseCodes); err != nil {
 		return err
 	}
 	// Reuse the ID of an existing question (matched by number) and of an
@@ -384,24 +384,12 @@ func sameQuestionBankContent(a, b QuestionBank) bool {
 	return true
 }
 
-// questionBankCourseCodes merges the legacy single course with the multi-course
-// list so direct store callers and older payloads still create associations.
-func questionBankCourseCodes(bank QuestionBank) []string {
-	codes := make([]string, 0, len(bank.CourseCodes)+1)
-	seen := make(map[string]bool, len(bank.CourseCodes)+1)
-	add := func(code string) {
-		code = strings.TrimSpace(code)
-		if code == "" || seen[code] {
-			return
-		}
-		seen[code] = true
-		codes = append(codes, code)
+func normalizeQuestionBankCourses(bank *QuestionBank) {
+	bank.CourseCodes = normalizeCourseCodes(bank.CourseCodes)
+	bank.CourseCode = ""
+	if len(bank.CourseCodes) > 0 {
+		bank.CourseCode = bank.CourseCodes[0]
 	}
-	for _, code := range bank.CourseCodes {
-		add(code)
-	}
-	add(bank.CourseCode)
-	return codes
 }
 
 func insertQuestionBankCourses(ctx context.Context, tx *sql.Tx, id string, codes []string) error {
@@ -427,11 +415,7 @@ func (s *Store) attachQuestionBankCourses(ctx context.Context, items []QuestionB
 		return err
 	}
 	for i := range items {
-		if list := codes[items[i].ID]; len(list) > 0 {
-			items[i].CourseCodes = list
-		} else if items[i].CourseCode != "" {
-			items[i].CourseCodes = []string{items[i].CourseCode}
-		}
+		items[i].CourseCodes = codes[items[i].ID]
 	}
 	return nil
 }

@@ -17,7 +17,7 @@ func TestQuestionBankCreateAndListSortsByName(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -47,7 +47,7 @@ func TestUpdateQuestionBankKeepsQuestionIDs(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -106,7 +106,7 @@ func TestQuestionBankRepositoryReplacesQuestionsAtomically(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -180,7 +180,7 @@ func TestDeleteQuestionBankRemovesQuestionsAndCDKs(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

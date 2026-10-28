@@ -29,9 +29,7 @@ func indexNames(t *testing.T, store *Store) map[string]bool {
 	return names
 }
 
-// TestSchemaIndexes covers the declared indexes: the two added for the hot
-// device-revocation and login-attempt queries, and the obsolete archived_at
-// indexes that must disappear from existing databases on open.
+// TestSchemaIndexes checks indexes used by frequent queries.
 func TestSchemaIndexes(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
@@ -39,21 +37,7 @@ func TestSchemaIndexes(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// Simulate a database created before the archived_at indexes were removed.
-	for name, ddl := range map[string]string{
-		"idx_question_banks_archived": `CREATE INDEX idx_question_banks_archived ON question_banks(archived_at)`,
-		"idx_textbooks_archived":      `CREATE INDEX idx_textbooks_archived ON textbooks(archived_at)`,
-		"idx_resources_archived":      `CREATE INDEX idx_resources_archived ON resources(archived_at)`,
-	} {
-		if _, err := store.DB.ExecContext(ctx, ddl); err != nil {
-			t.Fatalf("create legacy index %s: %v", name, err)
-		}
-	}
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,11 +45,6 @@ func TestSchemaIndexes(t *testing.T) {
 	for _, name := range []string{"idx_sessions_device", "idx_audit_action_time"} {
 		if !names[name] {
 			t.Fatalf("index %s missing", name)
-		}
-	}
-	for _, name := range removedIndexes {
-		if names[name] {
-			t.Fatalf("obsolete index %s still present", name)
 		}
 	}
 

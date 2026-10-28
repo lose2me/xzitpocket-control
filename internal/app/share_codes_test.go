@@ -20,7 +20,7 @@ func TestShareCodeRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{
@@ -68,7 +68,7 @@ func TestListShareCodesResolvesStudentID(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	encryptionKey := []byte("01234567890123456789012345678901")
@@ -139,7 +139,7 @@ func TestShareCodeListAndDetailExposeCode(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{

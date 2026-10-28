@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"xzitpocket-control/internal/ai"
 	"xzitpocket-control/internal/config"
@@ -114,7 +113,7 @@ func TestLoadSettingsSeedsFromConfig(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	key := []byte("01234567890123456789012345678901")
@@ -172,38 +171,6 @@ func TestAIEnablementFollowsAPIKey(t *testing.T) {
 	}
 	if a.cfg().AIAnalysisEnabled || a.ai().model != nil {
 		t.Fatal("AI must stop when the API key is cleared")
-	}
-}
-
-// TestLoadSettingsDropsObsoleteToggle removes CONTROL_AI_ENABLED rows left in
-// databases created before the switch was dropped.
-func TestLoadSettingsDropsObsoleteToggle(t *testing.T) {
-	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpdateSettings(ctx, map[string]string{"CONTROL_AI_ENABLED": "false"}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := New(config.Config{
-		TokenPepper:   []byte("token"),
-		IDPepper:      []byte("id"),
-		EncryptionKey: []byte("01234567890123456789012345678901"),
-		AdminKey:      "test",
-	}, store, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := store.Settings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := stored["CONTROL_AI_ENABLED"]; ok {
-		t.Fatalf("obsolete toggle was not removed: %#v", stored)
 	}
 }
 

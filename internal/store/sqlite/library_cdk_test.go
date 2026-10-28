@@ -15,7 +15,7 @@ func TestGenericLibraryCDKRedemptionAndAccess(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -70,7 +70,7 @@ func TestLibraryCDKConcurrentRedemptionBindsOnce(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -110,7 +110,7 @@ func TestLibraryCDKSearch(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

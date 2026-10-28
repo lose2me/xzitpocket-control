@@ -17,7 +17,7 @@ func TestConfigVersionsTrackSameMillisecondWrites(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{Store: store}
@@ -69,7 +69,7 @@ func TestQuestionBankVersionsTrackSameMillisecondWrites(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{Store: store}

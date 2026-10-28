@@ -14,7 +14,7 @@ func newUserListStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return store

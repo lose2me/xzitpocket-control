@@ -101,7 +101,7 @@ func (a *App) UploadCourses(ctx context.Context, p SessionPrincipal, in CourseUp
 			if len(book.Tags) > 1024 || strings.ContainsAny(book.Tags, "\r\n\x00") {
 				return nil, Err("invalid_courses", "教材标签无效", 400)
 			}
-			textbooks = append(textbooks, sqlite.TextbookInput{Name: book.Name, Tags: book.Tags, CourseCode: item.Code})
+			textbooks = append(textbooks, sqlite.TextbookInput{Name: book.Name, Tags: book.Tags, CourseCodes: []string{item.Code}})
 		}
 	}
 	if len(courses) == 0 {

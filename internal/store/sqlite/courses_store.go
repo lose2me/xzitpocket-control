@@ -12,16 +12,6 @@ import (
 // record onto a course number that is already taken.
 var ErrCourseExists = errors.New("course already exists")
 
-// newStoreIDPrefix is newStoreID without the error path; randomness failures
-// are effectively impossible, so a timestamp fallback keeps uploads working.
-func newStoreIDPrefix(prefix string) string {
-	id, err := newStoreID(prefix)
-	if err != nil {
-		return prefix + "_ts" + time.Now().UTC().Format("20060102150405.000000000")
-	}
-	return id
-}
-
 // Course is one uploaded course record. The course number (Code) identifies it.
 type Course struct {
 	ID        string    `json:"id"`
@@ -54,9 +44,13 @@ func (s *Store) UploadCourses(ctx context.Context, inputs []CourseInput, now tim
 		if strings.TrimSpace(input.Code) == "" {
 			continue
 		}
+		id, err := newStoreID("crs")
+		if err != nil {
+			return 0, err
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO courses(id, code, name, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?)`,
-			newStoreIDPrefix("crs"), input.Code, input.Name, millis(now), millis(now))
+			id, input.Code, input.Name, millis(now), millis(now))
 		if err == nil {
 			if affected, countErr := result.RowsAffected(); countErr == nil && affected == 1 {
 				accepted++
@@ -175,7 +169,10 @@ func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
 // CreateCourse inserts an administrator-authored record. A duplicate code is
 // reported as a conflict.
 func (s *Store) CreateCourse(ctx context.Context, input CourseInput, now time.Time) (Course, error) {
-	id := newStoreIDPrefix("crs")
+	id, err := newStoreID("crs")
+	if err != nil {
+		return Course{}, err
+	}
 	result, err := s.DB.ExecContext(ctx, `INSERT INTO courses(id, code, name, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)`,
 		id, input.Code, input.Name, millis(now), millis(now))
@@ -327,9 +324,8 @@ func (s *Store) AnalysisStatsByCourse(ctx context.Context, codes []string) (map[
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.course_code,
 			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN r.pdf_key <> '' AND LOWER(r.pdf_key) LIKE '%.pdf' AND r.archived_at = 0
-				AND EXISTS (SELECT 1 FROM resource_ai_tasks b WHERE b.resource_id = r.id AND b.mode = 'basic' AND b.status = 'succeeded')
 				AND EXISTS (SELECT 1 FROM resource_ai_tasks a WHERE a.resource_id = r.id AND a.status = 'succeeded'
-					AND ((a.mode = 'more' AND a.output_key <> '') OR (a.mode = 'basic' AND a.more_output_key <> '')))
+					AND a.output_key <> '' AND a.more_output_key <> '')
 				THEN 1 ELSE 0 END)
 		FROM resources r WHERE r.course_code IN (`+strings.Join(placeholders, ",")+`)
 		GROUP BY r.course_code`, args...)

@@ -17,7 +17,7 @@ func TestTextbookAdminCRUD(t *testing.T) {
 	if id == "" || created["course_code"] != "3007B0001" || len(created["course_codes"].([]any)) != 2 {
 		t.Fatalf("textbook create = %#v", created)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/admin/textbooks", http.MethodPost, map[string]any{"name": "高等数学", "tags": "高教社", "course_code": "3007B0001"}, adminHeaders); status != http.StatusConflict {
+	if status := requestStatus(t, ts.URL+"/api/v1/admin/textbooks", http.MethodPost, map[string]any{"name": "高等数学", "tags": "高教社", "course_codes": []string{"3007B0001"}}, adminHeaders); status != http.StatusConflict {
 		t.Fatalf("duplicate textbook status = %d, want %d", status, http.StatusConflict)
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/textbooks/"+id, http.MethodPut, map[string]any{"name": "高等数学（上）", "tags": "高教社/第7版", "course_codes": []string{"3007X0001", "3007B2106"}}, adminHeaders); status != http.StatusOK {

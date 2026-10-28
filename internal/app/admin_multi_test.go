@@ -18,7 +18,7 @@ func newAdminTestApp(t *testing.T) (*App, *sqlite.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{
@@ -74,11 +74,11 @@ func TestFreshDatabaseHasOnlySuperAdmin(t *testing.T) {
 	if _, _, err := a.AdminLogin(ctx, "super-key"); err != nil {
 		t.Fatal(err)
 	}
-	count, err := store.CountAdmins(ctx)
+	admins, err := store.ListAdmins(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("admins = %d, want only the super admin", count)
+	if len(admins) != 1 {
+		t.Fatalf("admins = %d, want only the super admin", len(admins))
 	}
 }

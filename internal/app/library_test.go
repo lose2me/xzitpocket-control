@@ -19,7 +19,7 @@ func TestQuestionBankValidationAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{TokenPepper: []byte("token"), IDPepper: []byte("id"), EncryptionKey: []byte("01234567890123456789012345678901"), AdminKey: "test"}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -69,7 +69,7 @@ func TestLibraryCDKUnlocksQuestionBankForStudent(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{TokenPepper: []byte("token"), IDPepper: []byte("id"), EncryptionKey: []byte("01234567890123456789012345678901"), AdminKey: "test"}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))

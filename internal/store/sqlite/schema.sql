@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS question_banks (
 );
 
 -- A question bank may be shared by several courses. question_banks.course_code
--- keeps the first association for sorting and older clients.
+-- keeps the first association for sorting.
 CREATE TABLE IF NOT EXISTS question_bank_courses (
     question_bank_id TEXT NOT NULL REFERENCES question_banks(id) ON DELETE CASCADE,
     course_code TEXT NOT NULL,
@@ -121,14 +121,6 @@ CREATE TABLE IF NOT EXISTS question_bank_courses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_bank_courses_code ON question_bank_courses(course_code);
-
-CREATE TABLE IF NOT EXISTS question_bank_id_counter (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    next_number INTEGER NOT NULL CHECK (next_number > 0)
-);
-
-INSERT OR IGNORE INTO question_bank_id_counter(id, next_number) VALUES (1, 1);
-
 
 CREATE TABLE IF NOT EXISTS questions (
     id TEXT PRIMARY KEY,
@@ -320,7 +312,7 @@ CREATE TABLE IF NOT EXISTS textbooks (
 );
 
 -- A textbook may be used by several courses. textbooks.course_code keeps the
--- first association for sorting and older clients.
+-- first association for sorting and uniqueness.
 CREATE TABLE IF NOT EXISTS textbook_courses (
     textbook_id TEXT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
     course_code TEXT NOT NULL,
@@ -417,7 +409,6 @@ CREATE TABLE IF NOT EXISTS download_marks (
 CREATE TABLE IF NOT EXISTS resource_ai_tasks (
     id TEXT PRIMARY KEY,
     resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-    mode TEXT NOT NULL DEFAULT 'basic' CHECK (mode IN ('basic', 'more')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled')),
     solvable INTEGER NOT NULL DEFAULT -1 CHECK (solvable IN (-1, 0, 1)),
     precheck_note TEXT NOT NULL DEFAULT '',
@@ -442,5 +433,13 @@ CREATE TABLE IF NOT EXISTS resource_ai_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_resource_ai_tasks_status ON resource_ai_tasks(status, created_at);
--- At most one unfinished run per paper per analysis mode; older rows are history.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_ai_tasks_mode_active ON resource_ai_tasks(resource_id, mode) WHERE status IN ('queued', 'running', 'paused');
+-- At most one unfinished run per paper; each run generates both reports.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_ai_tasks_active ON resource_ai_tasks(resource_id) WHERE status IN ('queued', 'running', 'paused');
+
+-- Monotonic resource revisions. The empty scope is the whole catalogue;
+-- other scopes are course codes. Triggers update these in the content write.
+CREATE TABLE IF NOT EXISTS resource_revisions (
+    scope TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO resource_revisions(scope, revision) VALUES ('', 0);

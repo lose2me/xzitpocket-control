@@ -101,11 +101,11 @@ func TestCreateSubmissionTicketValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCode: "C2"}, now)
+	other, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCodes: []string{"C2"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

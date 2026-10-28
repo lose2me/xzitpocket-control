@@ -27,7 +27,7 @@ func TestUploadStatsBindStudentAndContributor(t *testing.T) {
 		"idn-test", "usr-upload", "xzit-oa", "hash-test", "alias-test", ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
-	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	target, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,10 +114,10 @@ func TestListTextbooksForUploadIncludesCourses(t *testing.T) {
 	if _, err := a.CreateCourseForAdmin(ctx, CourseWriteInput{Code: "C2", Name: "课程二"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1", CourseCodes: []string{"C1", "C2"}}, now); err != nil {
+	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1", "C2"}}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCode: "C2"}, now); err != nil {
+	if _, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCodes: []string{"C2"}}, now); err != nil {
 		t.Fatal(err)
 	}
 	items, err := a.ListTextbooksForUpload(ctx)

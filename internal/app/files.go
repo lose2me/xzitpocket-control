@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"path"
 	"strings"
@@ -84,8 +85,7 @@ func archivedTextbookCoverKey(hash string) string {
 	return booksArchivedPrefix + hash + ".webp"
 }
 
-// objectHashFromKey extracts the content hash from a new-style object key.
-// Legacy ID-based keys return an empty string.
+// objectHashFromKey extracts the content hash from a stored object key.
 func objectHashFromKey(key string) string {
 	base := path.Base(strings.TrimSpace(key))
 	base = strings.TrimSuffix(base, path.Ext(base))
@@ -95,8 +95,18 @@ func objectHashFromKey(key string) string {
 	return ""
 }
 
+// storedFileVersion identifies immutable, content-addressed documents without
+// including metadata timestamps or exposing their storage path.
+func storedFileVersion(key string) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
 // storedFileFormat derives the file format from the object key extension.
-// Legacy keys end in ".pdf"; unknown extensions are treated as PDF.
+// PDF is the default when a record has no uploaded file yet.
 func storedFileFormat(key string) string {
 	switch ext := strings.TrimPrefix(strings.ToLower(path.Ext(strings.TrimSpace(key))), "."); ext {
 	case fileFormatDOCX, fileFormatDOC:

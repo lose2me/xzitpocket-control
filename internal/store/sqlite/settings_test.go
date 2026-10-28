@@ -14,7 +14,7 @@ func TestSettingsSeedAndUpdate(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
+	if err := store.InitSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

@@ -73,8 +73,11 @@ func (s *Store) CreateSubmission(ctx context.Context, input SubmissionInput, now
 	if strings.TrimSpace(input.Status) == "" {
 		input.Status = "pending_review"
 	}
-	id := newStoreIDPrefix("sub")
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO resource_submissions(
+	id, err := newStoreID("sub")
+	if err != nil {
+		return Submission{}, err
+	}
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO resource_submissions(
 			id, kind, course_code, name, tags, size_bytes, status, submitted_by_user_id, submitted_by_name, student_id_ciphertext, target_id, created_at, updated_at, note)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, input.Kind, input.CourseCode, input.Name, input.Tags, input.SizeBytes, input.Status,
@@ -215,7 +218,10 @@ func (s *Store) attachSubmissionFiles(ctx context.Context, items []Submission) (
 
 // AddSubmissionFile reserves one file row for a submission ticket.
 func (s *Store) AddSubmissionFile(ctx context.Context, input SubmissionFileInput, now time.Time) (SubmissionFile, error) {
-	id := newStoreIDPrefix("sf")
+	id, err := newStoreID("sf")
+	if err != nil {
+		return SubmissionFile{}, err
+	}
 	duplicate := 0
 	if input.Duplicate {
 		duplicate = 1

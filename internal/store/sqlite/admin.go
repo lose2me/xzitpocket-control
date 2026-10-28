@@ -59,13 +59,6 @@ func (a Admin) Allows(page string, write bool) bool {
 	return false
 }
 
-// GetAdmin returns the first local administrator.
-func (s *Store) GetAdmin(ctx context.Context) (Admin, error) {
-	row := s.DB.QueryRowContext(ctx,
-		"SELECT "+adminColumns+" FROM admin_users ORDER BY created_at, id LIMIT 1")
-	return scanAdmin(row)
-}
-
 func (s *Store) GetAdminByID(ctx context.Context, id string) (Admin, error) {
 	row := s.DB.QueryRowContext(ctx,
 		"SELECT "+adminColumns+" FROM admin_users WHERE id = ?", id)
@@ -108,11 +101,6 @@ func (s *Store) UpdateAdminAuth(ctx context.Context, id, passwordHash, permissio
 	return err
 }
 
-func (s *Store) SetAdminName(ctx context.Context, id, name string) error {
-	_, err := s.DB.ExecContext(ctx, "UPDATE admin_users SET name = ? WHERE id = ?", name, id)
-	return err
-}
-
 func (s *Store) DeleteAdmin(ctx context.Context, id string) error {
 	result, err := s.DB.ExecContext(ctx, "DELETE FROM admin_users WHERE id = ?", id)
 	if err != nil {
@@ -126,30 +114,6 @@ func (s *Store) DeleteAdmin(ctx context.Context, id string) error {
 		return sql.ErrNoRows
 	}
 	return nil
-}
-
-// DisableAdminsNotIn disables named administrators that are no longer configured.
-func (s *Store) DisableAdminsNotIn(ctx context.Context, names []string, now time.Time) error {
-	if len(names) == 0 {
-		return nil
-	}
-	placeholders := make([]string, 0, len(names))
-	args := make([]any, 0, len(names)+1)
-	args = append(args, millis(now))
-	for _, name := range names {
-		placeholders = append(placeholders, "?")
-		args = append(args, name)
-	}
-	_, err := s.DB.ExecContext(ctx,
-		"UPDATE admin_users SET disabled_at = ? WHERE name <> '' AND name NOT IN ("+strings.Join(placeholders, ",")+") AND disabled_at IS NULL",
-		args...)
-	return err
-}
-
-func (s *Store) CountAdmins(ctx context.Context) (int, error) {
-	var count int
-	err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM admin_users").Scan(&count)
-	return count, err
 }
 
 func (s *Store) CreateAdmin(ctx context.Context, admin Admin) error {

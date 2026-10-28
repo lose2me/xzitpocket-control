@@ -13,7 +13,7 @@ func TestTextbookAdminCRUDAndReassign(t *testing.T) {
 	if err != nil || created.ID == "" || created.CourseCode != "3007B0001" || len(created.CourseCodes) != 2 {
 		t.Fatalf("create = %#v, err = %v", created, err)
 	}
-	if _, err := a.CreateTextbookForAdmin(ctx, TextbookWriteInput{Name: "高等数学", Tags: "同济版", CourseCode: "3007B0001"}, "admin"); err == nil {
+	if _, err := a.CreateTextbookForAdmin(ctx, TextbookWriteInput{Name: "高等数学", Tags: "同济版", CourseCodes: []string{"3007B0001"}}, "admin"); err == nil {
 		t.Fatal("duplicate textbook create should conflict")
 	}
 	// Editing fields and reassigning the course keeps one row.

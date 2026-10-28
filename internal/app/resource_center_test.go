@@ -144,6 +144,81 @@ func TestCourseRevisionAdvancesWithinTheSameMillisecond(t *testing.T) {
 	}
 }
 
+func TestDocumentVersionsTrackFilesRatherThanMetadata(t *testing.T) {
+	a, store := newCourseApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	cfg := a.cfg()
+	cfg.CDNDomain, cfg.CDNAuthKey, cfg.CDNURLTTL = "https://files.test", "test-key", time.Hour
+	a.SetConfigForTesting(cfg)
+	if _, err := store.CreateCourse(ctx, sqlite.CourseInput{Code: "C1", Name: "高等数学"}, now); err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listVersions := func() [2]string {
+		t.Helper()
+		resources, _, _, err := a.ListCourseResourcesForUser(ctx, "C1")
+		if err != nil || len(resources) != 1 {
+			t.Fatalf("resources = %#v, err = %v", resources, err)
+		}
+		textbooks, _, _, err := a.ListCourseTextbooksForUser(ctx, "C1")
+		if err != nil || len(textbooks) != 1 {
+			t.Fatalf("textbooks = %#v, err = %v", textbooks, err)
+		}
+		return [2]string{resources[0].FileVersion, textbooks[0].FileVersion}
+	}
+	checkURLs := func(versions [2]string) {
+		t.Helper()
+		resourceURL, err := a.ResourceURL(ctx, resource.ID, 0)
+		if err != nil || resourceURL.FileVersion != versions[0] || resourceURL.URL == "" {
+			t.Fatalf("resource URL = %#v, expected version %q, err = %v", resourceURL, versions[0], err)
+		}
+		textbookURL, err := a.TextbookResourceURL(ctx, textbook.ID, "pdf", 0)
+		if err != nil || textbookURL.FileVersion != versions[1] || textbookURL.URL == "" {
+			t.Fatalf("textbook URL = %#v, expected version %q, err = %v", textbookURL, versions[1], err)
+		}
+	}
+	if versions := listVersions(); versions != [2]string{} {
+		t.Fatalf("documents without files have versions: %v", versions)
+	}
+	for _, hash := range []string{"11111111111111111111111111111111", "22222222222222222222222222222222"} {
+		previous := listVersions()
+		if err := store.SetResourcePdfKey(ctx, resource.ID, publishedObjectKey("resource", "pdf", hash), now); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetTextbookPdfKey(ctx, textbook.ID, publishedObjectKey("textbook", "pdf", hash), now); err != nil {
+			t.Fatal(err)
+		}
+		versions := listVersions()
+		for i, version := range versions {
+			if version == "" || version == previous[i] {
+				t.Fatalf("replacing file %d did not change its version: %q", i, version)
+			}
+		}
+		checkURLs(versions)
+		if _, err := store.DB.ExecContext(ctx, "UPDATE resources SET tags = ?, updated_at = updated_at + 1 WHERE id = ?", hash, resource.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpdateTextbook(ctx, textbook.ID, sqlite.TextbookInput{Name: "改名的教材", Tags: hash, CourseCodes: []string{"C1"}}, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetTextbookCoverKey(ctx, textbook.ID, textbookCoverKey(hash), now); err != nil {
+			t.Fatal(err)
+		}
+		if metadataVersions := listVersions(); metadataVersions != versions {
+			t.Fatalf("metadata edit changed file versions: %v -> %v", versions, metadataVersions)
+		}
+		checkURLs(versions)
+	}
+}
+
 func TestCourseResourceListIsNotTruncatedAtOnePage(t *testing.T) {
 	a, store := newCourseApp(t)
 	ctx := context.Background()
@@ -183,7 +258,7 @@ func TestResourceAIVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	task, _, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,6 +298,9 @@ func TestResourceAIVisibility(t *testing.T) {
 	if !ai.Available || ai.Markdown != markdown || ai.TotalPages != totalPages {
 		t.Fatalf("ai = %#v", ai)
 	}
+	if ai.FileVersion == "" {
+		t.Fatal("generated AI file has no version")
+	}
 
 	if err := store.SetResourceManualAnalysis(ctx, resource.ID, "resources/manual.pdf", 4567, now); err != nil {
 		t.Fatal(err)
@@ -238,6 +316,9 @@ func TestResourceAIVisibility(t *testing.T) {
 	if err != nil || !manual.Available || manual.OutputSize != 4567 {
 		t.Fatalf("manual ai = %#v, err = %v", manual, err)
 	}
+	if manual.FileVersion == "" || manual.FileVersion == ai.FileVersion {
+		t.Fatal("manual and generated AI files need distinct versions")
+	}
 }
 
 func TestResourceAIForUserCombinedReports(t *testing.T) {
@@ -251,7 +332,7 @@ func TestResourceAIForUserCombinedReports(t *testing.T) {
 	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/papers/combined.pdf", now); err != nil {
 		t.Fatal(err)
 	}
-	task, _, err := store.CreateAITask(ctx, resource.ID, "basic", "admin")
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +360,5 @@ func TestResourceAIForUserCombinedReports(t *testing.T) {
 	more, err := a.ResourceAIForUser(ctx, resource.ID, "more", 0)
 	if err != nil || !more.Available || more.Markdown != moreMarkdown || more.OutputSize != moreSize {
 		t.Fatalf("more = %#v, err = %v", more, err)
-	}
-	legacyName, err := a.ResourceAIForUser(ctx, resource.ID, "advanced", 0)
-	if err != nil || !legacyName.Available || legacyName.Markdown != moreMarkdown {
-		t.Fatalf("advanced alias = %#v, err = %v", legacyName, err)
 	}
 }

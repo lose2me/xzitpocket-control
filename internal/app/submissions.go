@@ -59,7 +59,6 @@ type SubmissionView struct {
 	Note              string               `json:"note"`
 	SizeBytes         int64                `json:"size_bytes"`
 	Status            string               `json:"status"`
-	Format            string               `json:"format"`
 	SubmittedByUserID string               `json:"submitted_by_user_id,omitempty"`
 	SubmittedByName   string               `json:"submitted_by_name"`
 	StudentID         string               `json:"student_id,omitempty"`
@@ -105,10 +104,10 @@ func normalizeSubmissionKind(kind string) (string, bool) {
 }
 
 // normalizeSubmissionFormat accepts PDF for every submission and Word
-// documents for exam papers. An empty format defaults to PDF for older apps.
+// documents for exam papers.
 func normalizeSubmissionFormat(format string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", fileFormatPDF:
+	case fileFormatPDF:
 		return fileFormatPDF, true
 	case fileFormatDOCX:
 		return fileFormatDOCX, true
@@ -208,7 +207,7 @@ func (a *App) CreateSubmissionTicket(ctx context.Context, p SessionPrincipal, in
 		if err != nil {
 			return ResourceUploadTicketView{}, err
 		}
-		associated := textbook.CourseCode == courseCode
+		associated := false
 		for _, code := range textbook.CourseCodes {
 			if code == courseCode {
 				associated = true

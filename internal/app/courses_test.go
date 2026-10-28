@@ -20,7 +20,7 @@ func newCourseApp(t *testing.T) (*App, *sqlite.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.Migrate(context.Background()); err != nil {
+	if err := store.InitSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a, err := New(config.Config{TokenPepper: []byte("token"), IDPepper: []byte("id"), EncryptionKey: []byte("01234567890123456789012345678901"), AdminKey: "test"}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -42,7 +42,7 @@ func TestCourseRenameMovesContentAndDeleteIsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCode: "C1"}, now)
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

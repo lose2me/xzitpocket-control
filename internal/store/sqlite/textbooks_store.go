@@ -13,7 +13,7 @@ import (
 var ErrTextbookExists = errors.New("textbook already exists")
 
 // Textbook is one book a course uses. CourseCode keeps the first association
-// for sorting and older clients; CourseCodes holds every associated course.
+// for sorting and uniqueness; CourseCodes holds every associated course.
 type Textbook struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
@@ -32,15 +32,13 @@ type Textbook struct {
 type TextbookInput struct {
 	Name        string
 	Tags        string
-	CourseCode  string
 	CourseCodes []string
 }
 
-// textbookInputCodes merges the legacy single course with the multi-course
-// list, dropping blanks and duplicates while keeping the caller's order.
-func textbookInputCodes(input TextbookInput) []string {
-	codes := make([]string, 0, len(input.CourseCodes)+1)
-	seen := make(map[string]bool, len(input.CourseCodes)+1)
+// normalizeCourseCodes drops blanks and duplicates while keeping the caller's order.
+func normalizeCourseCodes(input []string) []string {
+	codes := make([]string, 0, len(input))
+	seen := make(map[string]bool, len(input))
 	add := func(code string) {
 		code = strings.TrimSpace(code)
 		if code == "" || seen[code] {
@@ -49,10 +47,9 @@ func textbookInputCodes(input TextbookInput) []string {
 		seen[code] = true
 		codes = append(codes, code)
 	}
-	for _, code := range input.CourseCodes {
+	for _, code := range input {
 		add(code)
 	}
-	add(input.CourseCode)
 	return codes
 }
 
@@ -74,12 +71,15 @@ func (s *Store) UploadTextbooks(ctx context.Context, inputs []TextbookInput, now
 		if strings.TrimSpace(input.Name) == "" {
 			continue
 		}
-		codes := textbookInputCodes(input)
+		codes := normalizeCourseCodes(input.CourseCodes)
 		primary := ""
 		if len(codes) > 0 {
 			primary = codes[0]
 		}
-		id := newStoreIDPrefix("tbx")
+		id, err := newStoreID("tbx")
+		if err != nil {
+			return 0, err
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
 			VALUES (?, ?, ?, ?, '', '', ?, ?)`,
 			id, input.Name, input.Tags, primary, millis(now), millis(now))
@@ -261,7 +261,7 @@ func (s *Store) GetTextbook(ctx context.Context, id string) (Textbook, error) {
 }
 
 func (s *Store) CreateTextbook(ctx context.Context, input TextbookInput, now time.Time) (Textbook, error) {
-	codes := textbookInputCodes(input)
+	codes := normalizeCourseCodes(input.CourseCodes)
 	primary := ""
 	if len(codes) > 0 {
 		primary = codes[0]
@@ -271,7 +271,10 @@ func (s *Store) CreateTextbook(ctx context.Context, input TextbookInput, now tim
 		return Textbook{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	id := newStoreIDPrefix("tbx")
+	id, err := newStoreID("tbx")
+	if err != nil {
+		return Textbook{}, err
+	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO textbooks(id, name, tags, course_code, pdf_key, cover_key, created_at, updated_at)
 		VALUES (?, ?, ?, ?, '', '', ?, ?)`,
 		id, input.Name, input.Tags, primary, millis(now), millis(now))
@@ -294,7 +297,7 @@ func (s *Store) CreateTextbook(ctx context.Context, input TextbookInput, now tim
 }
 
 func (s *Store) UpdateTextbook(ctx context.Context, id string, input TextbookInput, now time.Time) error {
-	codes := textbookInputCodes(input)
+	codes := normalizeCourseCodes(input.CourseCodes)
 	primary := ""
 	if len(codes) > 0 {
 		primary = codes[0]
@@ -338,7 +341,6 @@ func insertTextbookCourses(ctx context.Context, tx *sql.Tx, id string, codes []s
 }
 
 // attachTextbookCourses fills CourseCodes for a page of textbooks in one query.
-// Rows written before multi-course support fall back to the legacy column.
 func (s *Store) attachTextbookCourses(ctx context.Context, items []Textbook) error {
 	if len(items) == 0 {
 		return nil
@@ -369,11 +371,7 @@ func (s *Store) attachTextbookCourses(ctx context.Context, items []Textbook) err
 		return err
 	}
 	for i := range items {
-		if list := codes[items[i].ID]; len(list) > 0 {
-			items[i].CourseCodes = list
-		} else if items[i].CourseCode != "" {
-			items[i].CourseCodes = []string{items[i].CourseCode}
-		}
+		items[i].CourseCodes = codes[items[i].ID]
 	}
 	return nil
 }
@@ -470,15 +468,18 @@ func (s *Store) SetTextbookArchive(ctx context.Context, id, pdfKey, coverKey str
 	return nil
 }
 
-// SetTextbookCoverKey records the COS key of the textbook's WebP cover.
+// SetTextbookCoverKey records a cover and invalidates every textbook sharing
+// its object key. A browser can upload new image bytes to the same PDF-based key.
 func (s *Store) SetTextbookCoverKey(ctx context.Context, id, key string, now time.Time) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET cover_key = ?, updated_at = MAX(updated_at + 1, ?) WHERE id = ?`, key, millis(now), id)
+	result, err := s.DB.ExecContext(ctx, `UPDATE textbooks SET cover_key = ?, updated_at = MAX(updated_at + 1, ?)
+		WHERE (id = ? OR (cover_key = ? AND cover_key <> ''))
+		AND EXISTS (SELECT 1 FROM textbooks WHERE id = ?)`, key, millis(now), id, key, id)
 	if err != nil {
 		return err
 	}
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
-	} else if affected != 1 {
+	} else if affected == 0 {
 		return sql.ErrNoRows
 	}
 	return nil
