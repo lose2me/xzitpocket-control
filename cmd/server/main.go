@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"mime"
@@ -79,34 +80,44 @@ func isAppRoute(staticFS fs.FS, urlPath string) bool {
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, logger); err != nil {
+		logger.Error("control server stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run starts the console and blocks until ctx is cancelled. Startup failures
+// are returned to the caller so they can be tested; the process only exits
+// from main.
+func run(ctx context.Context, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load config: %w", err)
 	}
 	store, err := sqlite.Open(cfg.DBPath)
 	if err != nil {
-		logger.Error("open database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("open database: %w", err)
 	}
 	defer store.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	if err := store.InitSchema(ctx); err != nil {
-		cancel()
-		logger.Error("initialize database", "error", err)
-		os.Exit(1)
+	initCtx, cancelInit := context.WithTimeout(ctx, 15*time.Second)
+	err = store.InitSchema(initCtx)
+	cancelInit()
+	if err != nil {
+		return fmt.Errorf("initialize database: %w", err)
 	}
-	cancel()
 	application, err := app.New(cfg, store, logger)
 	if err != nil {
-		logger.Error("initialize application", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("initialize application: %w", err)
 	}
 	staticFS := staticAssets(cfg, logger)
-	static := spaHandler(staticFS)
-	handler := httpapi.New(application, static, logger)
+	handler := httpapi.New(application, spaHandler(staticFS), logger)
 	server := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
-	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	cleanupCtx, cleanupCancel := context.WithCancel(ctx)
 	defer cleanupCancel()
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -135,20 +146,27 @@ func main() {
 			}
 		}
 	}()
+	listenErr := make(chan error, 1)
 	go func() {
 		logger.Info("control server listening", "addr", cfg.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server stopped", "error", err)
-			os.Exit(1)
+			listenErr <- err
+			return
 		}
+		listenErr <- nil
 	}()
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	application.StartAIAnalysis(sigCtx)
-	<-sigCtx.Done()
+	application.StartAIAnalysis(ctx)
+	select {
+	case err := <-listenErr:
+		if err != nil {
+			return fmt.Errorf("listen: %w", err)
+		}
+	case <-ctx.Done():
+	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown", "error", err)
+		return fmt.Errorf("shutdown: %w", err)
 	}
+	return nil
 }

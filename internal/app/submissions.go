@@ -519,21 +519,6 @@ func (a *App) requireSubmission(ctx context.Context, id, kind string) (sqlite.Su
 	return item, nil
 }
 
-// recordContribution links approved content to its contributor and increments
-// the profile counters shown on the app upload page. Both steps are
-// best-effort: the content has already been created.
-func (a *App) recordContribution(ctx context.Context, userID string, link func(string) error) {
-	if userID == "" {
-		return
-	}
-	if err := link(userID); err != nil {
-		a.Logger.Warn("link contribution failed", "error", err, "user", userID)
-	}
-	if err := a.Store.IncrementUserContribution(ctx, userID); err != nil {
-		a.Logger.Warn("increment contribution count failed", "error", err, "user", userID)
-	}
-}
-
 // DeleteSubmissionFileForAdmin removes one file of a review record, keeps the
 // object when another record or published content shares it, and deletes the
 // record itself once its last file is gone.
