@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at INTEGER NOT NULL
 );
 
--- Short-lived encrypted configuration payloads shared between app installs.
+-- Persistent encrypted configuration payloads shared between app installs.
 CREATE TABLE IF NOT EXISTS share_codes (
     id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL UNIQUE,
@@ -264,8 +264,7 @@ CREATE TABLE IF NOT EXISTS share_codes (
     payload_ciphertext TEXT NOT NULL,
     payload_hash TEXT NOT NULL DEFAULT '',
     created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_time_type ON activity_events(occurred_at, type);
@@ -283,7 +282,6 @@ CREATE INDEX IF NOT EXISTS idx_questions_bank_order ON questions(bank_id, questi
 CREATE INDEX IF NOT EXISTS idx_question_options_question_order ON question_options(question_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bank_status ON library_cdks(question_bank_id, status);
 CREATE INDEX IF NOT EXISTS idx_library_cdks_bound_student ON library_cdks(bound_student_id_hash, question_bank_id, status);
-CREATE INDEX IF NOT EXISTS idx_share_codes_expires ON share_codes(expires_at);
 
 -- Courses uploaded by clients at login. One row per course number (code).
 CREATE TABLE IF NOT EXISTS courses (

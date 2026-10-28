@@ -49,14 +49,6 @@ func TestShareCodeRoundTrip(t *testing.T) {
 	if _, _, err := a.ReadShareCode(ctx, "123456"); err == nil {
 		t.Fatal("unknown share code should fail")
 	}
-	// Legacy rows may still carry an expiry timestamp; it is ignored, so old
-	// codes stay readable like newly created ones.
-	if _, err := store.DB.ExecContext(ctx, "UPDATE share_codes SET expires_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour).UnixMilli(), meta.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := a.ReadShareCode(ctx, created.Code); err != nil {
-		t.Fatalf("share code should not expire: %v", err)
-	}
 }
 
 // The admin list labels each share code with its creator's student number, and

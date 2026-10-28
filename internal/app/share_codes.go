@@ -195,7 +195,7 @@ func (a *App) ListShareCodes(ctx context.Context, limit, offset int, sortKey, or
 	if offset < 0 {
 		offset = 0
 	}
-	if sortKey == "" || sortKey == "created_at" || sortKey == "expires_at" {
+	if sortKey == "" || sortKey == "created_at" {
 		items, total, err := a.Store.ListShareCodes(ctx, limit, offset, sortKey, order)
 		if err != nil {
 			return nil, 0, err
