@@ -1825,12 +1825,6 @@ import { template } from './template.js';
       const loadSchoolCalendar = async () => {
         applySchoolCalendarView(await api('/api/v1/admin/school-calendar'));
       };
-      const normalizeCompactDate = (value) => {
-        if (!/^\d{8}$/.test(value)) return '';
-        const date = new Date(value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8) + 'T00:00:00Z');
-        if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10).replaceAll('-', '') !== value) return '';
-        return value.slice(0, 4) + '-' + value.slice(4, 6) + '-' + value.slice(6, 8);
-      };
       const rebuildSchoolCalendar = () => {
         try {
           const match = /^(\d{8})-(\d{8})$/.exec((schoolCalendarRange.value || '').trim());
