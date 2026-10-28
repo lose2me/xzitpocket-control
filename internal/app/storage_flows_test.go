@@ -983,7 +983,7 @@ func TestRequireDownloadContributionGate(t *testing.T) {
 	if !errors.As(err, &apiErr) || apiErr.Code != "contribution_required" || apiErr.Status != http.StatusForbidden {
 		t.Fatalf("gate error = %v", err)
 	}
-	if !strings.Contains(apiErr.Message, "至少贡献 2") || !strings.Contains(apiErr.Message, "当前 0") {
+	if !strings.Contains(apiErr.Message, "至少贡献 2") || strings.Contains(apiErr.Message, "当前") {
 		t.Fatalf("gate message = %q", apiErr.Message)
 	}
 
@@ -997,8 +997,8 @@ func TestRequireDownloadContributionGate(t *testing.T) {
 	}
 	if err := a.RequireDownloadContribution(ctx, "usr-upload"); err == nil {
 		t.Fatal("one contribution should not pass a threshold of two")
-	} else if !strings.Contains(err.Error(), "当前 1") {
-		t.Fatalf("message after one contribution = %v", err)
+	} else if strings.Contains(err.Error(), "当前") {
+		t.Fatalf("message should not expose the current count: %v", err)
 	}
 
 	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
