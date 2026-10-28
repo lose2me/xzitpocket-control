@@ -16,6 +16,22 @@ import (
 
 const identityProvider = "xzit-oa"
 
+// ValidateReportingStudent binds a reported student ID to the authenticated
+// account. The plaintext ID is transported in a header, never copied to logs.
+func (a *App) ValidateReportingStudent(ctx context.Context, userID, studentID string) error {
+	identity, err := a.Store.GetIdentityByUser(ctx, userID, identityProvider)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if controlcrypto.HMACHex(a.cfg().IDPepper, studentID) != identity.StudentIDHash {
+		return Err("student_id_mismatch", "上报学号与登录账号不一致", http.StatusForbidden)
+	}
+	return nil
+}
+
 // contributorInfo returns the bound student's plaintext ID and alias for
 // administrator content rows. Missing identities simply render as unbound.
 func (a *App) contributorInfo(ctx context.Context, userID string) (studentID, name string) {
@@ -219,12 +235,7 @@ func (a *App) AssertLogin(ctx context.Context, principal DevicePrincipal, in Ass
 	if err != nil {
 		return SessionOutput{}, err
 	}
-	signedFields := []string{"xzitpocket-control-login", in.ChallengeID, in.Challenge, in.DeviceSerial, in.StudentID, in.StudentAlias, in.DisplayName}
-	if in.CollegeName != "" || in.ClassName != "" || in.MajorName != "" {
-		signedFields = append(signedFields, in.CollegeName, in.ClassName, in.MajorName)
-	}
-	signedFields = append(signedFields, in.AssertedAt)
-	message, err := controlcrypto.CanonicalLines(signedFields...)
+	message, err := controlcrypto.CanonicalLines("xzitpocket-control-login", in.ChallengeID, in.Challenge, in.DeviceSerial, in.StudentID, in.StudentAlias, in.DisplayName, in.CollegeName, in.ClassName, in.MajorName, in.AssertedAt)
 	if err != nil || !controlcrypto.VerifyP256Signature(pub, message, signature) {
 		a.recordLoginAttemptWithSource(ctx, "", device.ID, "signature_invalid", sourceHash)
 		return SessionOutput{}, Err("invalid_device_signature", "设备签名无效", http.StatusUnauthorized)
@@ -369,7 +380,7 @@ func (a *App) recordRiskForDevices(ctx context.Context, userID, deviceID string)
 	_ = a.Store.CreateRiskEvent(ctx, sqlite.RiskEvent{ID: id, Type: "account_device_burst", UserID: userID, DeviceID: deviceID, ObservedCount: count, WindowStart: now, WindowEnd: now, Detail: detail, CreatedAt: now})
 }
 
-func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, installationID, signedAt string) (SessionOutput, error) {
+func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, installationID, signedAt, studentID string) (SessionOutput, error) {
 	if strings.TrimSpace(refreshToken) == "" {
 		return SessionOutput{}, Err("invalid_refresh_token", "刷新令牌无效", http.StatusUnauthorized)
 	}
@@ -420,6 +431,9 @@ func (a *App) RefreshSession(ctx context.Context, refreshToken, signature, insta
 	message, err := controlcrypto.CanonicalLines("xzitpocket-control-refresh", device.DeviceSerial, refreshToken, signedAt)
 	if err != nil || !controlcrypto.VerifyP256Signature(pub, message, signature) {
 		return SessionOutput{}, Err("invalid_device_signature", "设备签名无效", http.StatusUnauthorized)
+	}
+	if err := a.ValidateReportingStudent(ctx, user.ID, studentID); err != nil {
+		return SessionOutput{}, err
 	}
 	access, err := controlcrypto.NewToken(32)
 	if err != nil {

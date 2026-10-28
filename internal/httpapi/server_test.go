@@ -57,7 +57,7 @@ func TestControlFlow(t *testing.T) {
 	d1 := newTestDevice(t, "inst-one")
 	reg1 := register(t, ts.URL, d1)
 	d1.serial, d1.token = reg1["device_serial"].(string), reg1["device_token"].(string)
-	challenge1 := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
+	challenge1 := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token})
 	student := "2023000001"
 	alias := controlcrypto.StudentAlias(student)
 	collegeName := "计算机学院"
@@ -67,7 +67,7 @@ func TestControlFlow(t *testing.T) {
 	loginPayload := map[string]any{"challenge_id": challenge1["challenge_id"], "challenge": challenge1["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "major_name": majorName, "asserted_at": asserted}
 	signedAt := time.Now().UTC().Format(time.RFC3339)
 	loginSignature := sign(t, d1.priv, lines("xzitpocket-control-login", challenge1["challenge_id"].(string), challenge1["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, majorName, asserted))
-	session1 := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginPayload, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": loginSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
+	session1 := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginPayload, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token, "X-Device-Signature": loginSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
 	access, refresh := session1["access_token"].(string), session1["refresh_token"].(string)
 	if access == "" || refresh == "" {
 		t.Fatalf("missing session: %#v", session1)
@@ -85,7 +85,7 @@ func TestControlFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	connectedAfter := time.Now().UTC().Add(-time.Second)
-	_ = request(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access})
+	_ = request(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	connectedUser, err := store.GetUser(context.Background(), sessionUser["id"].(string))
 	if err != nil || connectedUser.LastLoginAt.Before(connectedAfter) {
 		t.Fatalf("control connection did not update user time: %v, %v", connectedUser.LastLoginAt, err)
@@ -98,7 +98,7 @@ func TestControlFlow(t *testing.T) {
 	questionBank := map[string]any{"questionBank": map[string]any{"name": "计算机基础知识测验", "questions": []any{
 		map[string]any{"questionNumber": 1, "type": "单选题", "title": "第1题", "questionText": "以下哪个是计算机的核心部件？", "options": []any{map[string]any{"label": "A", "text": "显示器"}, map[string]any{"label": "B", "text": "CPU"}}, "correctAnswer": "B"},
 	}}}
-	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android", "app_version": "2.0.4"}}}, map[string]string{"Authorization": "Bearer " + access})
+	_ = requestWithHeaders(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []any{map[string]any{"event_id": "e1", "type": "app_start", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{"platform": "android", "app_version": "2.0.4"}}}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	updatedDevice, err := store.GetDeviceByInstallation(context.Background(), d1.installation)
 	if err != nil {
 		t.Fatal(err)
@@ -110,17 +110,20 @@ func TestControlFlow(t *testing.T) {
 	d2 := newTestDevice(t, "inst-two")
 	reg2 := register(t, ts.URL, d2)
 	d2.serial, d2.token = reg2["device_serial"].(string), reg2["device_token"].(string)
-	challenge2 := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d2.token})
+	challenge2 := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d2.token})
 	asserted2 := time.Now().UTC().Format(time.RFC3339)
 	login2 := map[string]any{"challenge_id": challenge2["challenge_id"], "challenge": challenge2["challenge"], "device_serial": d2.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "asserted_at": asserted2}
-	sig2 := sign(t, d2.priv, lines("xzitpocket-control-login", challenge2["challenge_id"].(string), challenge2["challenge"].(string), d2.serial, student, alias, "测试用户", asserted2))
-	secondSession := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, login2, map[string]string{"Authorization": "Device " + d2.token, "X-Device-Signature": sig2, "X-Device-Signed-At": asserted2, "X-Installation-ID": d2.installation})
+	sig2 := sign(t, d2.priv, lines("xzitpocket-control-login", challenge2["challenge_id"].(string), challenge2["challenge"].(string), d2.serial, student, alias, "测试用户", "", "", "", asserted2))
+	secondSession := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, login2, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d2.token, "X-Device-Signature": sig2, "X-Device-Signed-At": asserted2, "X-Installation-ID": d2.installation})
 	if secondSession["access_token"] == nil {
 		t.Fatal("second device did not login")
 	}
 
 	refreshSignature := sign(t, d1.priv, lines("xzitpocket-control-refresh", d1.serial, refresh, signedAt))
-	rotated := requestWithHeaders(t, ts.URL+"/api/v1/auth/refresh", http.MethodPost, map[string]string{"refresh_token": refresh}, map[string]string{"X-Device-Signature": refreshSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
+	if got := requestStatus(t, ts.URL+"/api/v1/auth/refresh", http.MethodPost, map[string]string{"refresh_token": refresh}, map[string]string{"X-Student-ID": "2023000002", "X-Device-Signature": refreshSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation}); got != http.StatusForbidden {
+		t.Fatalf("refresh accepted another student: %d", got)
+	}
+	rotated := requestWithHeaders(t, ts.URL+"/api/v1/auth/refresh", http.MethodPost, map[string]string{"refresh_token": refresh}, map[string]string{"X-Student-ID": "2023000001", "X-Device-Signature": refreshSignature, "X-Device-Signed-At": signedAt, "X-Installation-ID": d1.installation})
 	if rotated["access_token"] == nil {
 		t.Fatalf("refresh failed: %#v", rotated)
 	}
@@ -145,7 +148,7 @@ func TestControlFlow(t *testing.T) {
 		"event_id": "error-report-test", "occurred_at": time.Now().UTC().Format(time.RFC3339),
 		"app_version": "2.0.0", "platform": "android", "title": "登录失败",
 		"message": "测试错误", "error": "测试异常", "stack_trace": "测试堆栈",
-	}, map[string]string{"Authorization": "Bearer " + access})
+	}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	if errorReport["accepted"] != true {
 		t.Fatalf("error report was not accepted: %#v", errorReport)
 	}
@@ -167,7 +170,7 @@ func TestControlFlow(t *testing.T) {
 	discardedReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
 		"event_id": "error-report-ignored", "occurred_at": time.Now().UTC().Format(time.RFC3339),
 		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "应被忽略",
-	}, map[string]string{"Authorization": "Bearer " + access})
+	}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	if discardedReport["accepted"] != false {
 		t.Fatalf("ignored error report was accepted: %#v", discardedReport)
 	}
@@ -178,7 +181,7 @@ func TestControlFlow(t *testing.T) {
 	acceptedReport := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
 		"event_id": "error-report-allowed", "occurred_at": time.Now().UTC().Format(time.RFC3339),
 		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "应被接收",
-	}, map[string]string{"Authorization": "Bearer " + access})
+	}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	if acceptedReport["accepted"] != true {
 		t.Fatalf("allowed error report was discarded: %#v", acceptedReport)
 	}
@@ -193,7 +196,7 @@ func TestControlFlow(t *testing.T) {
 	reportAfterClear := requestWithHeaders(t, ts.URL+"/api/v1/error-reports", http.MethodPost, map[string]any{
 		"event_id": "error-report-after-clear", "occurred_at": time.Now().UTC().Format(time.RFC3339),
 		"app_version": "2.0.0", "platform": "android", "title": "登录失败", "message": "清空后应被接收",
-	}, map[string]string{"Authorization": "Bearer " + access})
+	}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	if reportAfterClear["accepted"] != true {
 		t.Fatalf("error report after clear was discarded: %#v", reportAfterClear)
 	}
@@ -285,30 +288,30 @@ func TestControlFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "disabled"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("disable user status = %d, want %d", status, http.StatusOK)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusForbidden {
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token}); status != http.StatusForbidden {
 		t.Fatalf("disabled user login-eligibility status = %d, want %d", status, http.StatusForbidden)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
+	if status := requestStatus(t, ts.URL+"/api/v1/me", http.MethodGet, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
 		t.Fatalf("disabled user /me status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []map[string]any{{"event_id": "disabled-user-event", "type": "foreground", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{}}}, map[string]string{"Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
+	if status := requestStatus(t, ts.URL+"/api/v1/telemetry/events", http.MethodPost, []map[string]any{{"event_id": "disabled-user-event", "type": "foreground", "occurred_at": time.Now().UTC().Format(time.RFC3339), "properties": map[string]any{}}}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access}); status != http.StatusUnauthorized {
 		t.Fatalf("disabled user telemetry status = %d, want %d", status, http.StatusUnauthorized)
 	}
 	for _, path := range []string{"/api/v1/question-banks", "/api/v1/question-banks/QB-001"} {
-		requestFailure(t, ts.URL+path, map[string]string{"Authorization": "Bearer " + access}, http.StatusForbidden, "user_unavailable")
+		requestFailure(t, ts.URL+path, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access}, http.StatusForbidden, "user_unavailable")
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/users/"+first["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("enable user status = %d, want %d", status, http.StatusOK)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusOK {
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token}); status != http.StatusOK {
 		t.Fatalf("active user login-eligibility status = %d, want %d", status, http.StatusOK)
 	}
-	requestFailure(t, ts.URL+"/api/v1/question-banks", map[string]string{"Authorization": "Bearer " + access}, http.StatusUnauthorized, "access_token_expired")
-	challengeAfterEnable := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + d1.token})
+	requestFailure(t, ts.URL+"/api/v1/question-banks", map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access}, http.StatusUnauthorized, "access_token_expired")
+	challengeAfterEnable := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token})
 	assertedAfterEnable := time.Now().UTC().Format(time.RFC3339)
 	loginAfterEnable := map[string]any{"challenge_id": challengeAfterEnable["challenge_id"], "challenge": challengeAfterEnable["challenge"], "device_serial": d1.serial, "student_id": student, "student_alias": alias, "display_name": "测试用户", "college_name": collegeName, "class_name": className, "major_name": majorName, "asserted_at": assertedAfterEnable}
 	signatureAfterEnable := sign(t, d1.priv, lines("xzitpocket-control-login", challengeAfterEnable["challenge_id"].(string), challengeAfterEnable["challenge"].(string), d1.serial, student, alias, "测试用户", collegeName, className, majorName, assertedAfterEnable))
-	newSession := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginAfterEnable, map[string]string{"Authorization": "Device " + d1.token, "X-Device-Signature": signatureAfterEnable, "X-Device-Signed-At": assertedAfterEnable, "X-Installation-ID": d1.installation})
+	newSession := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, loginAfterEnable, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token, "X-Device-Signature": signatureAfterEnable, "X-Device-Signed-At": assertedAfterEnable, "X-Installation-ID": d1.installation})
 	access = newSession["access_token"].(string)
 
 	for _, path := range []string{
@@ -334,7 +337,7 @@ func TestControlFlow(t *testing.T) {
 	if adminPreview["questionBank"] == nil {
 		t.Fatalf("admin question bank preview failed: %#v", adminPreview)
 	}
-	publicBank := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+createdBankID, http.MethodGet, nil, map[string]string{"Authorization": "Bearer " + access})
+	publicBank := requestWithHeaders(t, ts.URL+"/api/v1/question-banks/"+createdBankID, http.MethodGet, nil, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Bearer " + access})
 	if publicBank["questionBank"] == nil {
 		t.Fatalf("question bank read failed: %#v", publicBank)
 	}
@@ -359,7 +362,7 @@ func TestControlFlow(t *testing.T) {
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/devices/"+sessionDevice["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "revoked"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
 		t.Fatalf("revoke device status = %d, want %d", status, http.StatusOK)
 	}
-	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"Authorization": "Device " + d1.token}); status != http.StatusUnauthorized {
+	if status := requestStatus(t, ts.URL+"/api/v1/auth/login-eligibility", http.MethodPost, map[string]string{"student_id": student}, map[string]string{"X-Student-ID": "2023000001", "Authorization": "Device " + d1.token}); status != http.StatusUnauthorized {
 		t.Fatalf("revoked device login-eligibility status = %d, want %d", status, http.StatusUnauthorized)
 	}
 	if status := requestStatus(t, ts.URL+"/api/v1/admin/devices/"+sessionDevice["id"].(string)+"/status", http.MethodPatch, map[string]string{"status": "active"}, map[string]string{"Authorization": "Bearer " + adminAccess}); status != http.StatusOK {
@@ -384,7 +387,7 @@ func register(t *testing.T, base string, d *testDevice) map[string]any {
 	created := time.Now().UTC().Format(time.RFC3339)
 	body := map[string]any{"installation_id": d.installation, "public_key": pub, "platform": "android", "app_version": "2.0.0", "created_at": created}
 	sig := sign(t, d.priv, lines("xzitpocket-control-device", d.installation, pub, "android", "2.0.0", created))
-	return requestWithHeaders(t, base+"/api/v1/devices/register", http.MethodPost, body, map[string]string{"X-Device-Signature": sig})
+	return requestWithHeaders(t, base+"/api/v1/devices/register", http.MethodPost, body, map[string]string{"X-Student-ID": "2023000001", "X-Device-Signature": sig})
 }
 
 func request(t *testing.T, endpoint, method string, body any, headers map[string]string) map[string]any {

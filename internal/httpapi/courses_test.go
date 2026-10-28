@@ -38,6 +38,13 @@ func newAdminServer(t *testing.T) (*httptest.Server, map[string]string, string) 
 	if err := store.CreateSession(ctx, sqlite.Session{ID: "session", UserID: "user", DeviceID: "device", AccessHash: controlcrypto.HashToken(pepper, "access"), RefreshHash: "refresh-hash", ExpiresAt: now.Add(time.Hour), RefreshExpires: now.Add(24 * time.Hour), CreatedAt: now, LastUsedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	ciphertext, err := controlcrypto.Encrypt([]byte("01234567890123456789012345678901"), "20260001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO identities(id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at) VALUES ('identity', 'user', 'xzit-oa', ?, '', ?, ?, ?)`, controlcrypto.HMACHex([]byte("test-id-pepper"), "20260001"), ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a, err := app.New(config.Config{TokenPepper: pepper, IDPepper: []byte("test-id-pepper"), EncryptionKey: []byte("01234567890123456789012345678901"), AdminKey: "test-password"}, store, logger)
 	if err != nil {
@@ -46,7 +53,7 @@ func newAdminServer(t *testing.T) (*httptest.Server, map[string]string, string) 
 	ts := httptest.NewServer(New(a, http.NotFoundHandler(), logger))
 	t.Cleanup(ts.Close)
 	admin := requestWithHeaders(t, ts.URL+"/api/v1/admin/session", http.MethodPost, map[string]string{"key": "test-password"}, nil)
-	return ts, map[string]string{"Authorization": "Bearer access"}, "Bearer " + admin["access_token"].(string)
+	return ts, map[string]string{"Authorization": "Bearer access", "X-Student-ID": "20260001"}, "Bearer " + admin["access_token"].(string)
 }
 
 func TestCourseUploadAndAdminCRUD(t *testing.T) {
@@ -57,7 +64,7 @@ func TestCourseUploadAndAdminCRUD(t *testing.T) {
 		map[string]any{"code": "3007B2106", "name": "数学分析（Ⅲ）", "books": []any{map[string]any{"name": "数学分析", "tags": "高教社"}}},
 		map[string]any{"code": "3007B2106", "name": "重复编号"},
 	}}
-	if status := requestStatus(t, ts.URL+"/api/v1/courses", http.MethodPost, body, nil); status != http.StatusUnauthorized {
+	if status := requestStatus(t, ts.URL+"/api/v1/courses", http.MethodPost, body, map[string]string{"X-Student-ID": "20260001"}); status != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated course upload status = %d, want %d", status, http.StatusUnauthorized)
 	}
 	uploaded := requestWithHeaders(t, ts.URL+"/api/v1/courses", http.MethodPost, body, userHeaders)

@@ -42,13 +42,13 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	device := newTestDevice(t, "cdk-http-device")
 	registered := register(t, ts.URL, device)
 	device.serial, device.token = registered["device_serial"].(string), registered["device_token"].(string)
-	challenge := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"Authorization": "Device " + device.token})
+	challenge := request(t, ts.URL+"/api/v1/auth/challenges", http.MethodPost, nil, map[string]string{"X-Student-ID": "2023999001", "Authorization": "Device " + device.token})
 	student := "2023999001"
 	alias := controlcrypto.StudentAlias(student)
 	assertedAt := time.Now().UTC().Format(time.RFC3339)
 	login := map[string]any{"challenge_id": challenge["challenge_id"], "challenge": challenge["challenge"], "device_serial": device.serial, "student_id": student, "student_alias": alias, "display_name": "CDK 测试", "asserted_at": assertedAt}
-	signature := sign(t, device.priv, lines("xzitpocket-control-login", challenge["challenge_id"].(string), challenge["challenge"].(string), device.serial, student, alias, "CDK 测试", assertedAt))
-	session := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, login, map[string]string{"Authorization": "Device " + device.token, "X-Device-Signature": signature, "X-Device-Signed-At": assertedAt, "X-Installation-ID": device.installation})
+	signature := sign(t, device.priv, lines("xzitpocket-control-login", challenge["challenge_id"].(string), challenge["challenge"].(string), device.serial, student, alias, "CDK 测试", "", "", "", assertedAt))
+	session := requestWithHeaders(t, ts.URL+"/api/v1/auth/assertions", http.MethodPost, login, map[string]string{"X-Student-ID": "2023999001", "Authorization": "Device " + device.token, "X-Device-Signature": signature, "X-Device-Signed-At": assertedAt, "X-Installation-ID": device.installation})
 	access := session["access_token"].(string)
 
 	admin := requestWithHeaders(t, ts.URL+"/api/v1/admin/session", http.MethodPost, map[string]string{"key": "test-password"}, nil)
@@ -63,7 +63,7 @@ func TestLibraryCDKHTTPFlow(t *testing.T) {
 	if bank["questionBank"].(map[string]any)["requiresCDK"] != true {
 		t.Fatalf("question bank unlock flag missing: %#v", bank)
 	}
-	userHeaders := map[string]string{"Authorization": "Bearer " + access}
+	userHeaders := map[string]string{"X-Student-ID": student, "Authorization": "Bearer " + access}
 	visible := requestWithHeaders(t, ts.URL+"/api/v1/question-banks", http.MethodGet, nil, userHeaders)
 	if visible["total"].(float64) != 1 {
 		t.Fatalf("active question bank should be listed even when locked: %#v", visible)

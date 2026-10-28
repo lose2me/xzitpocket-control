@@ -97,6 +97,12 @@ func newRequestID() string {
 
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, apiPrefix)
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasPrefix(path, "/admin/") {
+		if err := controlcrypto.ValidateStudentID(r.Header.Get("X-Student-ID")); err != nil {
+			writeError(w, r, app.Err("student_id_required", "上报请求必须携带有效学号", http.StatusBadRequest))
+			return
+		}
+	}
 	if strings.HasPrefix(path, "/admin/") && path != "/admin/session" {
 		principal, ok := s.authAdmin(w, r)
 		if !ok {
@@ -610,6 +616,12 @@ func (s *Server) authSession(w http.ResponseWriter, r *http.Request) (app.Sessio
 		writeError(w, r, err)
 		return p, false
 	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if err := s.App.ValidateReportingStudent(r.Context(), p.User.ID, r.Header.Get("X-Student-ID")); err != nil {
+			writeError(w, r, err)
+			return p, false
+		}
+	}
 	return p, true
 }
 
@@ -718,6 +730,10 @@ func (s *Server) loginEligibility(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
+	if in.StudentID != r.Header.Get("X-Student-ID") {
+		writeError(w, r, app.Err("student_id_mismatch", "上报学号不一致", http.StatusBadRequest))
+		return
+	}
 	if err := s.App.CheckLoginEligibility(r.Context(), in.StudentID); err != nil {
 		writeError(w, r, err)
 		return
@@ -733,6 +749,10 @@ func (s *Server) assertLogin(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &in, 64<<10); err != nil {
 		s.App.ObserveLoginAttempt(r.Context(), p.Device.ID, s.sourceIPHash(r), "malformed_request")
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
+		return
+	}
+	if in.StudentID != r.Header.Get("X-Student-ID") {
+		writeError(w, r, app.Err("student_id_mismatch", "上报学号不一致", http.StatusBadRequest))
 		return
 	}
 	out, err := s.App.AssertLogin(r.Context(), p, in, r.Header.Get("X-Device-Signature"), r.Header.Get("X-Installation-ID"), r.Header.Get("X-Device-Signed-At"), s.sourceIPHash(r))
@@ -758,14 +778,11 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := decodeJSON(r, &in, 32<<10); err != nil && bearer(r) == "" {
+	if err := decodeJSON(r, &in, 32<<10); err != nil {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	if in.RefreshToken == "" {
-		in.RefreshToken = bearer(r)
-	}
-	out, err := s.App.RefreshSession(r.Context(), in.RefreshToken, r.Header.Get("X-Device-Signature"), r.Header.Get("X-Installation-ID"), r.Header.Get("X-Device-Signed-At"))
+	out, err := s.App.RefreshSession(r.Context(), in.RefreshToken, r.Header.Get("X-Device-Signature"), r.Header.Get("X-Installation-ID"), r.Header.Get("X-Device-Signed-At"), r.Header.Get("X-Student-ID"))
 	if err != nil {
 		writeError(w, r, err)
 		return

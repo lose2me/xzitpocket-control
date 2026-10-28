@@ -60,10 +60,15 @@ device_serial
 student_id
 student_alias
 display_name
+college_name
+class_name
+major_name
 asserted_at
 ```
 
 control 验证设备签名、challenge 一次性使用、学号格式和伪名后，按学号哈希查找或创建用户，绑定当前设备并创建会话。同一学号可在多台设备登录；设备切换账号只撤销该设备在旧账号上的会话。
+
+学院、班级、专业字段即使为空也参与签名。所有 APP 向 control 发出的非 GET/HEAD 请求携带 `X-Student-ID`；登录资格与断言的请求头须与正文一致，已登录写请求和刷新令牌须与会话绑定账号一致。管理员接口不使用此学号协议。
 
 伪名固定为 `SHA-256("xzitpocket-control|student|" + student_id)` 的小写十六进制字符串，不带版本号。access token 有效期 15 分钟，refresh token 有效期 30 天，刷新时轮换；数据库只保存 HMAC。
 
