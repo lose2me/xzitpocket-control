@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"xzitpocket-control/internal/cloud"
+	controlcrypto "xzitpocket-control/internal/crypto"
 	"xzitpocket-control/internal/store/sqlite"
 )
 
@@ -435,6 +436,11 @@ func TestCompleteSubmissionRejectsInvalidUploads(t *testing.T) {
 
 func TestSubmissionReviewAdminFlows(t *testing.T) {
 	a, store, ctx := newStorageApp(t)
+	cfg := a.cfg()
+	cfg.CDNDomain = "https://dl.xuda.live"
+	cfg.CDNAuthKey = "cdn-key"
+	cfg.CDNURLTTL = 30 * time.Minute
+	a.SetConfigForTesting(cfg)
 	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
 	pdf := []byte("%PDF-1.4 review")
 	a.cosClientOverride = cosStubMissing()
@@ -459,8 +465,12 @@ func TestSubmissionReviewAdminFlows(t *testing.T) {
 	if _, err := a.SubmissionResourceURL(ctx, "missing", "resource", 0); err == nil {
 		t.Fatal("missing submission should fail")
 	}
-	if _, err := a.SubmissionResourceURL(ctx, ticket.ID, "resource", 0); err == nil {
-		t.Fatal("url without CDN should fail")
+	if _, err := a.SubmissionResourceURL(ctx, "missing", "resource", 0); err == nil {
+		t.Fatal("url for a missing submission should fail")
+	}
+	reviewURL, err := a.SubmissionResourceURL(ctx, ticket.ID, "resource", 0)
+	if err != nil || !strings.Contains(reviewURL.URL, "sign=") || reviewURL.ExpiresAt == "" {
+		t.Fatalf("review url = %+v %v", reviewURL, err)
 	}
 	if err := a.DeleteSubmissionFileForAdmin(ctx, ticket.ID, "bogus", first.ID, "admin"); err == nil {
 		t.Fatal("invalid kind should fail")
@@ -601,4 +611,358 @@ func TestAdminDownloadsAndCounters(t *testing.T) {
 	a.removeCoverIfUnused(ctx, "published/textbooks/after-close.webp")
 	a.RecordTextbookDownload(ctx, textbook.ID, "another-user")
 	a.RecordResourceDownload(ctx, resource.ID, "another-user")
+}
+
+func TestSubmissionDuplicatesAndStaleCleanup(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	pdf := []byte("%PDF-1.4 duplicate")
+	a.cosClientOverride = cosStubMissing()
+
+	first, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "第一份", Files: []ResourceSubmissionFileInput{pdfFile("一.pdf", pdf)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstFile, err := store.GetSubmissionFile(ctx, first.Files[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = cosStubObjects(map[string][]byte{firstFile.ObjectKey: pdf})
+	if _, err := a.CompleteSubmission(ctx, p, first.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same content in a new ticket is flagged as a duplicate: HEAD answers
+	// for both the published key and the submission object.
+	a.cosClientOverride = newStubCOSClientWithETag(map[string]string{http.MethodGet: string(pdf)}, map[string]int64{http.MethodHead: int64(len(pdf))}, md5Hex(pdf))
+	second, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "第二份", Files: []ResourceSubmissionFileInput{pdfFile("二.pdf", pdf)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A stub that answers HEAD for every key marks the published copy.
+	a.cosClientOverride = newStubCOSClientWithETag(map[string]string{http.MethodGet: string(pdf)}, map[string]int64{http.MethodHead: int64(len(pdf))}, md5Hex(pdf))
+	view, err := a.CompleteSubmission(ctx, p, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Files) != 1 || !view.Files[0].Duplicate {
+		t.Fatalf("duplicate flag = %+v", view.Files)
+	}
+	// Rejecting the duplicate keeps the shared object used by the first review.
+	if err := a.RejectSubmissionForAdmin(ctx, second.ID, "resource", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.OpenSubmissionDownload(ctx, first.ID, "resource", ""); err != nil {
+		t.Fatalf("shared object should stay available: %v", err)
+	}
+	// Completing an already uploaded ticket is a 404.
+	if _, err := a.CompleteSubmission(ctx, p, second.ID); err == nil {
+		t.Fatal("completed ticket should not complete twice")
+	}
+
+	// A stale pending upload is removed by the cleanup pass.
+	a.cosClientOverride = cosStubMissing()
+	stale, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "过期", Files: []ResourceSubmissionFileInput{pdfFile("过期.pdf", []byte("%PDF-1.4 stale"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx, "UPDATE resource_submissions SET created_at = ? WHERE id = ?", time.Now().Add(-48*time.Hour).UnixMilli(), stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.cleanupStaleUploads(ctx)
+	if _, err := store.GetSubmission(ctx, stale.ID); err == nil {
+		t.Fatal("stale upload should be cleaned up")
+	}
+
+	// Admin listing filters by kind and pages.
+	items, total, err := a.ListSubmissionsForAdmin(ctx, "resource", 10, 0)
+	if err != nil || total < 1 || len(items) == 0 {
+		t.Fatalf("submission list = %d %v %v", total, items, err)
+	}
+	if _, total, err := a.ListSubmissionsForAdmin(ctx, "textbook", 10, 0); err != nil || total != 0 {
+		t.Fatalf("textbook submissions = %d %v", total, err)
+	}
+	if _, _, err := a.ListSubmissionsForAdmin(ctx, "bogus", 10, 0); err == nil {
+		t.Fatal("invalid kind should fail")
+	}
+}
+
+func TestResourceAIAndURLVariants(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	cfg := a.cfg()
+	cfg.CDNDomain = "https://dl.xuda.live"
+	cfg.CDNAuthKey = "cdn-key"
+	cfg.CDNURLTTL = 30 * time.Minute
+	a.SetConfigForTesting(cfg)
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	now := time.Now().UTC()
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResourceAIForUser(ctx, resource.ID, "bogus", 0); err == nil {
+		t.Fatal("invalid AI mode should fail")
+	}
+	if view, err := a.ResourceAIForUser(ctx, resource.ID, "", 0); err != nil || view.Available {
+		t.Fatalf("no AI output = %+v %v", view, err)
+	}
+	if view, err := a.ResourceAIForUser(ctx, resource.ID, "manual", 0); err != nil || view.Available {
+		t.Fatalf("no manual output = %+v %v", view, err)
+	}
+	if err := store.SetResourceManualAnalysis(ctx, resource.ID, "ai/papers/"+resource.ID+"/manual.pdf", 42, now); err != nil {
+		t.Fatal(err)
+	}
+	manual, err := a.ResourceAIForUser(ctx, resource.ID, "manual", time.Hour)
+	if err != nil || !manual.Available || !strings.Contains(manual.PDFURL, "sign=") {
+		t.Fatalf("manual AI = %+v %v", manual, err)
+	}
+
+	// A failed task only reports its status.
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/resources/ai.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := store.CreateAITask(ctx, resource.ID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{Status: stringPointer("failed"), Error: stringPointer("boom")}); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := a.ResourceAIForUser(ctx, resource.ID, "basic", 0)
+	if err != nil || failed.Available || failed.Status != "failed" || failed.Error != "boom" {
+		t.Fatalf("failed task = %+v %v", failed, err)
+	}
+	// A succeeded task without an output key has nothing to download.
+	if err := store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{Status: stringPointer("succeeded")}); err != nil {
+		t.Fatal(err)
+	}
+	if view, err := a.ResourceAIForUser(ctx, resource.ID, "more", 0); err != nil || view.Available {
+		t.Fatalf("succeeded without output = %+v %v", view, err)
+	}
+	// With outputs both modes return a signed URL.
+	if err := store.UpdateAITask(ctx, task.ID, sqlite.AITaskPatch{
+		OutputKey: stringPointer("ai/papers/out.pdf"), MoreOutputKey: stringPointer("ai/papers/out-more.pdf"),
+		Markdown: stringPointer("basic"), MoreMarkdown: stringPointer("more"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	basic, err := a.ResourceAIForUser(ctx, resource.ID, "basic", 0)
+	if err != nil || !basic.Available || basic.Markdown != "basic" || !strings.Contains(basic.PDFURL, "out.pdf") {
+		t.Fatalf("basic AI = %+v %v", basic, err)
+	}
+	more, err := a.ResourceAIForUser(ctx, resource.ID, "more", time.Hour)
+	if err != nil || more.Markdown != "more" || !strings.Contains(more.PDFURL, "out-more.pdf") {
+		t.Fatalf("more AI = %+v %v", more, err)
+	}
+
+	// Archived resources are hidden from the app but visible to the console.
+	if _, err := a.SetResourceArchived(ctx, resource.ID, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResourceURL(ctx, resource.ID, 0); err == nil {
+		t.Fatal("archived resource should not be served to the app")
+	}
+	if _, err := a.ResourceURLForAdmin(ctx, resource.ID, 0); err != nil {
+		t.Fatalf("admin should see archived resources: %v", err)
+	}
+}
+
+func TestTextbookResourceURLKinds(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	cfg := a.cfg()
+	cfg.CDNDomain = "https://dl.xuda.live"
+	cfg.CDNAuthKey = "cdn-key"
+	cfg.CDNURLTTL = 30 * time.Minute
+	a.SetConfigForTesting(cfg)
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	now := time.Now().UTC()
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.TextbookResourceURL(ctx, textbook.ID, "pdf", 0); err == nil {
+		t.Fatal("textbook without pdf should fail")
+	}
+	if err := store.SetTextbookPdfKey(ctx, textbook.ID, "published/textbooks/a.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	pdf, err := a.TextbookResourceURL(ctx, textbook.ID, "pdf", 0)
+	if err != nil || !strings.Contains(pdf.URL, "a.pdf") {
+		t.Fatalf("pdf url = %+v %v", pdf, err)
+	}
+	defaultKind, err := a.TextbookResourceURL(ctx, textbook.ID, "", 0)
+	if err != nil || defaultKind.URL == "" {
+		t.Fatalf("default kind = %+v %v", defaultKind, err)
+	}
+	if _, err := a.TextbookResourceURL(ctx, textbook.ID, "cover", 0); err == nil {
+		t.Fatal("cover without file should fail")
+	}
+	if err := store.SetTextbookCoverKey(ctx, textbook.ID, "published/textbooks/a.webp", now); err != nil {
+		t.Fatal(err)
+	}
+	cover, err := a.TextbookResourceURL(ctx, textbook.ID, "cover", 0)
+	if err != nil || !strings.Contains(cover.URL, "a.webp") {
+		t.Fatalf("cover url = %+v %v", cover, err)
+	}
+	if _, err := a.TextbookResourceURL(ctx, textbook.ID, "bogus", 0); err == nil {
+		t.Fatal("invalid kind should fail")
+	}
+	if _, err := a.SetTextbookArchived(ctx, textbook.ID, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.TextbookResourceURL(ctx, textbook.ID, "pdf", 0); err == nil {
+		t.Fatal("archived textbook should not be served to the app")
+	}
+	if _, err := a.TextbookResourceURLForAdmin(ctx, textbook.ID, "pdf", 0); err != nil {
+		t.Fatalf("admin should see archived textbook: %v", err)
+	}
+}
+
+func TestObserveLoginAttemptCreatesRiskEvent(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	cfg := a.cfg()
+	cfg.RiskLoginWindow = time.Minute
+	cfg.RiskLoginCount = 2
+	cfg.RiskDeviceCount = 1
+	a.SetConfigForTesting(cfg)
+	device := sqlite.Device{ID: "dev-risk", DeviceSerial: "s", Installation: "i", TokenHash: "h", PublicKey: "k", Platform: "android", AppVersion: "1", CreatedAt: time.Now().UTC(), LastSeenAt: time.Now().UTC()}
+	if err := store.CreateDevice(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	a.ObserveLoginAttempt(ctx, device.ID, "source-hash", "malformed_request")
+	a.ObserveLoginAttempt(ctx, device.ID, "", "malformed_request")
+	events, err := store.ListRiskEvents(ctx, 10, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "login_attempt_burst" || events[0].ObservedCount < 2 {
+		t.Fatalf("risk events = %+v", events)
+	}
+	// A closed store only logs.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a.ObserveLoginAttempt(ctx, device.ID, "source-hash", "malformed_request")
+}
+
+func TestAssetCleanupSharedAndFailingObjects(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	now := time.Now().UTC()
+	first, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材甲", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材乙", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedCover := "published/textbooks/shared.webp"
+	if err := store.SetTextbookCoverKey(ctx, first.ID, sharedCover, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookCoverKey(ctx, second.ID, sharedCover, now); err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	// The cover is still referenced by the second textbook.
+	a.removeCoverIfUnused(ctx, sharedCover)
+	// An unreferenced cover with storage failures only logs.
+	a.cosClientOverride = putFailingCOS()
+	a.removeCoverIfUnused(ctx, "published/textbooks/failing.webp")
+	a.removeStoredFileIfUnused(ctx, "published/resources/failing.pdf")
+
+	// RecordResourceDownload increments the contributor counter.
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "贡献试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/resources/contrib.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourceContributor(ctx, resource.ID, "usr-upload"); err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	a.RecordResourceDownload(ctx, resource.ID, "usr-upload")
+	stats, err := a.GetUploadStats(ctx, SessionPrincipal{User: sqlite.User{ID: "usr-upload"}})
+	if err != nil || stats.DownloadCount != 1 {
+		t.Fatalf("contributor downloads = %#v %v", stats, err)
+	}
+
+	// Aborting an already aborted ticket is a 404.
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	a.cosClientOverride = cosStubMissing()
+	ticket, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "取消两次", Files: []ResourceSubmissionFileInput{pdfFile("取消.pdf", []byte("%PDF-1.4 twice"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AbortSubmission(ctx, p, ticket.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AbortSubmission(ctx, p, ticket.ID); err == nil {
+		t.Fatal("second abort should be a 404")
+	}
+}
+
+func TestSubmissionUploadingLimit(t *testing.T) {
+	a, _, ctx := newStorageApp(t)
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	a.cosClientOverride = cosStubMissing()
+	for i := 0; i < maxUploadingPerUser; i++ {
+		if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+			Kind: "resource", CourseCode: "C1", Name: "排队" + string(rune('A'+i)),
+			Files: []ResourceSubmissionFileInput{pdfFile("排队"+string(rune('A'+i))+".pdf", []byte("%PDF-1.4 "+string(rune('A'+i))))},
+		}); err != nil {
+			t.Fatalf("ticket %d: %v", i, err)
+		}
+	}
+	if _, err := a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{
+		Kind: "resource", CourseCode: "C1", Name: "超额", Files: []ResourceSubmissionFileInput{pdfFile("超额.pdf", []byte("%PDF-1.4 over"))},
+	}); err == nil {
+		t.Fatal("too many pending uploads should be refused")
+	}
+}
+
+func TestDownloadContributorAndStudentIdentity(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	now := time.Now().UTC()
+	if err := store.CreateUser(ctx, sqlite.User{ID: "usr-contributor", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := controlcrypto.Encrypt(a.cfg().EncryptionKey, "20260001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.ExecContext(ctx,
+		`INSERT INTO identities(id, user_id, provider, student_id_hash, student_alias, student_id_ciphertext, created_at, updated_at)
+		 VALUES ('idn-upload', 'usr-upload', 'xzit-oa', 'hash', '', ?, ?, ?)`, ciphertext, now.UnixMilli(), now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := a.GetUploadStats(ctx, SessionPrincipal{User: sqlite.User{ID: "usr-upload"}})
+	if err != nil || stats.StudentID != "20260001" {
+		t.Fatalf("upload stats = %#v %v", stats, err)
+	}
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookPdfKey(ctx, textbook.ID, "published/textbooks/contrib.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookContributor(ctx, textbook.ID, "usr-contributor"); err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	a.RecordTextbookDownload(ctx, textbook.ID, "usr-upload")
+	if _, downloads, err := store.GetUserStats(ctx, "usr-contributor"); err != nil || downloads != 1 {
+		t.Fatalf("contributor downloads = %d %v", downloads, err)
+	}
 }

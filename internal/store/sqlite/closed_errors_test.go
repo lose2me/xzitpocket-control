@@ -259,6 +259,12 @@ func TestLibraryListingsAndRedemption(t *testing.T) {
 	if err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("search CDKs = %v %d %v", items, total, err)
 	}
+	if items, total, err := store.ListLibraryCDKs(ctx, 1, 1, "created_at", "asc", "cdk"); err != nil || total < 1 || len(items) != 1 {
+		t.Fatalf("paged search CDKs = %v %d %v", items, total, err)
+	}
+	if items, _, err := store.ListLibraryCDKs(ctx, 0, -5, "created_at", "asc"); err != nil || len(items) != 2 {
+		t.Fatalf("default page CDKs = %v %v", items, err)
+	}
 	if err := store.SetLibraryCDKStatus(ctx, "cdk-1", "disabled"); err != nil {
 		t.Fatal(err)
 	}
@@ -359,5 +365,178 @@ func TestTelemetryAggregates(t *testing.T) {
 	}
 	if series, err := empty.MetricsSeries(ctx, 30, now); err != nil || len(series) == 0 {
 		t.Fatalf("empty series = %+v %v", series, err)
+	}
+}
+
+func TestQuestionBankContentUpdates(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/banks.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	question := func(number int, text string) Question {
+		return Question{
+			ID: "q" + string(rune('0'+number)), QuestionNumber: number, Type: "单选题", Title: "第" + string(rune('0'+number)) + "题",
+			QuestionText: text, CorrectAnswer: "A", SortOrder: number - 1,
+			Options: []QuestionOption{{ID: "o" + string(rune('0'+number)), Label: "A", Text: "对", SortOrder: 0}},
+		}
+	}
+	bank := QuestionBank{ID: "bank-known", Name: "题库", Status: "active", CourseCodes: []string{"C1"}, CreatedAt: now, UpdatedAt: now,
+		Questions: []Question{question(1, "1+1")}}
+	if err := store.CreateQuestionBank(ctx, bank); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateQuestionBank(ctx, bank); err == nil {
+		t.Fatal("duplicate explicit ID should fail")
+	}
+	// Updating only metadata keeps the questions.
+	bank.Name = "题库改名"
+	if err := store.UpdateQuestionBank(ctx, bank); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil || stored.Name != "题库改名" || len(stored.Questions) != 1 {
+		t.Fatalf("metadata update = %+v %v", stored, err)
+	}
+	// Changing content replaces the question rows.
+	bank.Questions = []Question{question(1, "2+2"), question(2, "3+3")}
+	bank.CourseCodes = []string{"C2", "C3"}
+	if err := store.UpdateQuestionBank(ctx, bank); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = store.GetQuestionBank(ctx, bank.ID)
+	if err != nil || len(stored.Questions) != 2 || len(stored.CourseCodes) != 2 {
+		t.Fatalf("content update = %+v %v", stored, err)
+	}
+	if err := store.UpdateQuestionBank(ctx, QuestionBank{ID: "missing", Name: "x", Status: "active"}); err == nil {
+		t.Fatal("updating a missing bank should fail")
+	}
+	if err := store.SetQuestionBankStatus(ctx, "missing", "active", now); err == nil {
+		t.Fatal("status update on a missing bank should fail")
+	}
+	if err := store.SetQuestionBankArchive(ctx, "missing", now); err == nil {
+		t.Fatal("archive on a missing bank should fail")
+	}
+	if err := store.DeleteQuestionBank(ctx, bank.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetQuestionBank(ctx, bank.ID); err == nil {
+		t.Fatal("deleted bank should be gone")
+	}
+}
+
+func TestQuestionBankCourseReassignment(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/reassign.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	question := Question{ID: "q1", QuestionNumber: 1, Type: "单选题", Title: "第1题", QuestionText: "1+1", CorrectAnswer: "A", SortOrder: 0,
+		Options: []QuestionOption{{ID: "o1", Label: "A", Text: "2", SortOrder: 0}}}
+	bank := QuestionBank{ID: "bank-r", Name: "题库", Status: "active", CourseCodes: []string{"C1"}, CreatedAt: now, UpdatedAt: now, Questions: []Question{question}}
+	if err := store.CreateQuestionBank(ctx, bank); err != nil {
+		t.Fatal(err)
+	}
+	// Same questions, different courses: only the association rows change.
+	bank.CourseCodes = []string{"C2", "C3"}
+	if err := store.UpdateQuestionBank(ctx, bank); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetQuestionBank(ctx, bank.ID)
+	if err != nil || len(stored.CourseCodes) != 2 {
+		t.Fatalf("reassigned codes = %+v %v", stored, err)
+	}
+	// Listing with an offset and no filter still works.
+	if items, err := store.ListQuestionBanks(ctx, 1, 1, "", false, "", ""); err != nil {
+		t.Fatalf("offset listing = %v", err)
+	} else if len(items) != 0 {
+		t.Fatalf("offset listing = %+v", items)
+	}
+	// Unknown CDK and invalid status are rejected.
+	if _, err := store.RedeemLibraryCDK(ctx, "missing-hash", bank.ID, "student", "cipher", "", now); err == nil {
+		t.Fatal("unknown CDK should fail")
+	}
+	if err := store.SetLibraryCDKStatus(ctx, "missing", "bogus"); err == nil {
+		t.Fatal("invalid CDK status should fail")
+	}
+	if err := store.SetLibraryCDKStatus(ctx, "missing", "active"); err == nil {
+		t.Fatal("missing CDK status should fail")
+	}
+}
+
+func TestLibraryCDKSingleAndUserCounters(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/single.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := store.CreateUser(ctx, User{ID: "usr-c", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateLibraryCDK(ctx, LibraryCDK{ID: "single", CodeHash: "single-hash", Status: "active", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	bank, err := store.CreateQuestionBankAuto(ctx, QuestionBank{Name: "题库", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unbound CDK can be claimed by a student for any bank.
+	claimed, err := store.RedeemLibraryCDK(ctx, "single-hash", bank.ID, "student", "cipher", "usr-c", now)
+	if err != nil || claimed.Status != "used" || claimed.QuestionBankID != bank.ID {
+		t.Fatalf("single cdk = %+v %v", claimed, err)
+	}
+	if err := store.CreateLibraryCDK(ctx, LibraryCDK{ID: "single-2", CodeHash: "single-hash-2", Status: "active", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetLibraryCDKStatus(ctx, "single-2", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetLibraryCDKStatus(ctx, "single-2", "bogus"); err == nil {
+		t.Fatal("invalid cdk status should fail")
+	}
+	// Contribution counters are monotonic.
+	if err := store.IncrementUserContribution(ctx, "usr-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdjustUserContribution(ctx, "usr-c", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdjustUserDownloads(ctx, "usr-c", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.IncrementUserDownloads(ctx, "usr-c"); err != nil {
+		t.Fatal(err)
+	}
+	contribution, downloads, err := store.GetUserStats(ctx, "usr-c")
+	if err != nil || contribution != 3 || downloads != 4 {
+		t.Fatalf("user stats = %d %d %v", contribution, downloads, err)
+	}
+	// Unknown users only report no rows.
+	if err := store.IncrementUserContribution(ctx, "missing"); err == nil {
+		t.Fatal("missing user contribution should fail")
+	}
+	if err := store.AdjustUserDownloads(ctx, "missing", 1); err == nil {
+		t.Fatal("missing user download adjust should fail")
+	}
+	if err := store.AdjustUserContribution(ctx, "missing", 1); err == nil {
+		t.Fatal("missing user contribution adjust should fail")
+	}
+	if err := store.IncrementUserDownloads(ctx, "missing"); err == nil {
+		t.Fatal("missing user download increment should fail")
 	}
 }

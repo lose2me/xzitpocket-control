@@ -67,6 +67,13 @@ jobs:
           go tool cover -func=coverage.out | tail -n 1
           test -s coverage.out
 
+      # Blocks repeat once per test package under -coverpkg=./..., so the
+      # floor is checked on the de-duplicated statement total.
+      - name: Enforce Go coverage floor
+        run: |
+          cd tools/covercheck
+          go run . "$GITHUB_WORKSPACE/coverage.out" 85
+
       - name: Install web test dependencies
         run: npm ci
 

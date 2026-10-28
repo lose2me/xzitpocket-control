@@ -361,3 +361,114 @@ func TestIdentityHelpersSurviveClosedStore(t *testing.T) {
 		t.Fatal("course textbooks with a closed store should fail")
 	}
 }
+
+func TestStorageBackedOperationsSurfaceClosedStoreErrors(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	now := time.Now().UTC()
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	admin := AdminPrincipal{Admin: sqlite.Admin{ID: "admin"}}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	expectError := func(name string, err error) {
+		if err == nil {
+			t.Errorf("%s should fail on a closed store", name)
+		}
+	}
+	_, _, err = a.ListResourcesForAdmin(ctx, 10, 0, "", "", "", "", false)
+	expectError("ListResourcesForAdmin", err)
+	_, err = a.UploadCourseResources(ctx, "C1", []ResourceUpload{{Name: "a.pdf", Data: []byte("%PDF")}}, "admin")
+	expectError("UploadCourseResources", err)
+	_, err = a.UploadManualAnalysis(ctx, resource.ID, []byte("%PDF"), "admin")
+	expectError("UploadManualAnalysis", err)
+	expectError("DeleteResourceForAdmin", a.DeleteResourceForAdmin(ctx, resource.ID, "admin"))
+	_, err = a.SetResourceArchived(ctx, resource.ID, true, "admin")
+	expectError("SetResourceArchived", err)
+	_, err = a.ResourceURL(ctx, resource.ID, time.Minute)
+	expectError("ResourceURL", err)
+	_, err = a.ResourceAIForUser(ctx, resource.ID, "basic", time.Minute)
+	expectError("ResourceAIForUser", err)
+
+	_, _, err = a.ListTextbooksForAdmin(ctx, 10, 0, "", "", "", false)
+	expectError("ListTextbooksForAdmin", err)
+	_, err = a.ListTextbooksForUpload(ctx)
+	expectError("ListTextbooksForUpload", err)
+	_, err = a.CreateTextbookForAdmin(ctx, TextbookWriteInput{Name: "新教材"}, "admin")
+	expectError("CreateTextbookForAdmin", err)
+	_, err = a.UpdateTextbookForAdmin(ctx, textbook.ID, TextbookWriteInput{Name: "改"}, "admin")
+	expectError("UpdateTextbookForAdmin", err)
+	expectError("DeleteTextbookForAdmin", a.DeleteTextbookForAdmin(ctx, textbook.ID, "admin"))
+	_, err = a.SetTextbookArchived(ctx, textbook.ID, true, "admin")
+	expectError("SetTextbookArchived", err)
+	_, err = a.UploadTextbookPdf(ctx, textbook.ID, []byte("%PDF"), "admin")
+	expectError("UploadTextbookPdf", err)
+
+	_, err = a.CreateSubmissionTicket(ctx, p, ResourceSubmissionTicketInput{Kind: "resource", CourseCode: "C1", Name: "x", Files: []ResourceSubmissionFileInput{pdfFile("x.pdf", []byte("%PDF"))}})
+	expectError("CreateSubmissionTicket", err)
+	_, err = a.CompleteSubmission(ctx, p, "sub")
+	expectError("CompleteSubmission", err)
+	expectError("AbortSubmission", a.AbortSubmission(ctx, p, "sub"))
+	expectError("AbortSubmission missing", a.AbortSubmission(ctx, p, "missing"))
+	_, _, err = a.ListSubmissionsForAdmin(ctx, "resource", 10, 0)
+	expectError("ListSubmissionsForAdmin", err)
+	expectError("DeleteSubmissionFileForAdmin", a.DeleteSubmissionFileForAdmin(ctx, "sub", "resource", "file", "admin"))
+	expectError("RejectSubmissionForAdmin", a.RejectSubmissionForAdmin(ctx, "sub", "resource", "admin"))
+	_, err = a.SubmissionResourceURL(ctx, "sub", "resource", time.Minute)
+	expectError("SubmissionResourceURL", err)
+
+	_, err = a.CreateShareCode(ctx, ShareCodeCreateInput{Suffix: "2", Data: map[string]any{"a": 1}}, "usr-upload")
+	expectError("CreateShareCode", err)
+	_, _, err = a.ReadShareCode(ctx, "ABCDE2")
+	expectError("ReadShareCode", err)
+	_, _, err = a.ListShareCodes(ctx, 10, 0, "code", "asc")
+	expectError("ListShareCodes", err)
+	_, _, err = a.GetShareCode(ctx, "id")
+	expectError("GetShareCode", err)
+	expectError("DeleteShareCode", a.DeleteShareCode(ctx, "id", "admin"))
+
+	_, err = a.CreateLibraryCDK(ctx, LibraryCDKCreateInput{Count: 1}, "admin")
+	expectError("CreateLibraryCDK", err)
+	_, _, err = a.ListLibraryCDKs(ctx, 10, 0, "created_at", "desc")
+	expectError("ListLibraryCDKs", err)
+	expectError("SetLibraryCDKStatus", a.SetLibraryCDKStatus(ctx, "id", "disabled", "admin"))
+	_, err = a.RedeemLibraryCDK(ctx, p, "ABCDE1", "")
+	expectError("RedeemLibraryCDK", err)
+
+	_, err = a.ListAdminsForAdmin(ctx)
+	expectError("ListAdminsForAdmin", err)
+	m := a.AdminMe(admin)
+	if m.Permissions != "" && m.Name != "" {
+		t.Logf("admin me from snapshot = %+v", m)
+	}
+	_, _, err = a.ListUsers(ctx, 10, 0, "", "", "", "", "")
+	expectError("ListUsers", err)
+	_, err = a.GetUserDetail(ctx, "missing")
+	expectError("GetUserDetail", err)
+	expectError("SetUserStatus", a.SetUserStatus(ctx, "usr-upload", "disabled", "admin"))
+	_, _, err = a.ListDevices(ctx, 10, 0)
+	expectError("ListDevices", err)
+	_, err = a.ListAudit(ctx, 10, 0)
+	expectError("ListAudit", err)
+	_, _, err = a.ListErrorReports(ctx, 10, 0, "", "")
+	expectError("ListErrorReports", err)
+	_, err = a.GetAppReleaseConfig(ctx)
+	expectError("GetAppReleaseConfig", err)
+	_, err = a.GetSchoolCalendar(ctx)
+	expectError("GetSchoolCalendar", err)
+	_, err = a.GetConfigVersions(ctx)
+	expectError("GetConfigVersions", err)
+	_, err = a.ListTextbooksForUpload(ctx)
+	expectError("ListTextbooksForUpload", err)
+	_, err = a.ListResourceCourses(ctx)
+	expectError("ListResourceCourses", err)
+	a.CleanupTelemetry(ctx)
+}

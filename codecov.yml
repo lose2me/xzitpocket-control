@@ -6,8 +6,6 @@ coverage:
         target: auto
         threshold: 1%
         informational: true
-      # The web console gate is enforced locally by vitest; the Go gate is
-      # informational until the backend reaches the 85% target.
       web:
         target: 85%
         flags: [web]
@@ -15,7 +13,7 @@ coverage:
       go:
         target: 85%
         flags: [go]
-        informational: true
+        informational: false
     patch:
       default:
         target: 60%
