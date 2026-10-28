@@ -305,3 +305,59 @@ func TestCourseAndAdminMaintenanceErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIdentityHelpersSurviveClosedStore(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	now := time.Now().UTC()
+	device := sqlite.Device{ID: "dev-1", DeviceSerial: "serial-1", Installation: "inst-1", TokenHash: "hash", PublicKey: "key", Platform: "android", AppVersion: "1", CreatedAt: now, LastSeenAt: now}
+	if err := store.CreateDevice(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateUser(ctx, sqlite.User{ID: "usr-1", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	principal := DevicePrincipal{Device: device, Token: "token"}
+	if _, err := a.CreateChallenge(ctx, principal); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.RegisterDevice(ctx, RegisterDeviceInput{InstallationID: "inst-2", PublicKey: "k", Platform: "android", CreatedAt: now.Format(time.RFC3339)}, "sig"); err == nil {
+		t.Fatal("registration with a closed store should fail")
+	}
+	if _, err := a.CreateChallenge(ctx, principal); err == nil {
+		t.Fatal("challenge with a closed store should fail")
+	}
+	if err := a.CheckLoginEligibility(ctx, "20230001"); err == nil {
+		t.Fatal("eligibility with a closed store should fail")
+	}
+	if _, err := a.RefreshSession(ctx, "token", "sig", device.Installation, now.Format(time.RFC3339), "20230001"); err == nil {
+		t.Fatal("refresh with a closed store should fail")
+	}
+	if _, err := a.CurrentUser(ctx, SessionPrincipal{User: sqlite.User{ID: "usr-1"}}); err == nil {
+		t.Fatal("current user with a closed store should fail")
+	}
+	if _, err := a.UserDevices(ctx, SessionPrincipal{User: sqlite.User{ID: "usr-1"}}); err == nil {
+		t.Fatal("user devices with a closed store should fail")
+	}
+	if err := a.RevokeSession(ctx, SessionPrincipal{Session: sqlite.Session{ID: "ses-1"}}); err == nil {
+		t.Fatal("revoke with a closed store should fail")
+	}
+	if err := a.ValidateReportingStudent(ctx, "usr-1", "20230001"); err == nil {
+		t.Fatal("student validation with a closed store should fail")
+	}
+	if _, err := a.GetUploadStats(ctx, SessionPrincipal{User: sqlite.User{ID: "usr-1"}}); err == nil {
+		t.Fatal("upload stats with a closed store should fail")
+	}
+	if _, err := a.ListResourceCourses(ctx); err == nil {
+		t.Fatal("resource courses with a closed store should fail")
+	}
+	if _, _, _, err := a.ListCourseResourcesForUser(ctx, "C1"); err == nil {
+		t.Fatal("course resources with a closed store should fail")
+	}
+	if _, _, _, err := a.ListCourseTextbooksForUser(ctx, "C1"); err == nil {
+		t.Fatal("course textbooks with a closed store should fail")
+	}
+}

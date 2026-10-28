@@ -511,3 +511,94 @@ func TestSubmissionReviewAdminFlows(t *testing.T) {
 		t.Fatal("rejected submission should be gone")
 	}
 }
+
+func TestAdminDownloadsAndCounters(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	now := time.Now().UTC()
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+
+	if _, _, err := a.OpenTextbookDownload(ctx, "missing"); err == nil {
+		t.Fatal("missing textbook download should fail")
+	}
+	if _, _, err := a.OpenTextbookDownload(ctx, textbook.ID); err == nil {
+		t.Fatal("textbook without pdf should fail")
+	}
+	if err := store.SetTextbookPdfKey(ctx, textbook.ID, "published/textbooks/a.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	resp, filename, err := a.OpenTextbookDownload(ctx, textbook.ID)
+	if err != nil || filename != "教材.pdf" {
+		t.Fatalf("textbook download = %q %v", filename, err)
+	}
+	resp.Body.Close()
+
+	if _, _, err := a.OpenResourceDownload(ctx, "missing"); err == nil {
+		t.Fatal("missing resource download should fail")
+	}
+	if _, _, err := a.OpenResourceDownload(ctx, resource.ID); err == nil {
+		t.Fatal("resource without pdf should fail")
+	}
+	if err := store.SetResourcePdfKey(ctx, resource.ID, "published/resources/a.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	resp, filename, err = a.OpenResourceDownload(ctx, resource.ID)
+	if err != nil || filename != "试卷.pdf" {
+		t.Fatalf("resource download = %q %v", filename, err)
+	}
+	resp.Body.Close()
+
+	// Storage failures surface as a download error.
+	a.cosClientOverride = putFailingCOS()
+	if _, _, err := a.OpenResourceDownload(ctx, resource.ID); err == nil {
+		t.Fatal("storage failure should fail the download")
+	}
+
+	// Download counters only increase once per user per day.
+	a.cosClientOverride = newStubCOSClient(nil, nil)
+	p := SessionPrincipal{User: sqlite.User{ID: "usr-upload"}}
+	if _, err := a.GetUploadStats(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	a.RecordTextbookDownload(ctx, textbook.ID, "usr-upload")
+	a.RecordTextbookDownload(ctx, textbook.ID, "usr-upload")
+	stats, err := a.GetUploadStats(ctx, p)
+	if err != nil || stats.DownloadCount != 0 {
+		t.Fatalf("counters = %#v %v", stats, err)
+	}
+	a.RecordResourceDownload(ctx, resource.ID, "usr-upload")
+	a.RecordResourceDownload(ctx, resource.ID, "usr-upload")
+	// Unknown ids only log.
+	a.RecordTextbookDownload(ctx, "missing", "usr-upload")
+	a.RecordResourceDownload(ctx, "missing", "usr-upload")
+
+	// Unused objects are deleted; shared objects are kept.
+	otherTextbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材二", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookPdfKey(ctx, otherTextbook.ID, "published/textbooks/shared.pdf", now); err != nil {
+		t.Fatal(err)
+	}
+	a.removeStoredFileIfUnused(ctx, "published/textbooks/shared.pdf")
+	a.removeCoverIfUnused(ctx, "published/textbooks/cover.webp")
+	cfg := a.cfg()
+	cfg.COSSecretID, cfg.COSSecretKey = "", ""
+	a.SetConfigForTesting(cfg)
+	a.removeStoredFileIfUnused(ctx, "published/textbooks/unused.pdf")
+	a.removeCoverIfUnused(ctx, "published/textbooks/unused.webp")
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a.removeStoredFileIfUnused(ctx, "published/textbooks/after-close.pdf")
+	a.removeCoverIfUnused(ctx, "published/textbooks/after-close.webp")
+	a.RecordTextbookDownload(ctx, textbook.ID, "another-user")
+	a.RecordResourceDownload(ctx, resource.ID, "another-user")
+}
