@@ -14,36 +14,37 @@ import (
 // admin key and the AI work directories) stay in data/.env because the process
 // needs them before the database is open.
 const (
-	SettingPublicBaseURL         = "CONTROL_PUBLIC_BASE_URL"
-	SettingEventRetentionDays    = "CONTROL_EVENT_RETENTION_DAYS"
-	SettingAuditRetentionDays    = "CONTROL_AUDIT_RETENTION_DAYS"
-	SettingOverviewScalePercent  = "CONTROL_OVERVIEW_SCALE_PERCENT"
-	SettingRiskLoginWindow       = "CONTROL_RISK_LOGIN_WINDOW"
-	SettingRiskLoginCount        = "CONTROL_RISK_LOGIN_COUNT"
-	SettingRiskDeviceCount       = "CONTROL_RISK_DEVICE_COUNT"
-	SettingCOSRegion             = "CONTROL_COS_REGION"
-	SettingCOSBucket             = "CONTROL_COS_BUCKET"
-	SettingCOSSecretID           = "CONTROL_COS_SECRET_ID"
-	SettingCOSSecretKey          = "CONTROL_COS_SECRET_KEY"
-	SettingCOSWebsiteBucket      = "CONTROL_COS_WEBSITE_BUCKET"
-	SettingCDNDomain             = "CONTROL_CDN_DOMAIN"
-	SettingCDNAuthKey            = "CONTROL_CDN_AUTH_KEY"
-	SettingCDNURLTTL             = "CONTROL_CDN_URL_TTL"
-	SettingMonitorSecretID       = "CONTROL_MONITOR_SECRET_ID"
-	SettingMonitorSecretKey      = "CONTROL_MONITOR_SECRET_KEY"
-	SettingAIAPIKey              = "CONTROL_AI_API_KEY"
-	SettingAIBaseURL             = "CONTROL_AI_BASE_URL"
-	SettingAIModel               = "CONTROL_AI_MODEL"
-	SettingAIWindows             = "CONTROL_AI_WINDOWS"
-	SettingAITimezone            = "CONTROL_AI_TIMEZONE"
-	SettingAIRequestTimeout      = "CONTROL_AI_REQUEST_TIMEOUT"
-	SettingAIMaxAttempts         = "CONTROL_AI_MAX_ATTEMPTS"
-	SettingAIImageQuality        = "CONTROL_AI_IMAGE_QUALITY"
-	SettingAIImageMaxEdge        = "CONTROL_AI_IMAGE_MAX_EDGE"
-	SettingAIPrecheckSystem      = "CONTROL_AI_PROMPT_PRECHECK_SYSTEM"
-	SettingAIAnalysisSystem      = "CONTROL_AI_PROMPT_MERGED_ANALYSIS_SYSTEM"
-	SettingAIPrecheckInstruction = "CONTROL_AI_PROMPT_PRECHECK"
-	SettingAIAnalysisInstruction = "CONTROL_AI_PROMPT_ANALYSIS_INSTRUCTION"
+	SettingPublicBaseURL            = "CONTROL_PUBLIC_BASE_URL"
+	SettingEventRetentionDays       = "CONTROL_EVENT_RETENTION_DAYS"
+	SettingAuditRetentionDays       = "CONTROL_AUDIT_RETENTION_DAYS"
+	SettingOverviewScalePercent     = "CONTROL_OVERVIEW_SCALE_PERCENT"
+	SettingRiskLoginWindow          = "CONTROL_RISK_LOGIN_WINDOW"
+	SettingRiskLoginCount           = "CONTROL_RISK_LOGIN_COUNT"
+	SettingRiskDeviceCount          = "CONTROL_RISK_DEVICE_COUNT"
+	SettingDownloadMinContributions = "CONTROL_DOWNLOAD_MIN_CONTRIBUTIONS"
+	SettingCOSRegion                = "CONTROL_COS_REGION"
+	SettingCOSBucket                = "CONTROL_COS_BUCKET"
+	SettingCOSSecretID              = "CONTROL_COS_SECRET_ID"
+	SettingCOSSecretKey             = "CONTROL_COS_SECRET_KEY"
+	SettingCOSWebsiteBucket         = "CONTROL_COS_WEBSITE_BUCKET"
+	SettingCDNDomain                = "CONTROL_CDN_DOMAIN"
+	SettingCDNAuthKey               = "CONTROL_CDN_AUTH_KEY"
+	SettingCDNURLTTL                = "CONTROL_CDN_URL_TTL"
+	SettingMonitorSecretID          = "CONTROL_MONITOR_SECRET_ID"
+	SettingMonitorSecretKey         = "CONTROL_MONITOR_SECRET_KEY"
+	SettingAIAPIKey                 = "CONTROL_AI_API_KEY"
+	SettingAIBaseURL                = "CONTROL_AI_BASE_URL"
+	SettingAIModel                  = "CONTROL_AI_MODEL"
+	SettingAIWindows                = "CONTROL_AI_WINDOWS"
+	SettingAITimezone               = "CONTROL_AI_TIMEZONE"
+	SettingAIRequestTimeout         = "CONTROL_AI_REQUEST_TIMEOUT"
+	SettingAIMaxAttempts            = "CONTROL_AI_MAX_ATTEMPTS"
+	SettingAIImageQuality           = "CONTROL_AI_IMAGE_QUALITY"
+	SettingAIImageMaxEdge           = "CONTROL_AI_IMAGE_MAX_EDGE"
+	SettingAIPrecheckSystem         = "CONTROL_AI_PROMPT_PRECHECK_SYSTEM"
+	SettingAIAnalysisSystem         = "CONTROL_AI_PROMPT_MERGED_ANALYSIS_SYSTEM"
+	SettingAIPrecheckInstruction    = "CONTROL_AI_PROMPT_PRECHECK"
+	SettingAIAnalysisInstruction    = "CONTROL_AI_PROMPT_ANALYSIS_INSTRUCTION"
 
 	// Ingest switches: each client-side report can be accepted or ignored
 	// without deploying a new build.
@@ -102,6 +103,8 @@ var SettingSpecs = []SettingSpec{
 	{Key: SettingRiskLoginWindow, Group: "risk", Label: "登录观察窗口", Kind: SettingKindDuration, Hint: "例如 10m"},
 	{Key: SettingRiskLoginCount, Group: "risk", Label: "登录次数阈值", Kind: SettingKindInt, Min: 1, Max: 1000},
 	{Key: SettingRiskDeviceCount, Group: "risk", Label: "设备数量阈值", Kind: SettingKindInt, Min: 1, Max: 1000},
+
+	{Key: SettingDownloadMinContributions, Group: "general", Label: "下载所需贡献资源数", Kind: SettingKindInt, Hint: "0 = 不限制；按已发布的教材和试卷贡献数计算", Min: 0, Max: 100000},
 
 	{Key: SettingCOSRegion, Group: "storage", Label: "地域", Kind: SettingKindString, Hint: "例如 ap-shanghai"},
 	{Key: SettingCOSBucket, Group: "storage", Label: "资源桶", Kind: SettingKindString},
@@ -165,41 +168,42 @@ func SettingPermission(key string) string {
 // and never exposes them through the API.
 func RuntimeValues(cfg Config) map[string]string {
 	return map[string]string{
-		SettingPublicBaseURL:         cfg.PublicBaseURL,
-		SettingEventRetentionDays:    strconv.Itoa(cfg.EventRetentionDays),
-		SettingAuditRetentionDays:    strconv.Itoa(cfg.AuditRetentionDays),
-		SettingOverviewScalePercent:  strconv.Itoa(cfg.OverviewScalePercent),
-		SettingRiskLoginWindow:       cfg.RiskLoginWindow.String(),
-		SettingRiskLoginCount:        strconv.Itoa(cfg.RiskLoginCount),
-		SettingRiskDeviceCount:       strconv.Itoa(cfg.RiskDeviceCount),
-		SettingCOSRegion:             cfg.COSRegion,
-		SettingCOSBucket:             cfg.COSBucket,
-		SettingCOSSecretID:           cfg.COSSecretID,
-		SettingCOSSecretKey:          cfg.COSSecretKey,
-		SettingCOSWebsiteBucket:      cfg.COSWebsiteBucket,
-		SettingCDNDomain:             cfg.CDNDomain,
-		SettingCDNAuthKey:            cfg.CDNAuthKey,
-		SettingCDNURLTTL:             cfg.CDNURLTTL.String(),
-		SettingMonitorSecretID:       cfg.MonitorSecretID,
-		SettingMonitorSecretKey:      cfg.MonitorSecretKey,
-		SettingAIAPIKey:              cfg.AIAPIKey,
-		SettingAIBaseURL:             cfg.AIBaseURL,
-		SettingAIModel:               cfg.AIModel,
-		SettingAIWindows:             cfg.AIWindows,
-		SettingAITimezone:            cfg.AITimezone,
-		SettingAIRequestTimeout:      cfg.AIRequestTimeout.String(),
-		SettingAIMaxAttempts:         strconv.Itoa(cfg.AIMaxAttempts),
-		SettingAIImageQuality:        strconv.Itoa(cfg.AIImageQuality),
-		SettingAIImageMaxEdge:        strconv.Itoa(cfg.AIImageMaxEdge),
-		SettingAIPrecheckSystem:      cfg.AIPrecheckSystem,
-		SettingAIAnalysisSystem:      cfg.AIAnalysisSystem,
-		SettingAIPrecheckInstruction: cfg.AIPrecheckInstruction,
-		SettingAIAnalysisInstruction: cfg.AIAnalysisInstruction,
-		SettingAcceptCourses:         strconv.FormatBool(cfg.IngestCourses.Enabled()),
-		SettingAcceptTextbooks:       strconv.FormatBool(cfg.IngestTextbooks.Enabled()),
-		SettingAcceptSubmissions:     strconv.FormatBool(cfg.IngestSubmissions.Enabled()),
-		SettingAcceptUserInfo:        strconv.FormatBool(cfg.IngestUserInfo.Enabled()),
-		SettingAcceptEvents:          strconv.FormatBool(cfg.IngestEvents.Enabled()),
+		SettingPublicBaseURL:            cfg.PublicBaseURL,
+		SettingEventRetentionDays:       strconv.Itoa(cfg.EventRetentionDays),
+		SettingAuditRetentionDays:       strconv.Itoa(cfg.AuditRetentionDays),
+		SettingOverviewScalePercent:     strconv.Itoa(cfg.OverviewScalePercent),
+		SettingRiskLoginWindow:          cfg.RiskLoginWindow.String(),
+		SettingRiskLoginCount:           strconv.Itoa(cfg.RiskLoginCount),
+		SettingRiskDeviceCount:          strconv.Itoa(cfg.RiskDeviceCount),
+		SettingDownloadMinContributions: strconv.Itoa(cfg.DownloadMinContributions),
+		SettingCOSRegion:                cfg.COSRegion,
+		SettingCOSBucket:                cfg.COSBucket,
+		SettingCOSSecretID:              cfg.COSSecretID,
+		SettingCOSSecretKey:             cfg.COSSecretKey,
+		SettingCOSWebsiteBucket:         cfg.COSWebsiteBucket,
+		SettingCDNDomain:                cfg.CDNDomain,
+		SettingCDNAuthKey:               cfg.CDNAuthKey,
+		SettingCDNURLTTL:                cfg.CDNURLTTL.String(),
+		SettingMonitorSecretID:          cfg.MonitorSecretID,
+		SettingMonitorSecretKey:         cfg.MonitorSecretKey,
+		SettingAIAPIKey:                 cfg.AIAPIKey,
+		SettingAIBaseURL:                cfg.AIBaseURL,
+		SettingAIModel:                  cfg.AIModel,
+		SettingAIWindows:                cfg.AIWindows,
+		SettingAITimezone:               cfg.AITimezone,
+		SettingAIRequestTimeout:         cfg.AIRequestTimeout.String(),
+		SettingAIMaxAttempts:            strconv.Itoa(cfg.AIMaxAttempts),
+		SettingAIImageQuality:           strconv.Itoa(cfg.AIImageQuality),
+		SettingAIImageMaxEdge:           strconv.Itoa(cfg.AIImageMaxEdge),
+		SettingAIPrecheckSystem:         cfg.AIPrecheckSystem,
+		SettingAIAnalysisSystem:         cfg.AIAnalysisSystem,
+		SettingAIPrecheckInstruction:    cfg.AIPrecheckInstruction,
+		SettingAIAnalysisInstruction:    cfg.AIAnalysisInstruction,
+		SettingAcceptCourses:            strconv.FormatBool(cfg.IngestCourses.Enabled()),
+		SettingAcceptTextbooks:          strconv.FormatBool(cfg.IngestTextbooks.Enabled()),
+		SettingAcceptSubmissions:        strconv.FormatBool(cfg.IngestSubmissions.Enabled()),
+		SettingAcceptUserInfo:           strconv.FormatBool(cfg.IngestUserInfo.Enabled()),
+		SettingAcceptEvents:             strconv.FormatBool(cfg.IngestEvents.Enabled()),
 	}
 }
 
@@ -265,6 +269,9 @@ func ApplyRuntime(cfg *Config, values map[string]string) error {
 		return err
 	}
 	if err := parseInt(SettingRiskDeviceCount, 1, 1000, &cfg.RiskDeviceCount); err != nil {
+		return err
+	}
+	if err := parseInt(SettingDownloadMinContributions, 0, 100000, &cfg.DownloadMinContributions); err != nil {
 		return err
 	}
 

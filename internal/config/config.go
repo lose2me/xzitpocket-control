@@ -31,6 +31,10 @@ type Config struct {
 	RiskLoginWindow      time.Duration
 	RiskLoginCount       int
 	RiskDeviceCount      int
+	// DownloadMinContributions is how many published textbooks/papers a user
+	// must have contributed before the app may download from the resource
+	// centre. Zero disables the requirement.
+	DownloadMinContributions int
 
 	// Object storage + CDN used for textbook PDFs and their covers.
 	COSRegion    string
@@ -107,48 +111,49 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Path:                  configPath,
-		Addr:                  configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
-		DBPath:                dbPath,
-		PublicBaseURL:         strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
-		WebDir:                configValue(values, "CONTROL_WEB_DIR", ""),
-		AdminKey:              configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
-		EventRetentionDays:    intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
-		AuditRetentionDays:    intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
-		OverviewScalePercent:  intConfigValue(values, "CONTROL_OVERVIEW_SCALE_PERCENT", 100),
-		RiskLoginWindow:       durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
-		RiskLoginCount:        intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
-		RiskDeviceCount:       intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
-		COSRegion:             configValue(values, "CONTROL_COS_REGION", ""),
-		COSBucket:             configValue(values, "CONTROL_COS_BUCKET", ""),
-		COSSecretID:           configValue(values, "CONTROL_COS_SECRET_ID", ""),
-		COSSecretKey:          configValue(values, "CONTROL_COS_SECRET_KEY", ""),
-		COSWebsiteBucket:      configValue(values, "CONTROL_COS_WEBSITE_BUCKET", ""),
-		CDNDomain:             strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
-		CDNAuthKey:            configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
-		CDNURLTTL:             durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
-		MonitorSecretID:       configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
-		MonitorSecretKey:      configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
-		IngestCourses:         ingestSwitch(values, SettingAcceptCourses),
-		IngestTextbooks:       ingestSwitch(values, SettingAcceptTextbooks),
-		IngestSubmissions:     ingestSwitch(values, SettingAcceptSubmissions),
-		IngestUserInfo:        ingestSwitch(values, SettingAcceptUserInfo),
-		IngestEvents:          ingestSwitch(values, SettingAcceptEvents),
-		AIAPIKey:              strings.TrimSpace(values["CONTROL_AI_API_KEY"]),
-		AIBaseURL:             configValue(values, "CONTROL_AI_BASE_URL", "https://api.deepseek.com/v1"),
-		AIModel:               configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
-		AIWindows:             configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
-		AITimezone:            configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
-		AIRequestTimeout:      durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
-		AIMaxAttempts:         intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
-		AIImageQuality:        intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
-		AIImageMaxEdge:        intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
-		AIWorkDir:             configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
-		AIMathJaxDir:          configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
-		AIPrecheckSystem:      configValue(values, SettingAIPrecheckSystem, ai.DefaultPrecheckSystem),
-		AIAnalysisSystem:      configValue(values, SettingAIAnalysisSystem, ai.DefaultAnalysisSystem),
-		AIPrecheckInstruction: configValue(values, SettingAIPrecheckInstruction, ai.DefaultPrecheckInstruction),
-		AIAnalysisInstruction: configValue(values, SettingAIAnalysisInstruction, ai.DefaultAnalysisInstruction),
+		Path:                     configPath,
+		Addr:                     configValue(values, "CONTROL_ADDR", "127.0.0.1:8080"),
+		DBPath:                   dbPath,
+		PublicBaseURL:            strings.TrimRight(configValue(values, "CONTROL_PUBLIC_BASE_URL", "https://con.xuda.live"), "/"),
+		WebDir:                   configValue(values, "CONTROL_WEB_DIR", ""),
+		AdminKey:                 configValue(values, "CONTROL_ADMIN_KEY", "change-me"),
+		EventRetentionDays:       intConfigValue(values, "CONTROL_EVENT_RETENTION_DAYS", 90),
+		AuditRetentionDays:       intConfigValue(values, "CONTROL_AUDIT_RETENTION_DAYS", 30),
+		OverviewScalePercent:     intConfigValue(values, "CONTROL_OVERVIEW_SCALE_PERCENT", 100),
+		RiskLoginWindow:          durationConfigValue(values, "CONTROL_RISK_LOGIN_WINDOW", 10*time.Minute),
+		RiskLoginCount:           intConfigValue(values, "CONTROL_RISK_LOGIN_COUNT", 5),
+		RiskDeviceCount:          intConfigValue(values, "CONTROL_RISK_DEVICE_COUNT", 5),
+		DownloadMinContributions: intConfigValue(values, SettingDownloadMinContributions, 0),
+		COSRegion:                configValue(values, "CONTROL_COS_REGION", ""),
+		COSBucket:                configValue(values, "CONTROL_COS_BUCKET", ""),
+		COSSecretID:              configValue(values, "CONTROL_COS_SECRET_ID", ""),
+		COSSecretKey:             configValue(values, "CONTROL_COS_SECRET_KEY", ""),
+		COSWebsiteBucket:         configValue(values, "CONTROL_COS_WEBSITE_BUCKET", ""),
+		CDNDomain:                strings.TrimRight(configValue(values, "CONTROL_CDN_DOMAIN", ""), "/"),
+		CDNAuthKey:               configValue(values, "CONTROL_CDN_AUTH_KEY", ""),
+		CDNURLTTL:                durationConfigValue(values, "CONTROL_CDN_URL_TTL", 30*time.Minute),
+		MonitorSecretID:          configValue(values, "CONTROL_MONITOR_SECRET_ID", ""),
+		MonitorSecretKey:         configValue(values, "CONTROL_MONITOR_SECRET_KEY", ""),
+		IngestCourses:            ingestSwitch(values, SettingAcceptCourses),
+		IngestTextbooks:          ingestSwitch(values, SettingAcceptTextbooks),
+		IngestSubmissions:        ingestSwitch(values, SettingAcceptSubmissions),
+		IngestUserInfo:           ingestSwitch(values, SettingAcceptUserInfo),
+		IngestEvents:             ingestSwitch(values, SettingAcceptEvents),
+		AIAPIKey:                 strings.TrimSpace(values["CONTROL_AI_API_KEY"]),
+		AIBaseURL:                configValue(values, "CONTROL_AI_BASE_URL", "https://api.deepseek.com/v1"),
+		AIModel:                  configValue(values, "CONTROL_AI_MODEL", "deepseek-flash"),
+		AIWindows:                configValue(values, "CONTROL_AI_WINDOWS", "00:00-08:50,12:00-13:50,18:00-24:00"),
+		AITimezone:               configValue(values, "CONTROL_AI_TIMEZONE", "Asia/Shanghai"),
+		AIRequestTimeout:         durationConfigValue(values, "CONTROL_AI_REQUEST_TIMEOUT", 10*time.Minute),
+		AIMaxAttempts:            intConfigValue(values, "CONTROL_AI_MAX_ATTEMPTS", 3),
+		AIImageQuality:           intConfigValue(values, "CONTROL_AI_IMAGE_QUALITY", 80),
+		AIImageMaxEdge:           intConfigValue(values, "CONTROL_AI_IMAGE_MAX_EDGE", 1600),
+		AIWorkDir:                configValue(values, "CONTROL_AI_WORK_DIR", filepath.Join(filepath.Dir(dbPath), "ai-work")),
+		AIMathJaxDir:             configValue(values, "CONTROL_AI_MATHJAX_DIR", "ai-math"),
+		AIPrecheckSystem:         configValue(values, SettingAIPrecheckSystem, ai.DefaultPrecheckSystem),
+		AIAnalysisSystem:         configValue(values, SettingAIAnalysisSystem, ai.DefaultAnalysisSystem),
+		AIPrecheckInstruction:    configValue(values, SettingAIPrecheckInstruction, ai.DefaultPrecheckInstruction),
+		AIAnalysisInstruction:    configValue(values, SettingAIAnalysisInstruction, ai.DefaultAnalysisInstruction),
 	}
 	// AI is enabled whenever a key is configured; there is no separate switch.
 	cfg.AIAnalysisEnabled = strings.TrimSpace(cfg.AIAPIKey) != ""
@@ -175,6 +180,12 @@ func Load() (Config, error) {
 	}
 	if cfg.RiskDeviceCount < 1 {
 		cfg.RiskDeviceCount = 5
+	}
+	if cfg.DownloadMinContributions < 0 {
+		cfg.DownloadMinContributions = 0
+	}
+	if cfg.DownloadMinContributions > 100000 {
+		cfg.DownloadMinContributions = 100000
 	}
 
 	cfg.TokenPepper, err = secret(values, "CONTROL_TOKEN_PEPPER")

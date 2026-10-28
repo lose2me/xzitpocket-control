@@ -540,3 +540,80 @@ func TestLibraryCDKSingleAndUserCounters(t *testing.T) {
 		t.Fatal("missing user download increment should fail")
 	}
 }
+
+func TestCountContributions(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/contrib.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := store.CreateUser(ctx, User{ID: "usr-c", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateUser(ctx, User{ID: "usr-other", Status: "active", CreatedAt: now, LastLoginAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateTextbook(ctx, TextbookInput{Name: "教材一", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateTextbook(ctx, TextbookInput{Name: "教材二", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := store.CreateResource(ctx, ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTextbook, err := store.CreateTextbook(ctx, TextbookInput{Name: "别人的教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookContributor(ctx, first.ID, "usr-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookContributor(ctx, second.ID, "usr-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourceContributor(ctx, resource.ID, "usr-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookContributor(ctx, otherTextbook.ID, "usr-other"); err != nil {
+		t.Fatal(err)
+	}
+	// An unattributed textbook must not count.
+	if _, err := store.CreateTextbook(ctx, TextbookInput{Name: "无贡献者", CourseCodes: []string{"C1"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	count, err := store.CountContributions(ctx, "usr-c")
+	if err != nil || count != 3 {
+		t.Fatalf("count = %d %v", count, err)
+	}
+	if count, err := store.CountContributions(ctx, "usr-other"); err != nil || count != 1 {
+		t.Fatalf("other count = %d %v", count, err)
+	}
+	if count, err := store.CountContributions(ctx, "usr-none"); err != nil || count != 0 {
+		t.Fatalf("empty count = %d %v", count, err)
+	}
+	if count, err := store.CountContributions(ctx, "  "); err != nil || count != 0 {
+		t.Fatalf("blank user = %d %v", count, err)
+	}
+	// Archived content still counts as a contribution.
+	if err := store.SetTextbookArchive(ctx, first.ID, "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := store.CountContributions(ctx, "usr-c"); err != nil || count != 3 {
+		t.Fatalf("archived count = %d %v", count, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CountContributions(ctx, "usr-c"); err == nil {
+		t.Fatal("closed store should fail")
+	}
+}

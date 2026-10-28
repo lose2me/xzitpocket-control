@@ -323,6 +323,21 @@ func (s *Store) IncrementUserDownloads(ctx context.Context, userID string) error
 	return nil
 }
 
+// CountContributions counts the published textbooks and exam papers credited
+// to one user. It reflects the content that actually exists, unlike the
+// contribution counter which is only moved by re-attribution.
+func (s *Store) CountContributions(ctx context.Context, userID string) (int, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return 0, nil
+	}
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM textbooks WHERE contributor_user_id = ?) +
+		(SELECT COUNT(*) FROM resources WHERE contributor_user_id = ?)`, userID, userID).Scan(&count)
+	return count, err
+}
+
 // GetUserStats returns the contribution and download counters shown on the app
 // upload page.
 func (s *Store) GetUserStats(ctx context.Context, userID string) (contributionCount, downloadCount int64, err error) {

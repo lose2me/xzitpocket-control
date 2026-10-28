@@ -237,3 +237,46 @@ func TestParseAdminPermsErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestDownloadContributionThresholdConfig(t *testing.T) {
+	if (Config{}).DownloadMinContributions != 0 {
+		t.Fatalf("zero value = %d", (Config{}).DownloadMinContributions)
+	}
+	parsed := Config{}
+	if err := ApplyRuntime(&parsed, map[string]string{SettingDownloadMinContributions: "3"}); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.DownloadMinContributions != 3 {
+		t.Fatalf("parsed = %d", parsed.DownloadMinContributions)
+	}
+	for _, raw := range []string{"-1", "100001", "abc"} {
+		if err := ApplyRuntime(&Config{}, map[string]string{SettingDownloadMinContributions: raw}); err == nil {
+			t.Fatalf("%q should be rejected", raw)
+		}
+	}
+	values := RuntimeValues(Config{DownloadMinContributions: 7})
+	if values[SettingDownloadMinContributions] != "7" {
+		t.Fatalf("runtime value = %q", values[SettingDownloadMinContributions])
+	}
+}
+
+func TestLoadClampsDownloadContributionThreshold(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeEnv(t, dir, "CONTROL_DOWNLOAD_MIN_CONTRIBUTIONS=-5\n"+validSecrets)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DownloadMinContributions != 0 {
+		t.Fatalf("negative threshold = %d", cfg.DownloadMinContributions)
+	}
+	writeEnv(t, dir, "CONTROL_DOWNLOAD_MIN_CONTRIBUTIONS=4\n"+validSecrets)
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DownloadMinContributions != 4 {
+		t.Fatalf("threshold = %d", cfg.DownloadMinContributions)
+	}
+}
