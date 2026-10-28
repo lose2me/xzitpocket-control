@@ -28,7 +28,7 @@ func (a *App) RequireDownloadContribution(ctx context.Context, userID string) er
 	if count < required {
 		return Err(
 			"contribution_required",
-			fmt.Sprintf("至少贡献 %d 个教材或试卷后才能下载", required),
+			fmt.Sprintf("至少贡献 %d 个资源后才能下载", required),
 			http.StatusForbidden,
 		)
 	}

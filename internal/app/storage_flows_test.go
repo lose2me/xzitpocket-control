@@ -983,7 +983,7 @@ func TestRequireDownloadContributionGate(t *testing.T) {
 	if !errors.As(err, &apiErr) || apiErr.Code != "contribution_required" || apiErr.Status != http.StatusForbidden {
 		t.Fatalf("gate error = %v", err)
 	}
-	if !strings.Contains(apiErr.Message, "至少贡献 2") || strings.Contains(apiErr.Message, "当前") {
+	if !strings.Contains(apiErr.Message, "至少贡献 2 个资源后才能下载") || strings.Contains(apiErr.Message, "当前") {
 		t.Fatalf("gate message = %q", apiErr.Message)
 	}
 
