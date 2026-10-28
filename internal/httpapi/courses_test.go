@@ -16,7 +16,22 @@ import (
 	"xzitpocket-control/internal/store/sqlite"
 )
 
+type adminFixture struct {
+	server  *httptest.Server
+	handler *Server
+	app     *app.App
+	store   *sqlite.Store
+	headers map[string]string
+	token   string
+}
+
 func newAdminServer(t *testing.T) (*httptest.Server, map[string]string, string) {
+	t.Helper()
+	fixture := newAdminFixture(t, http.NotFoundHandler())
+	return fixture.server, fixture.headers, fixture.token
+}
+
+func newAdminFixture(t *testing.T, static http.Handler) *adminFixture {
 	t.Helper()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
@@ -50,10 +65,15 @@ func newAdminServer(t *testing.T) (*httptest.Server, map[string]string, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(New(a, http.NotFoundHandler(), logger))
+	handler := New(a, static, logger)
+	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 	admin := requestWithHeaders(t, ts.URL+"/api/v1/admin/session", http.MethodPost, map[string]string{"key": "test-password"}, nil)
-	return ts, map[string]string{"Authorization": "Bearer access", "X-Student-ID": "20260001"}, "Bearer " + admin["access_token"].(string)
+	return &adminFixture{
+		server: ts, handler: handler, app: a, store: store,
+		headers: map[string]string{"Authorization": "Bearer access", "X-Student-ID": "20260001"},
+		token:   "Bearer " + admin["access_token"].(string),
+	}
 }
 
 func TestCourseUploadAndAdminCRUD(t *testing.T) {

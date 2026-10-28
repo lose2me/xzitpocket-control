@@ -1,14 +1,33 @@
 coverage:
+  precision: 2
   status:
     project:
       default:
         target: auto
         threshold: 1%
         informational: true
+      # The web console gate is enforced locally by vitest; the Go gate is
+      # informational until the backend reaches the 85% target.
+      web:
+        target: 85%
+        flags: [web]
+        informational: false
+      go:
+        target: 85%
+        flags: [go]
+        informational: true
     patch:
       default:
         target: 60%
         informational: true
+
+flags:
+  go:
+    paths: [internal, cmd]
+    carryforward: false
+  web:
+    paths: [web]
+    carryforward: false
 
 comment:
   layout: "reach,diff,flags,files"

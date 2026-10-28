@@ -29,25 +29,82 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # The AI analysis tests exercise real PDF extraction and report
+      # rendering. They must run here instead of being skipped, so install the
+      # tools and install the MathJax dependency from its lockfile.
+      - name: Install AI analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            poppler-utils webp weasyprint fonts-noto-cjk
+          npm ci --prefix ai-math
+
+      - name: Verify AI analysis tools
+        run: |
+          for binary in pdftohtml cwebp weasyprint node; do
+            command -v "$binary" >/dev/null || { echo "missing $binary"; exit 1; }
+          done
+          node -e "require('./ai-math/node_modules/mathjax-full/js/mathjax.js')"
+
       - name: Vet
         run: go vet ./...
 
       - name: Build
         run: go build ./...
 
-      - name: Test
-        run: go test ./... -coverprofile=coverage.out
+      # -coverpkg=./... is required: otherwise calls between packages are not
+      # attributed to the package under test and the report understates
+      # coverage. Keep the report whole; do not trim it before uploading.
+      - name: Go tests with cross-package coverage
+        run: |
+          go test ./... -coverpkg=./... -coverprofile=coverage.out -covermode=atomic
+          go tool cover -func=coverage.out | tail -n 1
+          test -s coverage.out
 
-      - name: Upload coverage artifact
+      - name: Install web test dependencies
+        run: npm ci
+
+      - name: Web tests with coverage
+        run: npm run test:coverage
+
+      - name: Verify coverage reports
+        run: |
+          test -s coverage.out
+          test -s coverage/web/lcov.info
+          test -s coverage/web/coverage-final.json
+
+      - name: Upload coverage artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: coverage-go
-          path: coverage.out
+          name: coverage
+          path: |
+            coverage.out
+            coverage/web/
           retention-days: 14
 
-      - name: Upload coverage to Codecov
+      # Both reports are uploaded with distinct flags so a full Go report
+      # cannot mask a thin web report (or the reverse). A fork PR without the
+      # token is uploaded best-effort; trusted branches must fail loudly.
+      - name: Upload Go coverage to Codecov
         uses: codecov/codecov-action@v7
+        continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         with:
           files: coverage.out
+          flags: go
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+
+      - name: Upload web coverage to Codecov
+        uses: codecov/codecov-action@v7
+        continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        with:
+          files: coverage/web/lcov.info
+          flags: web
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
