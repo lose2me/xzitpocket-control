@@ -53,7 +53,12 @@ func (s *Server) userCourseTextbooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) userResourceAI(w http.ResponseWriter, r *http.Request, id string) {
-	if _, ok := s.authSession(w, r); !ok {
+	p, ok := s.authSession(w, r)
+	if !ok {
+		return
+	}
+	if err := s.App.RequireDownloadContribution(r.Context(), p.User.ID); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	out, err := s.App.ResourceAIForUser(r.Context(), id, r.URL.Query().Get("mode"), userURLTTL(r))
@@ -69,6 +74,10 @@ func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id stri
 	if !ok {
 		return
 	}
+	if err := s.App.RequireDownloadContribution(r.Context(), p.User.ID); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	out, err := s.App.ResourceURL(r.Context(), id, userURLTTL(r))
 	if err != nil {
 		writeError(w, r, err)
@@ -81,6 +90,10 @@ func (s *Server) userResourceURL(w http.ResponseWriter, r *http.Request, id stri
 func (s *Server) userTextbookURL(w http.ResponseWriter, r *http.Request, id string) {
 	p, ok := s.authSession(w, r)
 	if !ok {
+		return
+	}
+	if err := s.App.RequireDownloadContribution(r.Context(), p.User.ID); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	kind := r.URL.Query().Get("kind")

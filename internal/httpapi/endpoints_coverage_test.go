@@ -641,3 +641,51 @@ func TestAuthenticateSessionRejectsBadTokens(t *testing.T) {
 		t.Fatalf("cookie token = %d", recorder.Code)
 	}
 }
+
+func TestResourceCenterDownloadContributionGate(t *testing.T) {
+	f := newAdminFixture(t, http.NotFoundHandler())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	resource, err := f.store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textbook, err := f.store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.app.Cfg
+	cfg.DownloadMinContributions = 1
+	f.app.SetConfigForTesting(cfg)
+
+	for _, path := range []string{
+		"/api/v1/resources/" + resource.ID + "/url",
+		"/api/v1/textbooks/" + textbook.ID + "/url",
+		"/api/v1/resources/" + resource.ID + "/ai?mode=basic",
+	} {
+		if status := requestStatus(t, f.server.URL+path, http.MethodGet, nil, f.headers); status != http.StatusForbidden {
+			t.Fatalf("%s below the contribution threshold = %d, want 403", path, status)
+		}
+	}
+	if status := requestStatus(t, f.server.URL+"/api/v1/resources/"+resource.ID+"/url", http.MethodGet, nil, nil); status != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated download = %d", status)
+	}
+	// Admin downloads are not gated by the app policy.
+	if status := requestStatus(t, f.server.URL+"/api/v1/admin/resources/"+resource.ID+"/download", http.MethodGet, nil, map[string]string{"Authorization": f.token}); status == http.StatusForbidden {
+		t.Fatal("admin download should not be blocked by the app gate")
+	}
+
+	// One credited resource unlocks the app downloads.
+	if err := f.store.SetResourceContributor(ctx, resource.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if status := requestStatus(t, f.server.URL+"/api/v1/resources/"+resource.ID+"/url", http.MethodGet, nil, f.headers); status == http.StatusForbidden {
+		t.Fatal("resource download should pass the gate")
+	}
+	if status := requestStatus(t, f.server.URL+"/api/v1/textbooks/"+textbook.ID+"/url", http.MethodGet, nil, f.headers); status == http.StatusForbidden {
+		t.Fatal("textbook download should pass the gate")
+	}
+	if status := requestStatus(t, f.server.URL+"/api/v1/resources/"+resource.ID+"/ai?mode=basic", http.MethodGet, nil, f.headers); status != http.StatusOK {
+		t.Fatalf("AI access after unlocking = %d", status)
+	}
+}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -964,5 +965,61 @@ func TestDownloadContributorAndStudentIdentity(t *testing.T) {
 	a.RecordTextbookDownload(ctx, textbook.ID, "usr-upload")
 	if _, downloads, err := store.GetUserStats(ctx, "usr-contributor"); err != nil || downloads != 1 {
 		t.Fatalf("contributor downloads = %d %v", downloads, err)
+	}
+}
+
+func TestRequireDownloadContributionGate(t *testing.T) {
+	a, store, ctx := newStorageApp(t)
+	// Zero disables the gate.
+	if err := a.RequireDownloadContribution(ctx, "usr-upload"); err != nil {
+		t.Fatalf("disabled gate = %v", err)
+	}
+	cfg := a.cfg()
+	cfg.DownloadMinContributions = 2
+	a.SetConfigForTesting(cfg)
+
+	err := a.RequireDownloadContribution(ctx, "usr-upload")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "contribution_required" || apiErr.Status != http.StatusForbidden {
+		t.Fatalf("gate error = %v", err)
+	}
+	if !strings.Contains(apiErr.Message, "至少贡献 2") || !strings.Contains(apiErr.Message, "当前 0") {
+		t.Fatalf("gate message = %q", apiErr.Message)
+	}
+
+	now := time.Now().UTC()
+	textbook, err := store.CreateTextbook(ctx, sqlite.TextbookInput{Name: "教材", CourseCodes: []string{"C1"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTextbookContributor(ctx, textbook.ID, "usr-upload"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RequireDownloadContribution(ctx, "usr-upload"); err == nil {
+		t.Fatal("one contribution should not pass a threshold of two")
+	} else if !strings.Contains(err.Error(), "当前 1") {
+		t.Fatalf("message after one contribution = %v", err)
+	}
+
+	resource, err := store.CreateResource(ctx, sqlite.ResourceInput{Name: "试卷.pdf", CourseCode: "C1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResourceContributor(ctx, resource.ID, "usr-upload"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RequireDownloadContribution(ctx, "usr-upload"); err != nil {
+		t.Fatalf("two contributions should pass: %v", err)
+	}
+	// Another user's contributions do not count.
+	if err := a.RequireDownloadContribution(ctx, "someone-else"); err == nil {
+		t.Fatal("other user should not pass")
+	}
+	// A closed store surfaces the query error instead of allowing downloads.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RequireDownloadContribution(ctx, "usr-upload"); err == nil {
+		t.Fatal("closed store should fail")
 	}
 }

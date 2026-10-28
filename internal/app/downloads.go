@@ -4,12 +4,36 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	controlcrypto "xzitpocket-control/internal/crypto"
 )
+
+// RequireDownloadContribution enforces the console setting that gates app
+// downloads from the resource centre. Contributed content is counted from the
+// published textbooks and exam papers credited to the user, so a pending
+// upload does not unlock downloads. A zero threshold disables the check.
+func (a *App) RequireDownloadContribution(ctx context.Context, userID string) error {
+	required := a.cfg().DownloadMinContributions
+	if required <= 0 {
+		return nil
+	}
+	count, err := a.Store.CountContributions(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if count < required {
+		return Err(
+			"contribution_required",
+			fmt.Sprintf("至少贡献 %d 个教材或试卷后才能下载（当前 %d 个）", required, count),
+			http.StatusForbidden,
+		)
+	}
+	return nil
+}
 
 // OpenTextbookDownload streams a textbook for the console. Admin downloads do
 // not count toward the popularity numbers. Callers must close resp.Body.
