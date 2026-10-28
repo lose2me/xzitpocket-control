@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"xzitpocket-control/internal/app"
+	"xzitpocket-control/internal/config"
 	controlcrypto "xzitpocket-control/internal/crypto"
 )
 
@@ -102,7 +103,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		page, write := adminPageFor(path, r.Method)
-		if page != "" && !principal.Admin.Allows(page, write) {
+		allowed := principal.Admin.Allows(page, write)
+		// Content editors use the shared catalogue to choose associations.
+		if path == "/admin/courses" && !write {
+			allowed = allowed || principal.Admin.Allows("textbooks", false) || principal.Admin.Allows("resources", false) || principal.Admin.Allows("library", false)
+		}
+		if !allowed {
 			writeError(w, r, app.Err("forbidden", "无权访问", http.StatusForbidden))
 			return
 		}
@@ -645,25 +651,29 @@ func adminPageFor(path, method string) (string, bool) {
 	case path == "/admin/textbooks" || strings.HasPrefix(path, "/admin/textbooks/"):
 		return "textbooks", write
 	case path == "/admin/textbook-submissions" || strings.HasPrefix(path, "/admin/textbook-submissions/"):
-		return "textbooks", write
+		return "textbook-submissions", write
 	case path == "/admin/resources" || strings.HasPrefix(path, "/admin/resources/") ||
 		path == "/admin/ai-analyses" || strings.HasPrefix(path, "/admin/ai-analyses/"):
 		return "resources", write
 	case path == "/admin/resource-submissions" || strings.HasPrefix(path, "/admin/resource-submissions/"):
-		return "resources", write
+		return "resource-submissions", write
 	case path == "/admin/courses" || strings.HasPrefix(path, "/admin/courses/"):
 		return "courses", write
 	case path == "/admin/share-codes" || strings.HasPrefix(path, "/admin/share-codes/"):
 		return "share-codes", write
-	case path == "/admin/app/release" || path == "/admin/app/release-test" || path == "/admin/school-calendar" ||
-		path == "/admin/settings":
-		return "config", write
+	case path == "/admin/app/release" || path == "/admin/app/release-test":
+		return "app-release", write
+	case path == "/admin/school-calendar" || strings.HasPrefix(path, "/admin/school-calendar/"):
+		return "school-calendar", write
+	case path == "/admin/settings" || path == "/admin/me" || path == "/admin/session":
+		// Settings are filtered and checked per field in the handlers below.
+		return "", false
 	case path == "/admin/audit":
 		return "audit", write
 	case path == "/admin/admins" || strings.HasPrefix(path, "/admin/admins/"):
 		return "admins", write
 	}
-	return "", false
+	return "unassigned", write
 }
 
 func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
@@ -917,11 +927,29 @@ func (s *Server) adminMetricsBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+func (s *Server) settingsForAdmin(p app.AdminPrincipal) app.SettingsView {
+	out := app.SettingsView{Groups: []app.SettingsGroupView{}}
+	for _, group := range s.App.SettingsView().Groups {
+		fields := make([]app.SettingsFieldView, 0, len(group.Fields))
+		for _, field := range group.Fields {
+			if p.Admin.Allows(config.SettingPermission(field.Key), false) {
+				fields = append(fields, field)
+			}
+		}
+		if len(fields) > 0 {
+			group.Fields = fields
+			out.Groups = append(out.Groups, group)
+		}
+	}
+	return out
+}
+
 func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authAdmin(w, r); !ok {
+	p, ok := s.authAdmin(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.App.SettingsView())
+	writeJSON(w, http.StatusOK, s.settingsForAdmin(p))
 }
 
 func (s *Server) adminSettingsUpdate(w http.ResponseWriter, r *http.Request) {
@@ -934,12 +962,22 @@ func (s *Server) adminSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, app.Err("invalid_json", "请求格式无效", http.StatusBadRequest))
 		return
 	}
-	out, err := s.App.UpdateSettings(r.Context(), in, p.Admin.ID)
-	if err != nil {
+	keys := append([]string{}, in.Clear...)
+	for key := range in.Values {
+		keys = append(keys, key)
+	}
+	for _, key := range keys {
+		permission := config.SettingPermission(key)
+		if permission == "" || !p.Admin.Allows(permission, true) {
+			writeError(w, r, app.ErrForbidden)
+			return
+		}
+	}
+	if _, err := s.App.UpdateSettings(r.Context(), in, p.Admin.ID); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, s.settingsForAdmin(p))
 }
 
 func (s *Server) adminOverviewDisplay(w http.ResponseWriter, r *http.Request) {

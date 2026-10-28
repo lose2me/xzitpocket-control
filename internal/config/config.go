@@ -82,7 +82,10 @@ type Config struct {
 // AdminPages are the console pages that can be granted read/write access.
 var AdminPages = []string{
 	"overview", "users", "devices", "risk", "error-reports", "library",
-	"textbooks", "resources", "courses", "share-codes", "config", "audit",
+	"textbooks", "textbook-submissions", "resources", "resource-submissions",
+	"courses", "share-codes", "app-release", "school-calendar", "audit",
+	"settings-general", "settings-risk", "settings-storage", "settings-cdn",
+	"settings-monitoring", "settings-ai", "settings-ingest",
 }
 
 func Load() (Config, error) {

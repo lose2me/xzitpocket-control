@@ -567,20 +567,27 @@ import { template } from './template.js';
         { key: 'web-config', label: 'WEB 配置', icon: 'mdi-cog-outline' }
       ];
       const title = computed(() => (nav.find(item => item.key === view.value) || nav[0]).label);
-      // The two configuration pages share the single "config" grant stored in
-      // admin_users.permissions, so existing rows keep working.
-      const PAGE_PERMISSION = { 'app-config': 'config', 'web-config': 'config' };
-      const canAccess = (page, write) => {
-        page = PAGE_PERMISSION[page] || page;
+      const canAccess = (module, write) => {
         const perms = adminPerms.value || {};
-        if (perms['*'] === 'rw') return true;
-        const access = perms[page];
-        if (!access) return false;
+        const access = perms['*'] === 'rw' ? 'rw' : perms[module];
         return access === 'rw' || (!write && access === 'r');
       };
-      const canRead = (page) => canAccess(page, false);
-      const canWrite = (page) => canAccess(page, true);
-      const visibleNav = computed(() => nav.filter(item => canRead(item.key)));
+      const canRead = (module) => canAccess(module, false);
+      const canWrite = (module) => canAccess(module, true);
+      const pageModules = {
+        textbooks: ['textbooks', 'textbook-submissions'],
+        resources: ['resources', 'resource-submissions'],
+        'app-config': ['app-release', 'school-calendar'],
+        'web-config': ['overview', 'settings-general', 'settings-risk', 'settings-storage', 'settings-cdn', 'settings-monitoring', 'settings-ai', 'settings-ingest'],
+      };
+      const canView = (page) => (pageModules[page] || [page]).some(canRead);
+      const canEditView = (page) => (pageModules[page] || [page]).some(canWrite);
+      const settingPermission = (key, group) => key === 'CONTROL_OVERVIEW_SCALE_PERCENT' ? 'overview' : 'settings-' + group;
+      const canWriteSettingGroup = (key) => {
+        const group = settingGroups.value.find(item => item.key === key);
+        return !!group && group.fields.some(field => canWrite(settingPermission(field.key, key)));
+      };
+      const visibleNav = computed(() => nav.filter(item => canView(item.key)));
       const adminPageOptions = [
         { key: 'overview', label: '总览' },
         { key: 'users', label: '用户' },
@@ -592,7 +599,17 @@ import { template } from './template.js';
         { key: 'resources', label: '试卷' },
         { key: 'courses', label: '课程' },
         { key: 'share-codes', label: '分享码' },
-        { key: 'config', label: '配置' },
+        { key: 'textbook-submissions', label: '教材上传审核' },
+        { key: 'resource-submissions', label: '试卷上传审核' },
+        { key: 'app-release', label: '应用发布' },
+        { key: 'school-calendar', label: '校历调休' },
+        { key: 'settings-general', label: '网站常规设置' },
+        { key: 'settings-risk', label: '风控设置' },
+        { key: 'settings-storage', label: '对象存储设置' },
+        { key: 'settings-cdn', label: 'CDN 设置' },
+        { key: 'settings-monitoring', label: '监控设置' },
+        { key: 'settings-ai', label: 'AI 设置' },
+        { key: 'settings-ingest', label: '上报接收开关' },
         { key: 'audit', label: '审计' }
       ];
       const adminPageKeys = adminPageOptions.map((page) => page.key);
@@ -603,7 +620,7 @@ import { template } from './template.js';
       ];
       const adminHeaders = [
         { title: '密钥', key: 'key', sortable: false, width: '25%' },
-        { title: '页面权限', key: 'permissions', sortable: false, width: '35%' },
+        { title: '模块权限', key: 'permissions', sortable: false, width: '35%' },
         { title: '创建时间', key: 'created_at', sortable: false, width: '13%' },
         { title: '最近登录', key: 'last_login_at', sortable: false, width: '15%' },
         { title: '操作', key: 'actions', sortable: false, align: 'center', width: '12%' }
@@ -1746,6 +1763,8 @@ import { template } from './template.js';
         groups.forEach(group => (group.fields || []).forEach(field => {
           form[field.key] = {
             kind: field.kind,
+            group: group.key,
+            permission: settingPermission(field.key, group.key),
             value: field.kind === 'bool' ? field.value === 'true' : (field.value || ''),
             set: !!field.set,
           };
@@ -1766,7 +1785,7 @@ import { template } from './template.js';
       const saveSettings = () => call(async () => {
         const values = {};
         Object.entries(settingsForm.value || {}).forEach(([key, entry]) => {
-          if (!entry) return;
+          if (!entry || entry.group !== settingTab.value || !canWrite(entry.permission)) return;
           if (entry.kind === 'bool') { values[key] = entry.value ? 'true' : 'false'; return; }
           if (entry.kind === 'secret') {
             const secret = (entry.value || '').trim();
@@ -1921,7 +1940,7 @@ import { template } from './template.js';
         await loadUsers();
       });
       const ensureViewAllowed = () => {
-        if (canRead(view.value)) return;
+        if (canView(view.value)) return;
         const first = visibleNav.value[0];
         if (!first) return;
         view.value = first.key;
@@ -1934,6 +1953,7 @@ import { template } from './template.js';
         localStorage.setItem('control_admin_name', adminName.value);
         localStorage.setItem('control_admin_perms', out.permissions || '');
         ensureViewAllowed();
+        selectAllowedTabs(view.value);
       };
       const loadAdmins = async () => {
         const out = await api('/api/v1/admin/admins');
@@ -1967,7 +1987,7 @@ import { template } from './template.js';
           const access = adminPermsForm.value[page];
           if (access) parts.push(page + '=' + access);
         });
-        if (!parts.length) throw new Error('请至少授予一个页面的读权限');
+        if (!parts.length) throw new Error('请至少授予一个模块的读权限');
         const body = editing
           ? { key: form.key || '', permissions: parts.join(',') }
           : { key: form.key, permissions: parts.join(',') };
@@ -1987,7 +2007,7 @@ import { template } from './template.js';
       });
       const adminPermSummary = (row) => {
         if (!row) return '-';
-        if (row.super) return '全部页面（读写）';
+        if (row.super) return '全部模块（读写）';
         const parsed = parseAdminPerms(row.permissions);
         const parts = [];
         adminPageOptions.forEach((page) => {
@@ -2001,28 +2021,30 @@ import { template } from './template.js';
         ensureViewAllowed();
         await call(async () => {
           if (view.value === 'overview') await loadOverview();
-          else if (view.value === 'users') { await loadOverviewScale(); await loadUsers(); }
+          else if (view.value === 'users') { if (canRead('overview')) await loadOverviewScale(); await loadUsers(); }
           else if (view.value === 'admins') await loadAdmins();
           else if (view.value === 'risk') risks.value = (await api('/api/v1/admin/risk-events?limit=100')).items || [];
           else if (view.value === 'error-reports') await loadErrorReports();
           else if (view.value === 'library') await loadLibrary();
-          else if (view.value === 'textbooks') await Promise.all([loadTextbookSubmissions(), loadTextbooks(), loadArchivedTextbooks()]);
-          else if (view.value === 'resources') await Promise.all([loadResourceSubmissions(), loadCourses(), loadArchivedResources(), loadAITasks()]);
+          else if (view.value === 'textbooks') await Promise.all([canRead('textbook-submissions') && loadTextbookSubmissions(), canRead('textbooks') && loadTextbooks(), canRead('textbooks') && loadArchivedTextbooks()]);
+          else if (view.value === 'resources') await Promise.all([canRead('resource-submissions') && loadResourceSubmissions(), canRead('resources') && loadCourses(), canRead('resources') && loadArchivedResources(), canRead('resources') && loadAITasks()]);
           else if (view.value === 'courses') await loadCourses();
           else if (view.value === 'share-codes') await loadShareCodes();
-          else if (view.value === 'app-config') await Promise.all([loadRelease(), loadReleaseTest(), loadSchoolCalendar()]);
+          else if (view.value === 'app-config') await Promise.all([canRead('app-release') && loadRelease(), canRead('app-release') && loadReleaseTest(), canRead('school-calendar') && loadSchoolCalendar()]);
           else if (view.value === 'web-config') await loadSettings();
           else if (view.value === 'audit') audit.value = ((await api('/api/v1/admin/audit?limit=100')).items || []).map(item => Object.assign({}, item, { target_text: [item.target_type, item.target_id].filter(Boolean).join(' ') }));
         });
       };
-      // 每次进入内容页都回到发布区。
-      watch(view, (name) => {
+      // 每次进入页面选择当前管理员有权访问的默认模块。
+      const selectAllowedTabs = (name) => {
         if (name === 'library') libraryTab.value = 'publish';
-        else if (name === 'textbooks') textbookTab.value = 'publish';
-        else if (name === 'resources') resourceTab.value = 'publish';
-      });
+        else if (name === 'textbooks') textbookTab.value = canRead('textbooks') ? 'publish' : 'review';
+        else if (name === 'resources') resourceTab.value = canRead('resources') ? 'publish' : 'review';
+        else if (name === 'app-config') appConfigTab.value = canRead('app-release') ? 'release' : 'calendar';
+      };
+      watch(view, selectAllowedTabs);
       const switchView = (name) => {
-        if (!canRead(name)) {
+        if (!canView(name)) {
           const first = visibleNav.value[0];
           if (!first) return;
           name = first.key;
@@ -2357,7 +2379,7 @@ import { template } from './template.js';
         pdfCanvasEl, pdfFile, pdfPage, pdfPageCount, coverPreviewUrl, existingCoverUrl,
         courses, courseTotal, coursePage, courseItemsPerPage, courseSearch, courseSortBy, courseDialog, courseEditingId, courseForm, courseHeaders,
         shareCodeHeaders,
-        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, visibleNav, title, statCards, adminName, canRead, canWrite,
+        selectedUser, userDialog, loginForm, userStatus, snackbar, overviewDialog, overviewScaleInput, scaleOverviewValue, applyOverviewScale, resetOverviewScale, chartEl, platformChartEl, collegeChartEl, eventChartEl, featureChartEl, cdnStats, cdnTab, cdnDomains, cdnDomain, cdnChartEl, cdnCards, cdnPackage, cdnLoading, cdnError, loadCDNStats, formatBytes, formatBitrate, formatPercent, hostStats, hostLoading, hostError, hostChartEl, hostCards, loadHostStats, refreshActiveStats, activePackage, formatBytesIEC, bucketStats, bucketLoading, bucketError, bucketChartEl, bucketCards, activeBucket, activeBucketKey, loadBucketStats, formatStorageMB, nav, visibleNav, title, statCards, adminName, canRead, canWrite, canEditView, settingPermission, canWriteSettingGroup,
         platformRows, versionRows, collegeRows, classRows, eventRows, cdkActivationRows, featureRows, userDetails, userHeaders, deviceHeaders, riskHeaders, auditHeaders, errorReportHeaders, userDeviceHeaders,
         bankHeaders, cdkHeaders, riskOptions, bankStatusOptions, bankNewOptions, bankCDKOptions, questionTypeOptions, bankPageCount, login, logout, switchView, load, loadBanks, loadCDKs, searchCDKs, loadShareCodes, loadRelease, loadReleaseTest, loadSchoolCalendar, openSchoolCalendarRebuild, confirmSchoolCalendarRebuild, loadErrorReports, sortErrorReports, sortBanks, sortCDKs, sortShareCodes, saveRelease, saveReleaseTest, saveSchoolCalendar, loadUsers, searchUsers, filterUsersBy, sortUsers,
         showUser, closeUser, setStatus, disableUser, setRiskDeviceStatus, clearRiskEvents, acknowledge, openNewBank, closeBankEditor, setBankDialog, editBank, saveBank, setBankStatus, removeBank, setBankArchived, openNewCDK, createCDK, copyCDK, setCDKStatus, openShareCodeDialog, createShareCode, deleteShareCode, openShareCodeDetail, setErrorReportStudentIgnored, clearErrorReports, rawItem, valueOrDash, formatDateTime, statusColor, statusLabel, riskTypeLabel, eventTypeLabel, actionLabel, riskStatusColor,

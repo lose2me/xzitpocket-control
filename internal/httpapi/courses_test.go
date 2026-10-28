@@ -39,7 +39,7 @@ func newAdminServer(t *testing.T) (*httptest.Server, map[string]string, string) 
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	a, err := app.New(config.Config{TokenPepper: pepper, AdminKey: "test-password"}, store, logger)
+	a, err := app.New(config.Config{TokenPepper: pepper, IDPepper: []byte("test-id-pepper"), EncryptionKey: []byte("01234567890123456789012345678901"), AdminKey: "test-password"}, store, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

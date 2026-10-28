@@ -148,6 +148,18 @@ func SettingSpecByKey(key string) (SettingSpec, bool) {
 	return SettingSpec{}, false
 }
 
+// SettingPermission keeps shared controls under the same grant on every form.
+func SettingPermission(key string) string {
+	if key == SettingOverviewScalePercent {
+		return "overview"
+	}
+	spec, ok := SettingSpecByKey(key)
+	if !ok {
+		return ""
+	}
+	return "settings-" + spec.Group
+}
+
 // RuntimeValues renders the current runtime settings as stored values. Secrets
 // are included in plaintext here; the application encrypts them before saving
 // and never exposes them through the API.
